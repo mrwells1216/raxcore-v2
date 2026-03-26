@@ -240,10 +240,10 @@ export function BinaryCamoBackground({
               width: 'min(90vw, 840px)',
               maxWidth: '840px',
               minWidth: '400px',
-              opacity: 0.25,
-              filter: 'blur(1.5px) brightness(0.3) saturate(0.5)',
-              WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.15) 75%, rgba(0,0,0,0) 100%)',
-              maskImage: 'radial-gradient(ellipse 70% 65% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.15) 75%, rgba(0,0,0,0) 100%)',
+              opacity: 0.55,
+              filter: 'blur(0.5px) brightness(0.7) saturate(0.7)',
+              WebkitMaskImage: 'radial-gradient(ellipse 75% 70% at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 35%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.2) 80%, rgba(0,0,0,0) 100%)',
+              maskImage: 'radial-gradient(ellipse 75% 70% at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 35%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.2) 80%, rgba(0,0,0,0) 100%)',
             }}
           />
         </div>
