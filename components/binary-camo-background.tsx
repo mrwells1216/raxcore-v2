@@ -198,18 +198,11 @@ export function BinaryCamoBackground({
         }}
       />
 
-      {/* softer cloud-light behind the deer */}
+      {/* subtle ambient behind the deer - no glow */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           zIndex: 2,
-          background: `
-            radial-gradient(circle at 50% 42%, rgba(255, 189, 150, 0.14) 0%, rgba(255, 189, 150, 0.08) 12%, rgba(255, 189, 150, 0.04) 24%, rgba(0,0,0,0) 40%),
-            radial-gradient(circle at 50% 50%, rgba(255, 146, 85, 0.09) 0%, rgba(255, 146, 85, 0.04) 16%, rgba(0,0,0,0) 34%)
-          `,
-          filter: 'blur(28px)',
-          opacity: 0.92,
-          animation: 'raxLightningPulse 6s ease-in-out infinite',
         }}
       />
 
@@ -233,7 +226,7 @@ export function BinaryCamoBackground({
         </div>
       )}
       
-      {/* Deer image overlay - preserve size, reduce cutout feel */}
+      {/* Deer image overlay - soft blended edges */}
       {showDeerOverlay && (
         <div 
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
@@ -242,13 +235,15 @@ export function BinaryCamoBackground({
           <img
             src={deerImageSrc}
             alt="RaX deer mark"
-            className="select-none rax-deer-overlay"
+            className="select-none"
             style={{
               width: 'min(90vw, 840px)',
               maxWidth: '840px',
               minWidth: '400px',
-              WebkitMaskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
-              maskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
+              opacity: 0.25,
+              filter: 'blur(1.5px) brightness(0.3) saturate(0.5)',
+              WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.15) 75%, rgba(0,0,0,0) 100%)',
+              maskImage: 'radial-gradient(ellipse 70% 65% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.7) 30%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.15) 75%, rgba(0,0,0,0) 100%)',
             }}
           />
         </div>
@@ -265,26 +260,7 @@ export function BinaryCamoBackground({
         </Button>
       )}
 
-      <style jsx>{`
-        @keyframes raxLightningPulse {
-          0%, 100% {
-            opacity: 0.48;
-            transform: scale(1);
-          }
-          45% {
-            opacity: 0.7;
-            transform: scale(1.02);
-          }
-          50% {
-            opacity: 0.92;
-            transform: scale(1.035);
-          }
-          56% {
-            opacity: 0.62;
-            transform: scale(1.01);
-          }
-        }
-      `}</style>
+
     </>
   )
 }
