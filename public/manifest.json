@@ -1,0 +1,21 @@
+{
+  "name": "xRack - AI Antler Scoring",
+  "short_name": "xRack",
+  "description": "AI-powered whitetail antler scoring from photos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#3d2a1f",
+  "theme_color": "#6b4c3a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/apple-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
