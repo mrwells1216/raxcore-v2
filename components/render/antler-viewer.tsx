@@ -54,12 +54,14 @@ function useAntlerMaterial(color: string, wireframe: boolean) {
   return useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: new THREE.Color(color),
+        color: new THREE.Color('#000000'),
         roughness: 0.78,
         metalness: 0.04,
         wireframe,
+        transparent: true,
+        opacity: 0.7,
       }),
-    [color, wireframe]
+    [wireframe]
   )
 }
 

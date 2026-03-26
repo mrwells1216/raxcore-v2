@@ -154,28 +154,5 @@
   /* RaX Deer Overlay Styling */
   .rax-deer-overlay {
     opacity: 0.92;
-    animation: raxGlow 4s ease-in-out infinite;
-  }
-  
-  @keyframes raxGlow {
-    0%, 100% {
-      filter:
-        brightness(0.95)
-        contrast(1.08)
-        saturate(1.05)
-        drop-shadow(0 0 6px rgba(0,0,0,1))
-        drop-shadow(0 0 18px rgba(230,122,61,0.35))
-        drop-shadow(0 0 40px rgba(230,122,61,0.15));
-    }
-
-    50% {
-      filter:
-        brightness(1)
-        contrast(1.12)
-        saturate(1.05)
-        drop-shadow(0 0 6px rgba(0,0,0,1))
-        drop-shadow(0 0 26px rgba(230,122,61,0.45))
-        drop-shadow(0 0 60px rgba(230,122,61,0.25));
-    }
   }
 }
