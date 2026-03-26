@@ -242,13 +242,11 @@ export function BinaryCamoBackground({
           <img
             src={deerImageSrc}
             alt="RaX deer mark"
-            className="select-none"
+            className="select-none rax-deer-overlay"
             style={{
               width: 'min(90vw, 840px)',
               maxWidth: '840px',
               minWidth: '400px',
-              opacity: 0.34,
-              filter: 'brightness(0.88) contrast(1.04) saturate(0.96) blur(0.45px) drop-shadow(0 0 10px rgba(0,0,0,0.96)) drop-shadow(0 0 28px rgba(0,0,0,0.5))',
               WebkitMaskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
               maskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
             }}
