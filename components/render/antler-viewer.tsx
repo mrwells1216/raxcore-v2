@@ -266,7 +266,7 @@ export function AntlerViewer({
                 enablePan={false}
                 minDistance={2}
                 maxDistance={18}
-                target={[0, 1.2, 0]}
+                target={[0, 2.2, 0]}
                 enabled={!settings.autoRotate}
               />
             </Canvas>
