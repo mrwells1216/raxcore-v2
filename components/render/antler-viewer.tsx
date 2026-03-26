@@ -231,7 +231,7 @@ export function AntlerViewer({
     <div className={`space-y-4 ${className}`}>
       {/* 3D Canvas */}
       <Card className="overflow-hidden">
-        <div className="relative" style={{ height: '420px' }}>
+        <div className="relative h-80 sm:h-96 md:h-[420px]">
           <Suspense fallback={<LoadingFallback />}>
             <Canvas
               shadows
