@@ -785,3 +785,156 @@ export interface PlacementPreset {
   wallTone: WallTone
   description: string
 }
+
+// ========================================
+// BULK VALIDATION & MODEL COMPARISON (Phase 19)
+// ========================================
+
+export type BulkRunType = 'single_model' | 'model_comparison'
+
+export interface BulkValidationFilters {
+  states?: string[]
+  rackTypes?: RackType[]
+  sourceTypes?: SourceType[]
+  captureDevices?: CaptureDevice[]
+  minImageCount?: number
+  maxImageCount?: number
+  scoreRangeMin?: number
+  scoreRangeMax?: number
+  verifiedOnly?: boolean
+  dateRangeStart?: string
+  dateRangeEnd?: string
+  sampleSize?: number
+}
+
+export interface BulkValidationRun {
+  id: string
+  run_name: string
+  run_type: BulkRunType
+  status: ValidationRunStatus
+  // Model versions being compared
+  primary_model_version_id: string | null
+  comparison_model_version_ids: string[]
+  // Filters used
+  filters: BulkValidationFilters | null
+  filter_snapshot: string | null // JSON snapshot of filter state at run time
+  // Progress
+  total_examples: number
+  processed_examples: number
+  started_at: string | null
+  completed_at: string | null
+  // Aggregate metrics
+  summary_metrics: BulkRunSummaryMetrics | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BulkRunSummaryMetrics {
+  primary_model: ModelRunMetrics
+  comparison_models: ModelRunMetrics[]
+  improvement_vs_comparison: ImprovementMetrics[] | null
+}
+
+export interface ModelRunMetrics {
+  model_version_id: string | null
+  model_version_name: string | null
+  example_count: number
+  // Error metrics
+  avg_gross_error: number
+  avg_net_error: number | null
+  median_gross_error: number
+  median_net_error: number | null
+  rmse_gross: number
+  rmse_net: number | null
+  // Distribution
+  overestimation_count: number
+  underestimation_count: number
+  exact_count: number
+  within_5_inches: number
+  within_10_inches: number
+  within_5_percent: number
+  within_10_percent: number
+  // Processing
+  avg_processing_time_ms: number | null
+  avg_confidence_percent: number | null
+}
+
+export interface ImprovementMetrics {
+  comparison_model_version_id: string
+  comparison_model_version_name: string | null
+  mae_improvement_inches: number
+  mae_improvement_percent: number
+  examples_improved: number
+  examples_worsened: number
+  examples_unchanged: number
+}
+
+export interface BulkValidationResult {
+  id: string
+  bulk_run_id: string
+  training_example_id: string
+  buck_id: string
+  // Ground truth
+  ground_truth_gross: number
+  ground_truth_net: number | null
+  // Results by model version
+  model_results: ModelPredictionResult[]
+  // Metadata
+  state: string | null
+  rack_type: RackType | null
+  source_type: SourceType | null
+  image_count: number | null
+  created_at: string
+}
+
+export interface ModelPredictionResult {
+  model_version_id: string | null
+  model_version_name: string | null
+  // Raw vision output
+  raw_vision_gross: number | null
+  raw_vision_net: number | null
+  // Normalized output
+  normalized_gross: number | null
+  normalized_net: number | null
+  // Corrected/final output
+  final_gross: number
+  final_net: number | null
+  // Errors
+  error_gross: number
+  error_net: number | null
+  abs_error_gross: number
+  abs_error_net: number | null
+  percent_error_gross: number
+  percent_error_net: number | null
+  // Metadata
+  confidence_percent: number | null
+  scoring_method: string | null
+  processing_time_ms: number | null
+}
+
+export interface ModelComparisonDetail {
+  training_example_id: string
+  buck_id: string
+  ground_truth_gross: number
+  ground_truth_net: number | null
+  results: {
+    model_version_id: string | null
+    model_version_name: string | null
+    final_gross: number
+    final_net: number | null
+    error_gross: number
+    error_net: number | null
+    improved_vs_primary: boolean | null
+    error_diff_vs_primary: number | null
+  }[]
+  best_model_version_id: string | null
+  worst_model_version_id: string | null
+}
+
+export interface BulkRunExportData {
+  run: BulkValidationRun
+  summary_metrics: BulkRunSummaryMetrics
+  results: BulkValidationResult[]
+  comparison_details: ModelComparisonDetail[]
+}
