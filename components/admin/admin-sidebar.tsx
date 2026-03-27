@@ -11,7 +11,9 @@ import {
   Target,
   ChevronLeft,
   Menu,
-  BarChart3
+  BarChart3,
+  FlaskConical,
+  Activity
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -19,6 +21,8 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
+  { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },
   { name: 'Training Data', href: '/admin/training', icon: TrendingUp },
   { name: 'Error Patterns', href: '/admin/error-patterns', icon: BarChart3 },

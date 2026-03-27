@@ -551,3 +551,162 @@ export interface RenderBundle {
   outputs: RenderOutput[]
   geometry: AntlerGeometry | null
 }
+
+// ========================================
+// VALIDATION HARNESS TYPES (Phase 13)
+// ========================================
+
+export type ValidationRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface ValidationRun {
+  id: string
+  run_name: string
+  model_version_id: string | null
+  status: ValidationRunStatus
+  total_examples: number
+  processed_examples: number
+  started_at: string | null
+  completed_at: string | null
+  // Aggregate metrics
+  mean_absolute_error_gross: number | null
+  mean_absolute_error_net: number | null
+  median_absolute_error_gross: number | null
+  median_absolute_error_net: number | null
+  rmse_gross: number | null
+  rmse_net: number | null
+  within_5_percent: number | null
+  within_10_percent: number | null
+  within_15_percent: number | null
+  // Metadata
+  config: ValidationRunConfig | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ValidationRunConfig {
+  include_unverified: boolean
+  min_confidence: number | null
+  states_filter: string[] | null
+  rack_types_filter: RackType[] | null
+  score_range_min: number | null
+  score_range_max: number | null
+  sample_size: number | null
+  notes: string | null
+}
+
+export interface ValidationResult {
+  id: string
+  run_id: string
+  training_example_id: string
+  buck_id: string
+  // Ground truth
+  ground_truth_gross: number
+  ground_truth_net: number | null
+  // Prediction (re-scored during validation)
+  predicted_gross: number
+  predicted_net: number | null
+  confidence_percent: number | null
+  // Errors
+  error_gross: number
+  error_net: number | null
+  abs_error_gross: number
+  abs_error_net: number | null
+  percent_error_gross: number
+  percent_error_net: number | null
+  // Metadata
+  state: string | null
+  rack_type: RackType | null
+  scoring_method: string | null
+  processing_time_ms: number | null
+  created_at: string
+}
+
+export interface ValidationSummary {
+  run: ValidationRun
+  results: ValidationResult[]
+  // Breakdown by category
+  by_state: ValidationBreakdown[]
+  by_rack_type: ValidationBreakdown[]
+  by_score_bucket: ValidationBreakdown[]
+  by_confidence_bucket: ValidationBreakdown[]
+  // Outliers
+  worst_predictions: ValidationResult[]
+  best_predictions: ValidationResult[]
+}
+
+export interface ValidationBreakdown {
+  category: string
+  count: number
+  mae_gross: number
+  mae_net: number | null
+  median_error_gross: number
+  within_5_percent: number
+  within_10_percent: number
+}
+
+// ========================================
+// ACCURACY DASHBOARD TYPES (Phase 14)
+// ========================================
+
+export interface AccuracyMetrics {
+  // Overall metrics
+  total_predictions: number
+  total_with_ground_truth: number
+  coverage_percent: number
+  
+  // Error metrics
+  mae_gross: number | null
+  mae_net: number | null
+  median_error_gross: number | null
+  median_error_net: number | null
+  rmse_gross: number | null
+  rmse_net: number | null
+  
+  // Distribution
+  within_5_inches: number
+  within_10_inches: number
+  within_15_inches: number
+  within_5_percent: number
+  within_10_percent: number
+  
+  // Trend data
+  error_trend_7d: TrendPoint[]
+  error_trend_30d: TrendPoint[]
+  
+  // Model version performance
+  current_model_version: string | null
+  model_accuracy_history: ModelAccuracyPoint[]
+}
+
+export interface TrendPoint {
+  date: string
+  mae: number
+  count: number
+}
+
+export interface ModelAccuracyPoint {
+  version_name: string
+  created_at: string
+  mae_gross: number | null
+  sample_count: number
+}
+
+export interface AccuracyBreakdown {
+  dimension: string // 'state' | 'rack_type' | 'score_bucket' | 'confidence_bucket'
+  breakdown: {
+    label: string
+    count: number
+    mae_gross: number | null
+    mae_net: number | null
+    within_10_percent: number
+  }[]
+}
+
+export interface ErrorDistribution {
+  bucket_label: string // e.g., "-20 to -15", "-15 to -10", etc.
+  bucket_min: number
+  bucket_max: number
+  count: number
+  percent: number
+}
