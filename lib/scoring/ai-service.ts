@@ -15,8 +15,8 @@ import {
 import { normalizeMeasurements, type NormalizationResult } from './normalization'
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
-import { computeLearningCorrection, toSimpleLearningSummary } from './learning-correction'
-import type { ExtendedLearningSummary } from '@/lib/types'
+import { computeLearningCorrection, toSimpleLearningSummary, getActiveCalibrationProfile } from './learning-correction'
+import type { ExtendedLearningSummary, CalibrationProfile } from '@/lib/types'
 
 export interface ImageAnalysisInput {
   imageUrl: string
@@ -632,7 +632,11 @@ async function buildVisionScoringOutput(
     consistencyResult
   )
 
+  // Phase 20: Fetch active calibration profile for learning corrections
+  const calibrationProfile = await getActiveCalibrationProfile()
+
   // STAGE 5: Phase 10 Learning Correction - similarity-weighted verified examples
+  // Now includes calibration profile for weight/cap adjustments
   const learningResult = await computeLearningCorrection(
     {
       state: input.state,
@@ -646,6 +650,7 @@ async function buildVisionScoringOutput(
       angleDiversity,
       baseVisionConfidence,
       normalizedConfidence: calibratedConfidence.finalConfidence,
+      calibrationProfile, // Phase 20: Pass calibration profile
     },
     consistentMeasurements
   )
@@ -669,7 +674,11 @@ async function buildVisionScoringOutput(
   const net = Number((rawNet + learningResult.netCorrection).toFixed(1))
 
   // Combine confidence from calibration and learning boost
-  const confidencePercent = Math.min(97, Math.round(calibratedConfidence.finalConfidence + learningResult.confidenceBoost))
+  // Phase 20: Apply calibration profile's confidence scaling
+  const confidenceScaling = calibrationProfile?.confidence_scaling ?? 1.0
+  const baseConfidenceWithBoost = calibratedConfidence.finalConfidence + learningResult.confidenceBoost
+  const scaledConfidence = baseConfidenceWithBoost * confidenceScaling
+  const confidencePercent = Math.min(97, Math.max(15, Math.round(scaledConfidence)))
 
   const { low, high } = calculateErrorBands(gross, confidencePercent)
 
