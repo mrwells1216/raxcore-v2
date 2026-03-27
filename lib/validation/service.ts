@@ -10,7 +10,9 @@ import type {
   ModelAccuracyPoint,
   AccuracyBreakdown,
   ErrorDistribution,
-  RackType
+  RackType,
+  MeasurementLevelMetrics,
+  MeasurementCategory
 } from '@/lib/types'
 
 // ============================================================================
@@ -816,4 +818,193 @@ export async function getTrainingExamplesForValidation(
 
   if (error) throw new Error(`Failed to get training examples: ${error.message}`)
   return data || []
+}
+
+// ============================================================================
+// MEASUREMENT-LEVEL ACCURACY (Phase 21)
+// ============================================================================
+
+export async function getMeasurementLevelMetrics(): Promise<MeasurementLevelMetrics | null> {
+  const supabase = await createClient()
+
+  // Get training examples with measurement_errors data
+  const { data: examples } = await supabase
+    .from('training_examples')
+    .select('measurement_errors')
+    .eq('verified_for_training', true)
+    .not('measurement_errors', 'is', null)
+    .limit(500)
+
+  if (!examples || examples.length === 0) {
+    return null
+  }
+
+  // Calculate per-category MAE
+  const categoryErrors: Record<MeasurementCategory, { before: number[]; after: number[] }> = {
+    spread: { before: [], after: [] },
+    beam: { before: [], after: [] },
+    tine: { before: [], after: [] },
+    mass: { before: [], after: [] },
+    deduction: { before: [], after: [] },
+  }
+
+  for (const ex of examples) {
+    const errors = ex.measurement_errors as Record<string, number | { before?: number; after?: number }> | null
+    if (!errors) continue
+
+    for (const category of Object.keys(categoryErrors) as MeasurementCategory[]) {
+      const catError = errors[category]
+      if (typeof catError === 'number') {
+        // Legacy format: single error value (treat as "before")
+        categoryErrors[category].before.push(Math.abs(catError))
+      } else if (catError && typeof catError === 'object') {
+        // New format: before/after
+        if (catError.before !== undefined) {
+          categoryErrors[category].before.push(Math.abs(catError.before))
+        }
+        if (catError.after !== undefined) {
+          categoryErrors[category].after.push(Math.abs(catError.after))
+        }
+      }
+    }
+  }
+
+  // Calculate MAE for each category
+  const calcMae = (arr: number[]): number | null => {
+    if (arr.length === 0) return null
+    return arr.reduce((a, b) => a + b, 0) / arr.length
+  }
+
+  const spreadMaeBefore = calcMae(categoryErrors.spread.before)
+  const spreadMaeAfter = calcMae(categoryErrors.spread.after)
+  const beamMaeBefore = calcMae(categoryErrors.beam.before)
+  const beamMaeAfter = calcMae(categoryErrors.beam.after)
+  const tineMaeBefore = calcMae(categoryErrors.tine.before)
+  const tineMaeAfter = calcMae(categoryErrors.tine.after)
+  const massMaeBefore = calcMae(categoryErrors.mass.before)
+  const massMaeAfter = calcMae(categoryErrors.mass.after)
+
+  // Calculate improvement (positive = improved, negative = worsened)
+  const calcImprovement = (before: number | null, after: number | null): number | null => {
+    if (before === null || after === null) return null
+    return before - after
+  }
+
+  const spreadImprovement = calcImprovement(spreadMaeBefore, spreadMaeAfter)
+  const beamImprovement = calcImprovement(beamMaeBefore, beamMaeAfter)
+  const tineImprovement = calcImprovement(tineMaeBefore, tineMaeAfter)
+  const massImprovement = calcImprovement(massMaeBefore, massMaeAfter)
+
+  // Categorize improvements
+  const categoriesImproved: MeasurementCategory[] = []
+  const categoriesWorsened: MeasurementCategory[] = []
+  const categoriesUnchanged: MeasurementCategory[] = []
+
+  const categorizeImprovement = (category: MeasurementCategory, improvement: number | null) => {
+    if (improvement === null) return
+    if (improvement > 0.25) categoriesImproved.push(category)
+    else if (improvement < -0.25) categoriesWorsened.push(category)
+    else categoriesUnchanged.push(category)
+  }
+
+  categorizeImprovement('spread', spreadImprovement)
+  categorizeImprovement('beam', beamImprovement)
+  categorizeImprovement('tine', tineImprovement)
+  categorizeImprovement('mass', massImprovement)
+
+  return {
+    spreadMaeBefore,
+    spreadMaeAfter,
+    beamMaeBefore,
+    beamMaeAfter,
+    tineMaeBefore,
+    tineMaeAfter,
+    massMaeBefore,
+    massMaeAfter,
+    spreadImprovement,
+    beamImprovement,
+    tineImprovement,
+    massImprovement,
+    categoriesImproved,
+    categoriesWorsened,
+    categoriesUnchanged,
+  }
+}
+
+export interface MeasurementAccuracyBreakdown {
+  category: MeasurementCategory
+  label: string
+  maeBefore: number | null
+  maeAfter: number | null
+  improvement: number | null
+  sampleCount: number
+}
+
+export async function getMeasurementAccuracyBreakdown(): Promise<MeasurementAccuracyBreakdown[]> {
+  const metrics = await getMeasurementLevelMetrics()
+  
+  if (!metrics) {
+    return []
+  }
+
+  const supabase = await createClient()
+  
+  // Get sample counts per category
+  const { data: examples } = await supabase
+    .from('training_examples')
+    .select('measurement_errors')
+    .eq('verified_for_training', true)
+    .not('measurement_errors', 'is', null)
+    .limit(500)
+
+  const categoryCounts: Record<MeasurementCategory, number> = {
+    spread: 0,
+    beam: 0,
+    tine: 0,
+    mass: 0,
+    deduction: 0,
+  }
+
+  for (const ex of examples || []) {
+    const errors = ex.measurement_errors as Record<string, unknown> | null
+    if (!errors) continue
+    for (const cat of Object.keys(categoryCounts) as MeasurementCategory[]) {
+      if (errors[cat] !== undefined) categoryCounts[cat]++
+    }
+  }
+
+  return [
+    {
+      category: 'spread',
+      label: 'Inside Spread',
+      maeBefore: metrics.spreadMaeBefore,
+      maeAfter: metrics.spreadMaeAfter,
+      improvement: metrics.spreadImprovement,
+      sampleCount: categoryCounts.spread,
+    },
+    {
+      category: 'beam',
+      label: 'Main Beams',
+      maeBefore: metrics.beamMaeBefore,
+      maeAfter: metrics.beamMaeAfter,
+      improvement: metrics.beamImprovement,
+      sampleCount: categoryCounts.beam,
+    },
+    {
+      category: 'tine',
+      label: 'Tine Lengths',
+      maeBefore: metrics.tineMaeBefore,
+      maeAfter: metrics.tineMaeAfter,
+      improvement: metrics.tineImprovement,
+      sampleCount: categoryCounts.tine,
+    },
+    {
+      category: 'mass',
+      label: 'Mass/Circumference',
+      maeBefore: metrics.massMaeBefore,
+      maeAfter: metrics.massMaeAfter,
+      improvement: metrics.massImprovement,
+      sampleCount: categoryCounts.mass,
+    },
+  ]
 }

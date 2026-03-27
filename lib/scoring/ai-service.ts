@@ -16,8 +16,9 @@ import { normalizeMeasurements, type NormalizationResult } from './normalization
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
 import { computeLearningCorrection, toSimpleLearningSummary } from './learning-correction'
+import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } from './measurement-correction'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
-import type { ExtendedLearningSummary, CalibrationProfile } from '@/lib/types'
+import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary } from '@/lib/types'
 
 export interface ImageAnalysisInput {
   imageUrl: string
@@ -66,6 +67,8 @@ export interface ScoringOutput {
   confidenceReliability: 'low' | 'medium' | 'high' | 'very_high'
   // Phase 10: Extended learning summary (for admin)
   extendedLearningSummary?: ExtendedLearningSummary
+  // Phase 21: Measurement-level correction summary
+  measurementCorrectionSummary?: MeasurementCorrectionSummary
 }
 
 // Learning summary exposed to UI
@@ -595,13 +598,14 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
 /**
  * Build output from successful vision scoring
  * 
- * Pipeline stages (Phase 9 + 10):
+ * Pipeline stages (Phase 9 + 10 + 21):
  * 1. Vision output -> raw measurements
  * 2. Normalization -> reduce outliers, enforce ranges
  * 3. Landmark consistency -> validate anatomical ratios
  * 4. Confidence recalibration -> based on agreement/variance
- * 5. Phase 10 Learning correction -> similarity-weighted verified examples
- * 6. Final score calculation with per-measurement corrections
+ * 5. Phase 21 Measurement-level correction -> per-category corrections first
+ * 6. Phase 10 Learning correction -> similarity-weighted verified examples (total score)
+ * 7. Final score calculation with combined corrections
  */
 async function buildVisionScoringOutput(
   input: ScoringInput,
@@ -642,8 +646,30 @@ async function buildVisionScoringOutput(
   // Phase 20: Use explicit calibration profile if provided, otherwise fetch active profile
   const calibrationProfile = explicitCalibrationProfile ?? await getActiveCalibrationProfile()
 
-  // STAGE 5: Phase 10 Learning Correction - similarity-weighted verified examples
-  // Now includes calibration profile for weight/cap adjustments
+  // STAGE 5: Phase 21 Measurement-Level Correction - correct individual measurements first
+  const measurementCorrectionResult = await computeMeasurementLevelCorrection(
+    {
+      state: input.state,
+      rackType: input.rackType,
+      mainFramePoints: input.mainFramePoints,
+      sourceType: input.sourceType,
+      captureDevice: input.captureDevice,
+      imageCount: input.images.length,
+      earsFullyVisible: input.earsFullyVisible,
+      harvestMethod: undefined,
+      angleDiversity,
+      baseVisionConfidence,
+      normalizedConfidence: calibratedConfidence.finalConfidence,
+      calibrationProfile,
+    },
+    consistentMeasurements
+  )
+
+  // Use measurement-corrected measurements as the base for further processing
+  const measurementCorrectedMeasurements = measurementCorrectionResult.correctedMeasurements
+
+  // STAGE 6: Phase 10 Learning Correction - additional total-score adjustment
+  // This provides supplemental correction on top of measurement-level corrections
   const learningResult = await computeLearningCorrection(
     {
       state: input.state,
@@ -653,18 +679,17 @@ async function buildVisionScoringOutput(
       captureDevice: input.captureDevice,
       imageCount: input.images.length,
       earsFullyVisible: input.earsFullyVisible,
-      harvestMethod: undefined, // Not in current input
+      harvestMethod: undefined,
       angleDiversity,
       baseVisionConfidence,
       normalizedConfidence: calibratedConfidence.finalConfidence,
-      calibrationProfile, // Phase 20: Pass calibration profile
+      calibrationProfile,
     },
-    consistentMeasurements
+    measurementCorrectedMeasurements
   )
 
-  // STAGE 6: Apply learning corrections to measurements and scores
-  // Apply per-measurement corrections if available
-  const correctedMeasurements = { ...consistentMeasurements }
+  // STAGE 7: Apply any remaining per-field corrections from learning result
+  const correctedMeasurements = { ...measurementCorrectedMeasurements }
   for (const [field, correction] of learningResult.measurementCorrections) {
     const key = field as keyof typeof correctedMeasurements
     const currentVal = correctedMeasurements[key]
@@ -676,9 +701,12 @@ async function buildVisionScoringOutput(
   // Calculate final scores from corrected measurements
   const { gross: rawGross, net: rawNet } = calculateScores(correctedMeasurements)
 
-  // Apply overall score corrections
-  const gross = Number((rawGross + learningResult.grossCorrection).toFixed(1))
-  const net = Number((rawNet + learningResult.netCorrection).toFixed(1))
+  // Apply remaining overall score corrections (reduced since measurement-level already applied)
+  // Scale down the learning correction since measurement corrections already applied
+  const scaledGrossCorrection = learningResult.grossCorrection * 0.5
+  const scaledNetCorrection = learningResult.netCorrection * 0.5
+  const gross = Number((rawGross + scaledGrossCorrection).toFixed(1))
+  const net = Number((rawNet + scaledNetCorrection).toFixed(1))
 
   // Combine confidence from calibration and learning boost
   // Phase 20: Apply calibration profile's confidence scaling
@@ -707,6 +735,11 @@ async function buildVisionScoringOutput(
   
   // Add calibration explanation
   explanations.push(...calibratedConfidence.explanation)
+  
+  // Add Phase 21 measurement correction notes
+  if (measurementCorrectionResult.summary.totalCategoriesCorrected > 0) {
+    explanations.push(...measurementCorrectionResult.summary.notes)
+  }
   
   // Add Phase 10 learning notes
   explanations.push(...learningResult.summary.notes)
@@ -746,6 +779,8 @@ async function buildVisionScoringOutput(
     confidenceReliability: calibratedConfidence.reliability,
     // Phase 10 extended learning summary (for admin)
     extendedLearningSummary: learningResult.summary,
+    // Phase 21 measurement-level correction summary
+    measurementCorrectionSummary: measurementCorrectionResult.summary,
   }
 }
 

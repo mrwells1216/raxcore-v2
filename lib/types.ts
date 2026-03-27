@@ -1121,3 +1121,96 @@ export const CALIBRATION_SAFE_RANGES = {
   max_tine_correction: { min: 0.5, max: 4.0 },
   max_mass_correction: { min: 0.2, max: 2.0 },
 } as const
+
+// ========================================
+// MEASUREMENT-LEVEL CORRECTION TYPES (Phase 21)
+// ========================================
+
+export type MeasurementCategory = 'spread' | 'beam' | 'tine' | 'mass' | 'deduction'
+
+export interface CategoryCorrectionSummary {
+  category: MeasurementCategory
+  originalTotal: number
+  correctedTotal: number
+  correctionAmount: number
+  correctionPercent: number
+  confidence: number
+  sampleCount: number
+  direction: 'increase' | 'decrease' | 'none'
+  capped: boolean
+  cappingReason: string | null
+}
+
+export interface FieldCorrectionDetail {
+  field: string
+  category: MeasurementCategory
+  originalValue: number
+  correction: number
+  correctedValue: number
+  confidence: number
+  sampleCount: number
+}
+
+export interface MeasurementCorrectionSummary {
+  totalFieldsCorrected: number
+  totalCategoriesCorrected: number
+  strongestCorrection: {
+    category: MeasurementCategory
+    amount: number
+    direction: 'increase' | 'decrease'
+  } | null
+  weakestCategory: MeasurementCategory | null
+  overallCorrectionDirection: 'increase' | 'decrease' | 'mixed' | 'none'
+  grossCorrectionApplied: number
+  netCorrectionApplied: number
+  confidenceWeightedAvg: number
+  verifiedExamplesUsed: number
+  highlySimilarExamplesUsed: number
+  correctionStrength: 'none' | 'low' | 'medium' | 'high'
+  notes: string[]
+  categoryCorrections?: CategoryCorrectionSummary[]
+  fieldCorrections?: FieldCorrectionDetail[]
+}
+
+export interface MeasurementLevelMetrics {
+  // Per-category MAE before and after correction
+  spreadMaeBefore: number | null
+  spreadMaeAfter: number | null
+  beamMaeBefore: number | null
+  beamMaeAfter: number | null
+  tineMaeBefore: number | null
+  tineMaeAfter: number | null
+  massMaeBefore: number | null
+  massMaeAfter: number | null
+  // Improvement metrics
+  spreadImprovement: number | null
+  beamImprovement: number | null
+  tineImprovement: number | null
+  massImprovement: number | null
+  // Which categories are improving
+  categoriesImproved: MeasurementCategory[]
+  categoriesWorsened: MeasurementCategory[]
+  categoriesUnchanged: MeasurementCategory[]
+}
+
+export interface MeasurementErrorSnapshot {
+  spread?: number
+  beam?: number
+  tine?: number
+  mass?: number
+  deduction?: number
+}
+
+export interface ValidationResultWithMeasurements extends ValidationResult {
+  measurement_errors_before?: MeasurementErrorSnapshot | null
+  measurement_errors_after?: MeasurementErrorSnapshot | null
+  category_corrections_applied?: Record<MeasurementCategory, number> | null
+}
+
+export interface AccuracyMetricsWithMeasurements extends AccuracyMetrics {
+  measurement_level?: MeasurementLevelMetrics | null
+}
+
+export interface ExtendedLearningSummaryWithMeasurements extends ExtendedLearningSummary {
+  measurementCorrectionSummary?: MeasurementCorrectionSummary | null
+}

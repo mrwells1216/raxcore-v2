@@ -1,16 +1,18 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Target, TrendingUp, CheckCircle2, BarChart3, Layers } from 'lucide-react'
-import { getAccuracyMetrics, getAccuracyBreakdown, getErrorDistribution } from '@/lib/validation/service'
+import { Target, TrendingUp, CheckCircle2, BarChart3, Layers, Ruler } from 'lucide-react'
+import { getAccuracyMetrics, getAccuracyBreakdown, getErrorDistribution, getMeasurementAccuracyBreakdown } from '@/lib/validation/service'
 import { AccuracyTrendChart } from '@/components/admin/accuracy-trend-chart'
 import { ErrorDistributionChart } from '@/components/admin/error-distribution-chart'
 import { AccuracyBreakdownTable } from '@/components/admin/accuracy-breakdown-table'
+import { MeasurementAccuracyChart, MeasurementCategoryStatus } from '@/components/admin/measurement-accuracy-chart'
 
 export default async function AccuracyPage() {
-  const [metrics, byScoreBucket, byState, errorDistribution] = await Promise.all([
+  const [metrics, byScoreBucket, byState, errorDistribution, measurementBreakdown] = await Promise.all([
     getAccuracyMetrics(),
     getAccuracyBreakdown('score_bucket'),
     getAccuracyBreakdown('state'),
-    getErrorDistribution()
+    getErrorDistribution(),
+    getMeasurementAccuracyBreakdown()
   ])
 
   return (
@@ -135,6 +137,71 @@ export default async function AccuracyPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Measurement-Level Accuracy (Phase 21) */}
+      {measurementBreakdown.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Ruler className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-lg">Measurement-Level Accuracy</CardTitle>
+                <CardDescription>
+                  Per-category error before and after correction
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div>
+                <p className="text-sm font-medium mb-3">Before vs After Correction</p>
+                <MeasurementAccuracyChart data={measurementBreakdown} />
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-3">Improvement by Category</p>
+                <MeasurementAccuracyChart data={measurementBreakdown} showImprovement />
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-medium mb-3">Category Status</p>
+              <MeasurementCategoryStatus 
+                data={measurementBreakdown.map(m => ({
+                  category: m.category,
+                  status: m.improvement === null 
+                    ? 'unchanged' 
+                    : m.improvement > 0.25 
+                      ? 'improved' 
+                      : m.improvement < -0.25 
+                        ? 'worsened' 
+                        : 'unchanged',
+                  changeAmount: m.improvement ?? 0,
+                }))}
+              />
+            </div>
+            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 pt-2 border-t border-border">
+              {measurementBreakdown.map((m) => (
+                <div key={m.category} className="text-center">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{m.label}</p>
+                  <div className="flex items-baseline justify-center gap-1 mt-1">
+                    <span className="text-lg font-semibold">
+                      {m.maeAfter?.toFixed(1) ?? m.maeBefore?.toFixed(1) ?? '-'}"
+                    </span>
+                    {m.improvement !== null && m.improvement !== 0 && (
+                      <span className={`text-xs ${m.improvement > 0 ? 'text-primary' : 'text-destructive'}`}>
+                        ({m.improvement > 0 ? '-' : '+'}{Math.abs(m.improvement).toFixed(1)}")
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {m.sampleCount} samples
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Charts Row */}
       <div className="grid gap-6 lg:grid-cols-2">
