@@ -2,13 +2,15 @@
 
 import { useState } from 'react'
 import { AntlerViewer } from '@/components/render/antler-viewer'
+import { PlacementPreview } from '@/components/render/placement-preview'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Share2, AlertTriangle, Box } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Share2, AlertTriangle, Box, Home, Rotate3D } from 'lucide-react'
 import { toast } from 'sonner'
-import type { AntlerGeometry, RenderSettings } from '@/lib/types'
-import { DEFAULT_RENDER_CONFIG, type RenderConfig } from '@/lib/render/adapter'
+import type { AntlerGeometry, RenderSettings, PlacementConfig } from '@/lib/types'
+import { DEFAULT_RENDER_CONFIG, DEFAULT_PLACEMENT_CONFIG, type RenderConfig } from '@/lib/render/adapter'
 
 interface RenderClientProps {
   buckId: string
@@ -27,6 +29,8 @@ export function RenderClient({
 }: RenderClientProps) {
   const [settings, setSettings] = useState<RenderSettings>(initialSettings)
   const [renderConfig, setRenderConfig] = useState<RenderConfig>(DEFAULT_RENDER_CONFIG)
+  const [placementConfig, setPlacementConfig] = useState<PlacementConfig>(DEFAULT_PLACEMENT_CONFIG)
+  const [viewMode, setViewMode] = useState<'3d' | 'placement'>('3d')
 
   const handleSettingsChange = (updates: Partial<RenderSettings>) => {
     setSettings(prev => ({ ...prev, ...updates }))
@@ -34,6 +38,10 @@ export function RenderClient({
 
   const handleRenderConfigChange = (updates: Partial<RenderConfig>) => {
     setRenderConfig(prev => ({ ...prev, ...updates }))
+  }
+
+  const handlePlacementConfigChange = (updates: Partial<PlacementConfig>) => {
+    setPlacementConfig(prev => ({ ...prev, ...updates }))
   }
 
   const handleShare = async () => {
@@ -76,14 +84,41 @@ export function RenderClient({
         </CardContent>
       </Card>
 
-      {/* 3D Viewer */}
-      <AntlerViewer
-        geometry={geometry}
-        settings={settings}
-        renderConfig={renderConfig}
-        onSettingsChange={handleSettingsChange}
-        onRenderConfigChange={handleRenderConfigChange}
-      />
+      {/* View Mode Tabs */}
+      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as '3d' | 'placement')} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="3d" className="flex items-center gap-1.5">
+            <Rotate3D className="h-4 w-4" />
+            3D View
+          </TabsTrigger>
+          <TabsTrigger value="placement" className="flex items-center gap-1.5">
+            <Home className="h-4 w-4" />
+            Wall Preview
+          </TabsTrigger>
+        </TabsList>
+
+        {/* 3D Viewer Tab */}
+        <TabsContent value="3d" className="mt-0">
+          <AntlerViewer
+            geometry={geometry}
+            settings={settings}
+            renderConfig={renderConfig}
+            onSettingsChange={handleSettingsChange}
+            onRenderConfigChange={handleRenderConfigChange}
+          />
+        </TabsContent>
+
+        {/* Placement Preview Tab */}
+        <TabsContent value="placement" className="mt-0">
+          <PlacementPreview
+            config={placementConfig}
+            onConfigChange={handlePlacementConfigChange}
+            geometry={geometry}
+            renderConfig={renderConfig}
+            settings={{ ...settings, autoRotate: false }}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Disclaimer */}
       <Card className="bg-amber-500/5 border-amber-500/20">

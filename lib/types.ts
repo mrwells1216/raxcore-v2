@@ -751,3 +751,37 @@ export interface IntakeQualitySummary {
 export interface PredictionWithIntakeQuality extends Prediction {
   intake_quality?: IntakeQualitySummary | null
 }
+
+// ========================================
+// PLACEMENT PREVIEW TYPES (Phase 18)
+// ========================================
+
+export type PlacementPreviewMode = 'studio' | 'wall' | 'room_image'
+
+export type WallTone = 'white' | 'cream' | 'gray' | 'beige' | 'wood_light' | 'wood_dark' | 'brick' | 'stone'
+
+export interface PlacementConfig {
+  /** Preview mode: studio (neutral), wall backdrop, or room image */
+  previewMode: PlacementPreviewMode
+  /** Wall tone/texture (used for 'wall' mode) */
+  wallTone: WallTone
+  /** Horizontal position offset (-1 to 1, left to right) */
+  horizontalOffset: number
+  /** Vertical position offset (-1 to 1, bottom to top) */
+  verticalOffset: number
+  /** Scale multiplier (0.5 to 2.0) */
+  scale: number
+  /** Uploaded room image URL (for 'room_image' mode) */
+  roomImageUrl: string | null
+  /** Shadow intensity (0 to 1) */
+  shadowIntensity: number
+  /** Show mount bracket/hardware hint */
+  showMountHint: boolean
+}
+
+export interface PlacementPreset {
+  id: string
+  name: string
+  wallTone: WallTone
+  description: string
+}

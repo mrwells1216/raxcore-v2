@@ -14,7 +14,7 @@
  */
 
 import * as THREE from 'three'
-import type { AntlerGeometry, RenderSettings } from '@/lib/types'
+import type { AntlerGeometry, RenderSettings, PlacementConfig, WallTone, PlacementPreviewMode, PlacementPreset } from '@/lib/types'
 
 export type RendererType = 'parametric_3d' | 'canvas_2d' | 'external_mesh'
 export type MountMode = 'antlers_only' | 'european_mount'
@@ -48,6 +48,51 @@ export const DEFAULT_RENDER_CONFIG: RenderConfig = {
   beamSweepBias: 0.15, // slight forward sweep
   tineForwardTilt: 0.4,
   showSkullPlate: false,
+}
+
+// ─── Phase 18: Placement Preview Config ──────────────────────────────────────
+
+export const DEFAULT_PLACEMENT_CONFIG: PlacementConfig = {
+  previewMode: 'studio',
+  wallTone: 'cream',
+  horizontalOffset: 0,
+  verticalOffset: 0,
+  scale: 1.0,
+  roomImageUrl: null,
+  shadowIntensity: 0.3,
+  showMountHint: true,
+}
+
+export const WALL_TONE_COLORS: Record<WallTone, { background: string; accent: string; label: string }> = {
+  white: { background: '#FAFAFA', accent: '#E0E0E0', label: 'Clean White' },
+  cream: { background: '#F5F0E6', accent: '#E0D8C8', label: 'Warm Cream' },
+  gray: { background: '#E8E8E8', accent: '#D0D0D0', label: 'Modern Gray' },
+  beige: { background: '#E8DFC8', accent: '#D4C8B0', label: 'Classic Beige' },
+  wood_light: { background: '#DEB887', accent: '#C9A66B', label: 'Light Wood' },
+  wood_dark: { background: '#8B6914', accent: '#6B5010', label: 'Dark Wood' },
+  brick: { background: '#B85C4A', accent: '#8B4433', label: 'Exposed Brick' },
+  stone: { background: '#A09080', accent: '#807060', label: 'Natural Stone' },
+}
+
+export const PLACEMENT_PRESETS: PlacementPreset[] = [
+  { id: 'living_room', name: 'Living Room', wallTone: 'cream', description: 'Warm, inviting space' },
+  { id: 'office', name: 'Office', wallTone: 'gray', description: 'Modern, professional' },
+  { id: 'cabin', name: 'Cabin Lodge', wallTone: 'wood_dark', description: 'Rustic hunting lodge' },
+  { id: 'trophy_room', name: 'Trophy Room', wallTone: 'wood_light', description: 'Classic display' },
+  { id: 'gallery', name: 'Gallery', wallTone: 'white', description: 'Clean, museum-style' },
+]
+
+/**
+ * Ensure older render records without placement config still work.
+ * Merges saved config with defaults.
+ */
+export function ensurePlacementConfig(
+  savedConfig?: Partial<PlacementConfig> | null
+): PlacementConfig {
+  return {
+    ...DEFAULT_PLACEMENT_CONFIG,
+    ...(savedConfig || {}),
+  }
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────

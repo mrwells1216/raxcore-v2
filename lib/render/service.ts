@@ -28,7 +28,9 @@ import type {
   RenderBundle,
   Measurements,
   RackType,
+  PlacementConfig,
 } from '@/lib/types'
+import { DEFAULT_PLACEMENT_CONFIG } from '@/lib/render/adapter'
 
 // Default render settings
 export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
