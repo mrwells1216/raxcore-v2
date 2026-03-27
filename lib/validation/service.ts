@@ -15,7 +15,11 @@ import type {
   MeasurementCategory,
   SecondPassAccuracyMetrics,
   SelfCheckIssueType,
-  FinalSelectionMethod
+  FinalSelectionMethod,
+  RuntimeHealthMetrics,
+  VisionRuntimeErrorType,
+  FallbackReason,
+  ImageValidationIssueType
 } from '@/lib/types'
 
 // ============================================================================
@@ -1291,4 +1295,235 @@ export async function getSelfCheckIssueAnalysis(): Promise<SelfCheckIssueAnalysi
   }
 
   return analyses.sort((a, b) => b.count - a.count)
+}
+
+// ============================================================================
+// PHASE 24: RUNTIME HEALTH METRICS
+// ============================================================================
+
+export async function getRuntimeHealthMetrics(): Promise<RuntimeHealthMetrics | null> {
+  const supabase = await createClient()
+
+  // Get predictions from last 30 days
+  const { data: predictions } = await supabase
+    .from('predictions')
+    .select(`
+      id,
+      scoring_method,
+      used_fallback,
+      fallback_reason,
+      runtime_total_time_ms,
+      runtime_timed_out,
+      runtime_was_retried,
+      runtime_total_attempts,
+      image_validation_valid,
+      image_validation_valid_count,
+      image_validation_total_count,
+      image_validation_issue_count,
+      image_validation_issues,
+      fallback_metadata,
+      created_at
+    `)
+    .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1000)
+
+  if (!predictions || predictions.length === 0) {
+    return null
+  }
+
+  const totalPredictions = predictions.length
+  
+  // Vision success rate
+  const visionSuccesses = predictions.filter(p => 
+    p.scoring_method === 'vision' && !p.used_fallback
+  ).length
+  const visionSuccessRate = (visionSuccesses / totalPredictions) * 100
+
+  // Fallback rate
+  const fallbacks = predictions.filter(p => p.used_fallback).length
+  const fallbackRate = (fallbacks / totalPredictions) * 100
+
+  // Error type counts
+  const errorTypeCounts: Partial<Record<VisionRuntimeErrorType, number>> = {}
+  const fallbackReasonCounts: Partial<Record<FallbackReason, number>> = {}
+
+  for (const p of predictions) {
+    if (p.fallback_reason) {
+      const reason = p.fallback_reason as FallbackReason
+      fallbackReasonCounts[reason] = (fallbackReasonCounts[reason] || 0) + 1
+      
+      // Map fallback reason to error type
+      const errorTypeMap: Record<string, VisionRuntimeErrorType> = {
+        vision_timeout: 'timeout',
+        vision_provider_error: 'provider_error',
+        vision_rate_limit: 'rate_limit',
+        vision_quota_exceeded: 'quota_exceeded',
+        vision_model_unavailable: 'model_unavailable',
+        vision_malformed_response: 'malformed_response',
+        vision_validation_failed: 'validation_error',
+        vision_content_blocked: 'content_policy',
+      }
+      const errorType = errorTypeMap[reason] || 'unknown'
+      errorTypeCounts[errorType] = (errorTypeCounts[errorType] || 0) + 1
+    }
+  }
+
+  // Timing stats
+  const timings = predictions
+    .map(p => p.runtime_total_time_ms)
+    .filter((t): t is number => t !== null && t > 0)
+  
+  const avgVisionTimeMs = timings.length > 0 
+    ? timings.reduce((a, b) => a + b, 0) / timings.length 
+    : null
+
+  const sortedTimings = [...timings].sort((a, b) => a - b)
+  const p95VisionTimeMs = sortedTimings.length > 0 
+    ? sortedTimings[Math.floor(sortedTimings.length * 0.95)]
+    : null
+
+  // Timeout rate
+  const timeouts = predictions.filter(p => p.runtime_timed_out).length
+  const timeoutRate = (timeouts / totalPredictions) * 100
+
+  // Image validation stats
+  const validImageCounts = predictions
+    .map(p => p.image_validation_valid_count)
+    .filter((c): c is number => c !== null)
+  
+  const avgValidImagesPerRequest = validImageCounts.length > 0
+    ? validImageCounts.reduce((a, b) => a + b, 0) / validImageCounts.length
+    : 0
+
+  const imageValidationFailures = predictions.filter(p => p.image_validation_valid === false).length
+  const imageValidationFailRate = (imageValidationFailures / totalPredictions) * 100
+
+  // Common image issues
+  const imageIssueCounts: Partial<Record<ImageValidationIssueType, number>> = {}
+  for (const p of predictions) {
+    if (p.image_validation_issues && Array.isArray(p.image_validation_issues)) {
+      for (const issue of p.image_validation_issues) {
+        const issueType = (issue as { issueType?: string })?.issueType as ImageValidationIssueType | undefined
+        if (issueType) {
+          imageIssueCounts[issueType] = (imageIssueCounts[issueType] || 0) + 1
+        }
+      }
+    }
+  }
+
+  const commonImageIssues = Object.entries(imageIssueCounts)
+    .map(([type, count]) => ({ type: type as ImageValidationIssueType, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+
+  // Retry stats
+  const retriedPredictions = predictions.filter(p => p.runtime_was_retried).length
+  const retryRate = (retriedPredictions / totalPredictions) * 100
+
+  const failedWithRetries = predictions.filter(p => 
+    p.used_fallback && p.runtime_total_attempts && p.runtime_total_attempts > 1
+  )
+  const avgRetriesPerFailure = failedWithRetries.length > 0
+    ? failedWithRetries.reduce((sum, p) => sum + ((p.runtime_total_attempts || 1) - 1), 0) / failedWithRetries.length
+    : 0
+
+  // Health trend by day
+  const dayGroups = new Map<string, typeof predictions>()
+  for (const p of predictions) {
+    const day = p.created_at.split('T')[0]
+    if (!dayGroups.has(day)) {
+      dayGroups.set(day, [])
+    }
+    dayGroups.get(day)!.push(p)
+  }
+
+  const healthTrend7d = Array.from(dayGroups.entries())
+    .slice(0, 7)
+    .map(([date, preds]) => {
+      const dayTotal = preds.length
+      const daySuccesses = preds.filter(p => p.scoring_method === 'vision' && !p.used_fallback).length
+      const dayFallbacks = preds.filter(p => p.used_fallback).length
+      const dayTimings = preds.map(p => p.runtime_total_time_ms).filter((t): t is number => t !== null)
+      
+      return {
+        date,
+        successRate: dayTotal > 0 ? (daySuccesses / dayTotal) * 100 : 0,
+        fallbackRate: dayTotal > 0 ? (dayFallbacks / dayTotal) * 100 : 0,
+        avgTimeMs: dayTimings.length > 0 
+          ? dayTimings.reduce((a, b) => a + b, 0) / dayTimings.length 
+          : 0,
+      }
+    })
+
+  return {
+    totalPredictions,
+    visionSuccessRate,
+    fallbackRate,
+    errorTypeCounts: errorTypeCounts as Record<VisionRuntimeErrorType, number>,
+    fallbackReasonCounts: fallbackReasonCounts as Record<FallbackReason, number>,
+    avgVisionTimeMs,
+    p95VisionTimeMs,
+    timeoutRate,
+    avgValidImagesPerRequest,
+    imageValidationFailRate,
+    commonImageIssues,
+    retryRate,
+    avgRetriesPerFailure,
+    healthTrend7d,
+  }
+}
+
+export interface FallbackBreakdown {
+  reason: FallbackReason
+  count: number
+  percent: number
+  avgConfidencePenalty: number | null
+  avgErrorBandWidening: number | null
+}
+
+export async function getFallbackBreakdown(): Promise<FallbackBreakdown[]> {
+  const supabase = await createClient()
+
+  const { data: predictions } = await supabase
+    .from('predictions')
+    .select('fallback_reason, fallback_confidence_penalty, fallback_error_band_widening')
+    .eq('used_fallback', true)
+    .not('fallback_reason', 'is', null)
+    .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+    .limit(500)
+
+  if (!predictions || predictions.length === 0) {
+    return []
+  }
+
+  const total = predictions.length
+  const reasonGroups = new Map<string, typeof predictions>()
+
+  for (const p of predictions) {
+    const reason = p.fallback_reason!
+    if (!reasonGroups.has(reason)) {
+      reasonGroups.set(reason, [])
+    }
+    reasonGroups.get(reason)!.push(p)
+  }
+
+  return Array.from(reasonGroups.entries())
+    .map(([reason, preds]) => {
+      const penalties = preds.map(p => p.fallback_confidence_penalty).filter((p): p is number => p !== null)
+      const widenings = preds.map(p => p.fallback_error_band_widening).filter((w): w is number => w !== null)
+
+      return {
+        reason: reason as FallbackReason,
+        count: preds.length,
+        percent: (preds.length / total) * 100,
+        avgConfidencePenalty: penalties.length > 0 
+          ? penalties.reduce((a, b) => a + b, 0) / penalties.length 
+          : null,
+        avgErrorBandWidening: widenings.length > 0 
+          ? widenings.reduce((a, b) => a + b, 0) / widenings.length 
+          : null,
+      }
+    })
+    .sort((a, b) => b.count - a.count)
 }

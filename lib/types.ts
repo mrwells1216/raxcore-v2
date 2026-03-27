@@ -1364,3 +1364,168 @@ export interface SecondPassAccuracyMetrics {
     sampleCount: number
   }[]
 }
+
+// ========================================
+// PHASE 24: VISION/RUNTIME HARDENING
+// ========================================
+
+export type VisionRuntimeErrorType =
+  | 'timeout'
+  | 'rate_limit'
+  | 'provider_error'
+  | 'network_error'
+  | 'malformed_response'
+  | 'incomplete_response'
+  | 'validation_error'
+  | 'quota_exceeded'
+  | 'model_unavailable'
+  | 'content_policy'
+  | 'unknown'
+
+export type FallbackReason =
+  | 'vision_timeout'
+  | 'vision_provider_error'
+  | 'vision_rate_limit'
+  | 'vision_quota_exceeded'
+  | 'vision_model_unavailable'
+  | 'vision_malformed_response'
+  | 'vision_validation_failed'
+  | 'vision_content_blocked'
+  | 'image_validation_failed'
+  | 'no_valid_images'
+  | 'all_images_inaccessible'
+  | 'unknown_error'
+
+export type FallbackStrategy =
+  | 'heuristic_full'
+  | 'heuristic_degraded'
+  | 'safe_minimum'
+  | 'error_response'
+
+export type ImageValidationIssueType =
+  | 'missing_url'
+  | 'invalid_url_format'
+  | 'url_inaccessible'
+  | 'unsupported_file_type'
+  | 'zero_byte_file'
+  | 'file_too_large'
+  | 'duplicate_image'
+  | 'data_url_malformed'
+  | 'signed_url_expired'
+  | 'private_url'
+  | 'timeout_checking'
+
+export interface RuntimeErrorInfo {
+  type: VisionRuntimeErrorType
+  message: string
+  retryable: boolean
+  attempt?: number
+  totalAttempts?: number
+}
+
+export interface RuntimeMetadataInfo {
+  totalAttempts: number
+  successfulAttempt: number | null
+  totalTimeMs: number
+  retryDelaysMs: number[]
+  timedOut: boolean
+  wasRetried: boolean
+}
+
+export interface ImageValidationIssueInfo {
+  imageIndex: number
+  issueType: ImageValidationIssueType
+  severity: 'error' | 'warning' | 'info'
+  message: string
+  recoverable: boolean
+}
+
+export interface FallbackMetadataInfo {
+  usedFallback: boolean
+  fallbackReason: FallbackReason | null
+  fallbackStrategy: FallbackStrategy | null
+  visionErrorTypes: VisionRuntimeErrorType[]
+  imageValidationIssues: ImageValidationIssueInfo[]
+  validImageCount: number
+  totalImageCount: number
+  confidencePenalty: number
+  errorBandWidening: number
+  summary: string
+  timestamp: string
+}
+
+export interface RuntimeHealthMetrics {
+  // Overall health
+  totalPredictions: number
+  visionSuccessRate: number
+  fallbackRate: number
+  
+  // Error breakdown
+  errorTypeCounts: Record<VisionRuntimeErrorType, number>
+  fallbackReasonCounts: Record<FallbackReason, number>
+  
+  // Timing
+  avgVisionTimeMs: number | null
+  p95VisionTimeMs: number | null
+  timeoutRate: number
+  
+  // Image validation
+  avgValidImagesPerRequest: number
+  imageValidationFailRate: number
+  commonImageIssues: { type: ImageValidationIssueType; count: number }[]
+  
+  // Retry stats
+  retryRate: number
+  avgRetriesPerFailure: number
+  
+  // By time period
+  healthTrend7d: {
+    date: string
+    successRate: number
+    fallbackRate: number
+    avgTimeMs: number
+  }[]
+}
+
+// Extended prediction with runtime metadata
+export interface PredictionWithRuntime extends Prediction {
+  fallback_metadata?: FallbackMetadataInfo | null
+  runtime_metadata?: RuntimeMetadataInfo | null
+  image_validation_summary?: {
+    validCount: number
+    totalCount: number
+    issues: ImageValidationIssueInfo[]
+  } | null
+}
+
+// Extended scoring output with runtime info
+export interface ScoringOutputWithRuntime {
+  // Standard scoring output fields
+  predictedGross: number
+  predictedNet: number
+  confidencePercent: number
+  errorBandLow: number
+  errorBandHigh: number
+  measurements: Measurements
+  landmarks: LandmarksDetected
+  stateCalibration: StateCalibration
+  processingTimeMs: number
+  imagesUsed: number
+  angleDiversityScore: number
+  confidenceExplanation: string[]
+  scalingReferencesUsed: string[]
+  visionModelUsed: string | null
+  scoringMethod: 'vision' | 'heuristic' | 'vision_with_fallback'
+  visionConfidence: number | null
+  
+  // Phase 24 runtime metadata
+  fallbackMetadata?: FallbackMetadataInfo | null
+  runtimeMetadata?: RuntimeMetadataInfo | null
+  imageValidationSummary?: {
+    valid: boolean
+    validCount: number
+    totalCount: number
+    warningsOnly: boolean
+    issues: ImageValidationIssueInfo[]
+  } | null
+}

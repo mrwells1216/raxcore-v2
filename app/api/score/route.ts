@@ -215,9 +215,47 @@ export async function POST(request: Request) {
       extendedLearningSummary: scoringResult.extendedLearningSummary,
       // Phase 15: Intake quality
       intakeQuality: intakeQuality || null,
+      // Phase 24: Runtime/fallback metadata
+      fallbackMetadata: scoringResult.fallbackMetadata || null,
+      runtimeMetadata: scoringResult.runtimeMetadata || null,
+      imageValidationSummary: scoringResult.imageValidationSummary || null,
     })
   } catch (error) {
-    console.error('Scoring API error:', error)
-    return NextResponse.json({ error: 'Scoring failed', details: String(error) }, { status: 500 })
+    // Phase 24: Enhanced error handling with user-safe messages
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const isTimeout = errorMessage.toLowerCase().includes('timeout')
+    const isRateLimit = errorMessage.toLowerCase().includes('rate') || errorMessage.includes('429')
+    const isNetwork = errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')
+    
+    // Log detailed error for debugging
+    console.error('Scoring API error:', {
+      error: errorMessage,
+      isTimeout,
+      isRateLimit,
+      isNetwork,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    // Determine user-safe error message
+    let userMessage = 'An unexpected error occurred during scoring. Please try again.'
+    let statusCode = 500
+    
+    if (isTimeout) {
+      userMessage = 'The scoring service is taking longer than expected. Please try again.'
+      statusCode = 504
+    } else if (isRateLimit) {
+      userMessage = 'The service is currently busy. Please wait a moment and try again.'
+      statusCode = 429
+    } else if (isNetwork) {
+      userMessage = 'A network error occurred. Please check your connection and try again.'
+      statusCode = 503
+    }
+
+    return NextResponse.json({ 
+      error: 'Scoring failed', 
+      userMessage,
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      errorType: isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isNetwork ? 'network' : 'unknown',
+    }, { status: statusCode })
   }
 }

@@ -1,13 +1,32 @@
 /**
  * RutAI Vision Scoring Service
  * Analyzes deer antler images using a vision-capable AI model to estimate measurements.
+ * Phase 24: Enhanced with runtime hardening, validation, and fallback support.
  */
 
 import { generateObject } from 'ai'
 import { gateway } from '@ai-sdk/gateway'
 import { z } from 'zod'
-import type { Measurements, LandmarksDetected, AngleType } from '@/lib/types'
+import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
+import { 
+  validateImages, 
+  type ImageValidationResult, 
+  type ImageInput 
+} from './image-validation'
+import { 
+  executeWithRuntime, 
+  validateVisionOutput,
+  classifyError,
+  type RuntimeConfig,
+  type RuntimeMetadata,
+  type VisionRuntimeError
+} from './vision-runtime'
+import {
+  makeFallbackDecision,
+  createFallbackMetadata,
+  type FallbackMetadata
+} from './fallback-handler'
 
 // Vision model to use - Gemini 2.0 Flash has strong vision capabilities
 const VISION_MODEL = 'google/gemini-2.0-flash-001'
@@ -177,55 +196,104 @@ export interface VisionScoringResult {
   output: VisionOutput
   processingTimeMs: number
   modelUsed: string
+  // Phase 24: Runtime metadata
+  runtimeMetadata: RuntimeMetadata
+  imageValidation: ImageValidationResult
 }
 
 export interface VisionScoringError {
   success: false
   error: string
+  userMessage: string
   fallbackReason: string
+  // Phase 24: Enhanced error metadata
+  runtimeMetadata: RuntimeMetadata | null
+  imageValidation: ImageValidationResult | null
+  visionErrors: VisionRuntimeError[]
+  fallbackMetadata: FallbackMetadata
 }
 
 export type VisionScoringResponse = VisionScoringResult | VisionScoringError
 
+// Phase 24: Runtime configuration for vision calls
+const VISION_RUNTIME_CONFIG: Partial<RuntimeConfig> = {
+  totalTimeoutMs: 55000,      // 55s total (leave room for request overhead)
+  singleCallTimeoutMs: 25000, // 25s per attempt
+  maxRetries: 2,
+  retryDelayBaseMs: 1000,
+  retryDelayMaxMs: 4000,
+  exponentialBackoff: true,
+}
+
 /**
  * Score deer antlers using vision model analysis
+ * Phase 24: Enhanced with full runtime hardening
  */
 export async function scoreWithVision(input: VisionScoringInput): Promise<VisionScoringResponse> {
   const startTime = Date.now()
+  const visionErrors: VisionRuntimeError[] = []
 
-  // Validate input
+  // Phase 24: Comprehensive image validation
   if (!input.images || input.images.length === 0) {
+    const fallbackDecision = makeFallbackDecision(
+      { type: 'validation_error', message: 'No images provided', retryable: false },
+      null,
+      null
+    )
     return {
       success: false,
       error: 'No images provided',
-      fallbackReason: 'missing_images',
+      userMessage: 'Please provide at least one image for scoring.',
+      fallbackReason: 'no_valid_images',
+      runtimeMetadata: null,
+      imageValidation: null,
+      visionErrors: [],
+      fallbackMetadata: createFallbackMetadata(fallbackDecision, [], null, null),
     }
   }
 
-  // Filter to valid image URLs
-  const validImages = input.images.filter(img => {
-    try {
-      // Check if it's a valid URL or data URL
-      if (img.imageUrl.startsWith('data:image/')) return true
-      new URL(img.imageUrl)
-      return true
-    } catch {
-      return false
-    }
+  // Validate all images with full checks
+  const imageInputs: ImageInput[] = input.images.map(img => ({
+    imageUrl: img.imageUrl,
+    angleType: img.angleType,
+    width: img.width,
+    height: img.height,
+  }))
+  
+  const imageValidation = await validateImages(imageInputs, {
+    skipAccessibilityChecks: false,
+    skipDuplicateCheck: false,
+    minValidImages: 1,
+    maxImages: 10,
   })
 
-  if (validImages.length === 0) {
+  // If no valid images, fail early
+  if (!imageValidation.valid || imageValidation.validImageCount === 0) {
+    const validationError: VisionRuntimeError = {
+      type: 'validation_error',
+      message: imageValidation.summary,
+      retryable: false,
+    }
+    const fallbackDecision = makeFallbackDecision(validationError, null, imageValidation)
+    
     return {
       success: false,
-      error: 'No valid image URLs provided',
-      fallbackReason: 'invalid_image_urls',
+      error: imageValidation.summary,
+      userMessage: 'Could not process images. Please check image URLs and formats.',
+      fallbackReason: 'image_validation_failed',
+      runtimeMetadata: null,
+      imageValidation,
+      visionErrors: [validationError],
+      fallbackMetadata: createFallbackMetadata(fallbackDecision, [validationError], imageValidation, null),
     }
   }
 
-  try {
+  // Use only valid images for vision call
+  const validImages = imageValidation.validImageIndices.map(i => input.images[i])
+
+  // Phase 24: Execute vision call with runtime hardening
+  const visionCallResult = await executeWithRuntime(async () => {
     const prompt = buildVisionPrompt({ ...input, images: validImages })
-    
-    // Build message content with images
     const imageContent = prepareImageContent(validImages)
     
     const { object: visionOutput } = await generateObject({
@@ -240,31 +308,114 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
           ],
         },
       ],
-      maxRetries: 2,
+      // Note: AI SDK has its own retry logic, but we wrap it for timeout/monitoring
+      maxRetries: 1,
     })
 
-    // Validate the response has reasonable values
-    if (!visionOutput.measurements || visionOutput.gross_score < 50 || visionOutput.gross_score > 300) {
-      return {
-        success: false,
-        error: 'Vision model returned invalid score range',
-        fallbackReason: 'invalid_response_range',
-      }
+    return visionOutput
+  }, VISION_RUNTIME_CONFIG)
+
+  // Collect any errors from the runtime
+  if (visionCallResult.metadata.errorsEncountered.length > 0) {
+    visionErrors.push(...visionCallResult.metadata.errorsEncountered)
+  }
+
+  // Handle vision call failure
+  if (!visionCallResult.success) {
+    const runtimeError = visionCallResult.error || {
+      type: 'unknown' as const,
+      message: 'Unknown vision error',
+      retryable: false,
     }
+    visionErrors.push(runtimeError)
+    
+    const fallbackDecision = makeFallbackDecision(runtimeError, visionCallResult.metadata, imageValidation)
+    
+    console.error('Vision scoring failed:', {
+      error: runtimeError.type,
+      message: runtimeError.message,
+      attempts: visionCallResult.metadata.totalAttempts,
+      timeMs: visionCallResult.metadata.totalTimeMs,
+      timedOut: visionCallResult.metadata.timedOut,
+    })
 
     return {
-      success: true,
-      output: visionOutput,
-      processingTimeMs: Date.now() - startTime,
-      modelUsed: VISION_MODEL,
+      success: false,
+      error: runtimeError.message,
+      userMessage: fallbackDecision.userMessage,
+      fallbackReason: fallbackDecision.reason || 'unknown_error',
+      runtimeMetadata: visionCallResult.metadata,
+      imageValidation,
+      visionErrors,
+      fallbackMetadata: createFallbackMetadata(fallbackDecision, visionErrors, imageValidation, visionCallResult.metadata),
     }
-  } catch (error) {
-    console.error('Vision scoring error:', error)
+  }
+
+  // Phase 24: Validate vision output for sanity
+  const outputValidation = validateVisionOutput(visionCallResult.result)
+  
+  if (!outputValidation.valid || outputValidation.severity === 'critical') {
+    const validationError: VisionRuntimeError = {
+      type: 'validation_error',
+      message: `Output validation failed: ${outputValidation.issues.join('; ')}`,
+      retryable: true,
+    }
+    visionErrors.push(validationError)
+    
+    const fallbackDecision = makeFallbackDecision(validationError, visionCallResult.metadata, imageValidation)
+    
+    console.error('Vision output validation failed:', outputValidation.issues)
+
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown vision scoring error',
-      fallbackReason: 'vision_model_error',
+      error: 'Vision model returned invalid output',
+      userMessage: 'Image analysis returned unexpected results. Please try again.',
+      fallbackReason: 'vision_validation_failed',
+      runtimeMetadata: visionCallResult.metadata,
+      imageValidation,
+      visionErrors,
+      fallbackMetadata: createFallbackMetadata(fallbackDecision, visionErrors, imageValidation, visionCallResult.metadata),
     }
+  }
+
+  const visionOutput = visionCallResult.result as VisionOutput
+
+  // Additional sanity check on score range
+  if (visionOutput.gross_score < 50 || visionOutput.gross_score > 350) {
+    const rangeError: VisionRuntimeError = {
+      type: 'validation_error',
+      message: `Gross score ${visionOutput.gross_score} outside reasonable range (50-350)`,
+      retryable: false,
+    }
+    visionErrors.push(rangeError)
+    
+    const fallbackDecision = makeFallbackDecision(rangeError, visionCallResult.metadata, imageValidation)
+
+    return {
+      success: false,
+      error: 'Vision model returned implausible score',
+      userMessage: 'Image analysis returned an unexpected score. Please try different images.',
+      fallbackReason: 'vision_validation_failed',
+      runtimeMetadata: visionCallResult.metadata,
+      imageValidation,
+      visionErrors,
+      fallbackMetadata: createFallbackMetadata(fallbackDecision, visionErrors, imageValidation, visionCallResult.metadata),
+    }
+  }
+
+  // Log any minor validation issues as warnings
+  if (outputValidation.issues.length > 0 && outputValidation.severity !== 'none') {
+    console.warn('Vision output has minor issues:', outputValidation.issues)
+  }
+
+  // Success!
+  return {
+    success: true,
+    output: visionOutput,
+    processingTimeMs: Date.now() - startTime,
+    modelUsed: VISION_MODEL,
+    runtimeMetadata: visionCallResult.metadata,
+    imageValidation,
   }
 }
 

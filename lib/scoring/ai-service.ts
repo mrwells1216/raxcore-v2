@@ -11,7 +11,9 @@ import type {
   CaptureDevice, 
   SourceType,
   TwoPassScoringMetadata,
-  SelfCheckSummary 
+  SelfCheckSummary,
+  FallbackMetadataInfo,
+  RuntimeMetadataInfo
 } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES, ANATOMICAL_REFERENCES, CONFIDENCE_THRESHOLDS } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/server'
@@ -28,6 +30,7 @@ import { computeLearningCorrection, toSimpleLearningSummary } from './learning-c
 import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } from './measurement-correction'
 import { runSelfCheck, type SelfCheckResult } from './self-check'
 import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } from './second-pass'
+import { applyFallbackPenalties, type FallbackMetadata } from './fallback-handler'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
 import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary } from '@/lib/types'
 
@@ -82,6 +85,16 @@ export interface ScoringOutput {
   measurementCorrectionSummary?: MeasurementCorrectionSummary
   // Phase 23: Two-pass scoring metadata
   twoPassMetadata?: TwoPassScoringMetadata
+  // Phase 24: Runtime/fallback metadata
+  fallbackMetadata?: FallbackMetadataInfo | null
+  runtimeMetadata?: RuntimeMetadataInfo | null
+  imageValidationSummary?: {
+    valid: boolean
+    validCount: number
+    totalCount: number
+    warningsOnly: boolean
+    issueCount: number
+  } | null
 }
 
 // Learning summary exposed to UI
@@ -563,6 +576,7 @@ function calculateScores(measurements: Measurements) {
 
 /**
  * Main scoring function - attempts vision scoring first, falls back to heuristics
+ * Phase 24: Enhanced with runtime hardening and detailed fallback metadata
  */
 export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const startTime = Date.now()
@@ -570,7 +584,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const angleDiversity = calculateAngleDiversity(angles)
   const stateCalibration = getStateCalibration(input.state)
 
-  // Try vision scoring first
+  // Try vision scoring first (with Phase 24 runtime hardening)
   const visionResult = await scoreWithVision({
     images: input.images,
     state: input.state,
@@ -584,7 +598,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   if (visionResult.success) {
     // Vision scoring succeeded - use vision measurements with Phase 10 learning
     // Pass explicit calibration profile if provided, otherwise uses active profile
-    return buildVisionScoringOutput(
+    const output = await buildVisionScoringOutput(
       input,
       visionResult,
       input.calibrationProfile,
@@ -592,13 +606,46 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
       angleDiversity,
       startTime
     )
+    
+    // Phase 24: Add runtime metadata to successful output
+    return {
+      ...output,
+      runtimeMetadata: {
+        totalAttempts: visionResult.runtimeMetadata.totalAttempts,
+        successfulAttempt: visionResult.runtimeMetadata.successfulAttempt,
+        totalTimeMs: visionResult.runtimeMetadata.totalTimeMs,
+        retryDelaysMs: visionResult.runtimeMetadata.retryDelaysMs,
+        timedOut: visionResult.runtimeMetadata.timedOut,
+        wasRetried: visionResult.runtimeMetadata.wasRetried,
+      },
+      imageValidationSummary: {
+        valid: visionResult.imageValidation.valid,
+        validCount: visionResult.imageValidation.validImageCount,
+        totalCount: visionResult.imageValidation.totalImageCount,
+        warningsOnly: visionResult.imageValidation.warningsOnly,
+        issueCount: visionResult.imageValidation.issues.length,
+      },
+      fallbackMetadata: null, // No fallback used
+    }
   }
 
   // Vision failed - fall back to heuristic scoring
   // Use legacy learning for heuristic path
   const learned = await getLearnedAdjustment(input, angleDiversity)
-  console.warn('Vision scoring failed, using heuristic fallback:', visionResult.error)
-  return buildHeuristicScoringOutput(
+  
+  // Phase 24: Log detailed failure information
+  console.warn('Vision scoring failed, using heuristic fallback:', {
+    error: visionResult.error,
+    fallbackReason: visionResult.fallbackReason,
+    userMessage: visionResult.userMessage,
+    attempts: visionResult.runtimeMetadata?.totalAttempts || 0,
+    timeMs: visionResult.runtimeMetadata?.totalTimeMs || 0,
+    timedOut: visionResult.runtimeMetadata?.timedOut || false,
+    imageValidation: visionResult.imageValidation?.summary || 'N/A',
+  })
+
+  // Build heuristic output with fallback metadata
+  const heuristicOutput = buildHeuristicScoringOutput(
     input,
     learned,
     stateCalibration,
@@ -606,6 +653,50 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     startTime,
     visionResult.fallbackReason
   )
+
+  // Phase 24: Convert fallback metadata to storable format
+  const fallbackMetadata: FallbackMetadataInfo = {
+    usedFallback: true,
+    fallbackReason: visionResult.fallbackMetadata.fallbackReason,
+    fallbackStrategy: visionResult.fallbackMetadata.fallbackStrategy,
+    visionErrorTypes: visionResult.visionErrors.map(e => e.type),
+    imageValidationIssues: visionResult.imageValidation?.issues.map(i => ({
+      imageIndex: i.imageIndex,
+      issueType: i.issueType,
+      severity: i.severity,
+      message: i.message,
+      recoverable: i.recoverable,
+    })) || [],
+    validImageCount: visionResult.imageValidation?.validImageCount || 0,
+    totalImageCount: visionResult.imageValidation?.totalImageCount || input.images.length,
+    confidencePenalty: visionResult.fallbackMetadata.confidencePenalty,
+    errorBandWidening: visionResult.fallbackMetadata.errorBandWidening,
+    summary: visionResult.fallbackMetadata.summary,
+    timestamp: visionResult.fallbackMetadata.timestamp,
+  }
+
+  // Apply fallback penalties to the output
+  const penalizedOutput = applyFallbackPenalties(heuristicOutput, visionResult.fallbackMetadata)
+
+  return {
+    ...penalizedOutput,
+    fallbackMetadata,
+    runtimeMetadata: visionResult.runtimeMetadata ? {
+      totalAttempts: visionResult.runtimeMetadata.totalAttempts,
+      successfulAttempt: visionResult.runtimeMetadata.successfulAttempt,
+      totalTimeMs: visionResult.runtimeMetadata.totalTimeMs,
+      retryDelaysMs: visionResult.runtimeMetadata.retryDelaysMs,
+      timedOut: visionResult.runtimeMetadata.timedOut,
+      wasRetried: visionResult.runtimeMetadata.wasRetried,
+    } : null,
+    imageValidationSummary: visionResult.imageValidation ? {
+      valid: visionResult.imageValidation.valid,
+      validCount: visionResult.imageValidation.validImageCount,
+      totalCount: visionResult.imageValidation.totalImageCount,
+      warningsOnly: visionResult.imageValidation.warningsOnly,
+      issueCount: visionResult.imageValidation.issues.length,
+    } : null,
+  }
 }
 
 /**
