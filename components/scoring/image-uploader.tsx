@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Upload, ImagePlus, AlertCircle } from 'lucide-react'
+import { Upload, ImagePlus, AlertCircle, Eye, Camera, Sun, Focus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
@@ -172,6 +172,9 @@ export function ImageUploader({ onUpload }: ImageUploaderProps) {
         </div>
       </div>
 
+      {/* Upload Guidance Tips */}
+      <UploadGuidanceTips />
+
       {/* Error message */}
       {error && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
@@ -179,6 +182,35 @@ export function ImageUploader({ onUpload }: ImageUploaderProps) {
           {error}
         </div>
       )}
+    </div>
+  )
+}
+
+// Upload guidance tips component
+function UploadGuidanceTips() {
+  const tips = [
+    { icon: Camera, text: 'Include front + side angles', highlight: true },
+    { icon: Eye, text: 'Keep both ears visible', highlight: true },
+    { icon: Focus, text: 'Sharp, in-focus photos', highlight: false },
+    { icon: Sun, text: 'Good lighting, avoid shadows', highlight: false },
+  ]
+
+  return (
+    <div className="p-3 rounded-lg bg-secondary/30 border border-border">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+        For best results
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {tips.map((tip, i) => (
+          <div 
+            key={i}
+            className={`flex items-center gap-2 text-xs ${tip.highlight ? 'text-primary font-medium' : 'text-muted-foreground'}`}
+          >
+            <tip.icon className="h-3.5 w-3.5 shrink-0" />
+            <span>{tip.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

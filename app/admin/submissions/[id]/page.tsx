@@ -14,7 +14,8 @@ import {
   TrendingDown,
   Minus,
   AlertTriangle,
-  Eye
+  Eye,
+  Camera
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
-import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice } from '@/lib/types'
+import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary } from '@/lib/types'
 import { 
   createBuck, 
   addBuckImages, 
@@ -26,6 +26,17 @@ export async function POST(request: Request) {
     const nickname = formData.get('nickname') as string | null
     const location = formData.get('location') as string | null
     const harvestDate = formData.get('harvest_date') as string | null
+    const intakeQualityRaw = formData.get('intake_quality') as string | null
+    
+    // Parse intake quality summary if provided
+    let intakeQuality: IntakeQualitySummary | null = null
+    if (intakeQualityRaw) {
+      try {
+        intakeQuality = JSON.parse(intakeQualityRaw)
+      } catch {
+        // Ignore parse errors
+      }
+    }
 
     if (!state || !rackType) {
       return NextResponse.json({ error: 'State and rack type are required' }, { status: 400 })
@@ -88,6 +99,32 @@ export async function POST(request: Request) {
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
     })
 
+    // Apply intake quality adjustments to confidence and error bands
+    let adjustedConfidence = scoringResult.confidencePercent
+    let adjustedErrorBandLow = scoringResult.errorBandLow
+    let adjustedErrorBandHigh = scoringResult.errorBandHigh
+    
+    if (intakeQuality) {
+      // Apply confidence adjustment from intake quality
+      adjustedConfidence = Math.max(15, Math.min(95, adjustedConfidence + intakeQuality.confidenceAdjustment))
+      
+      // Apply error band widening
+      if (intakeQuality.errorBandWidening > 1.0) {
+        const midpoint = scoringResult.predictedGross
+        const originalRange = scoringResult.errorBandHigh - scoringResult.errorBandLow
+        const newRange = originalRange * intakeQuality.errorBandWidening
+        adjustedErrorBandLow = midpoint - (newRange / 2)
+        adjustedErrorBandHigh = midpoint + (newRange / 2)
+      }
+      
+      // Add intake quality factors to confidence explanation
+      if (intakeQuality.weakestFactors.length > 0) {
+        scoringResult.confidenceExplanation.push(
+          `Image quality factors: ${intakeQuality.weakestFactors.join(', ')}`
+        )
+      }
+    }
+
     // Get active model version
     const model = await getActiveModelVersion()
 
@@ -149,11 +186,11 @@ export async function POST(request: Request) {
       estimatedScore: scoringResult.predictedGross,
       netScore: scoringResult.predictedNet,
       scoreRange: {
-        low: scoringResult.errorBandLow,
-        high: scoringResult.errorBandHigh
+        low: adjustedErrorBandLow,
+        high: adjustedErrorBandHigh
       },
-      confidence: scoringResult.confidencePercent >= 75 ? 'high' : scoringResult.confidencePercent >= 50 ? 'medium' : 'low',
-      confidencePercent: scoringResult.confidencePercent,
+      confidence: adjustedConfidence >= 75 ? 'high' : adjustedConfidence >= 50 ? 'medium' : 'low',
+      confidencePercent: adjustedConfidence,
       measurements: scoringResult.measurements,
       landmarks: scoringResult.landmarks,
       stateCalibration: scoringResult.stateCalibration,
@@ -175,6 +212,8 @@ export async function POST(request: Request) {
       confidenceReliability: scoringResult.confidenceReliability,
       // Phase 10: Extended learning data (for admin)
       extendedLearningSummary: scoringResult.extendedLearningSummary,
+      // Phase 15: Intake quality
+      intakeQuality: intakeQuality || null,
     })
   } catch (error) {
     console.error('Scoring API error:', error)

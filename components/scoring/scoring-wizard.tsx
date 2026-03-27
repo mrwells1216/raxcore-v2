@@ -11,7 +11,9 @@ import { ImageUploader } from './image-uploader'
 import { ScoringForm } from './scoring-form'
 import { ImagePreviewGrid } from './image-preview-grid'
 import { ImageGuidance } from './image-guidance'
-import type { ScoringResult, ScoringFormData, AngleType } from '@/lib/types'
+import { IntakeQualityDisplay } from './intake-quality-display'
+import { computeIntakeQuality, getBestNextPhoto, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
+import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
 
 interface CapturedImage {
@@ -40,22 +42,61 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
   const [images, setImages] = useState<CapturedImage[]>([])
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [intakeQuality, setIntakeQuality] = useState<IntakeQualityAssessment | null>(null)
+  const [showQualityWarning, setShowQualityWarning] = useState(false)
+
+  // Compute intake quality whenever images change
+  const updateIntakeQuality = useCallback((currentImages: CapturedImage[], earsVisible?: boolean, sourceType?: string) => {
+    if (currentImages.length === 0) {
+      setIntakeQuality(null)
+      return
+    }
+    
+    const assessment = computeIntakeQuality({
+      images: currentImages.map(img => ({
+        angleType: img.angleType,
+        width: img.width,
+        height: img.height,
+      })),
+      earsFullyVisible: earsVisible,
+      sourceType: sourceType as any,
+    })
+    
+    setIntakeQuality(assessment)
+    
+    // Show warning if quality is poor and user tries to proceed
+    if (assessment.tier === 'poor' && currentImages.length >= 1) {
+      setShowQualityWarning(true)
+    }
+  }, [])
 
   const progress = ((step + 1) / STEPS.length) * 100
 
   const handleImageCapture = useCallback((image: CapturedImage) => {
-    setImages(prev => [...prev, image])
+    setImages(prev => {
+      const newImages = [...prev, image]
+      updateIntakeQuality(newImages)
+      return newImages
+    })
     toast.success(`${image.angleType} image added`)
-  }, [])
+  }, [updateIntakeQuality])
 
   const handleImagesUpload = useCallback((newImages: CapturedImage[]) => {
-    setImages(prev => [...prev, ...newImages])
+    setImages(prev => {
+      const updated = [...prev, ...newImages]
+      updateIntakeQuality(updated)
+      return updated
+    })
     toast.success(`${newImages.length} image(s) added`)
-  }, [])
+  }, [updateIntakeQuality])
 
   const handleRemoveImage = useCallback((id: string) => {
-    setImages(prev => prev.filter(img => img.id !== id))
-  }, [])
+    setImages(prev => {
+      const updated = prev.filter(img => img.id !== id)
+      updateIntakeQuality(updated)
+      return updated
+    })
+  }, [updateIntakeQuality])
 
   const handleFormSubmit = (data: ScoringFormData) => {
     setFormData(data)
@@ -63,6 +104,19 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
   }
 
   const handleAnalyze = async (data: ScoringFormData) => {
+    // Re-compute intake quality with form data
+    const finalQuality = computeIntakeQuality({
+      images: images.map(img => ({
+        angleType: img.angleType,
+        width: img.width,
+        height: img.height,
+      })),
+      earsFullyVisible: data.ears_fully_visible,
+      sourceType: data.source_type,
+      captureDevice: data.capture_device,
+    })
+    setIntakeQuality(finalQuality)
+
     setIsAnalyzing(true)
     setStep(2)
 
@@ -80,6 +134,21 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
         apiFormData.append('ears_fully_visible', String(data.ears_fully_visible))
       }
       if (data.notes) apiFormData.append('notes', data.notes)
+      
+      // Include intake quality summary
+      if (finalQuality) {
+        const qualitySummary: IntakeQualitySummary = {
+          tier: finalQuality.tier,
+          overallScore: finalQuality.overallScore,
+          strongestFactors: finalQuality.strongestFactors,
+          weakestFactors: finalQuality.weakestFactors,
+          confidenceAdjustment: finalQuality.confidenceAdjustment,
+          errorBandWidening: finalQuality.errorBandWidening,
+          recommendations: finalQuality.recommendations,
+          summary: finalQuality.summary,
+        }
+        apiFormData.append('intake_quality', JSON.stringify(qualitySummary))
+      }
 
       // Add images
       images.forEach((img, index) => {
@@ -111,7 +180,8 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
     }
   }
 
-  const canProceedToDetails = images.length >= 1
+  const canProceedToDetails = images.length >= 1 && (intakeQuality?.canProceed ?? true)
+  const bestNextPhoto = intakeQuality ? getBestNextPhoto(intakeQuality) : null
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -159,12 +229,14 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
               </TabsContent>
             </Tabs>
 
-            {/* Image Guidance */}
-            <ImageGuidance 
-              capturedAngles={images.map(img => img.angleType)}
-              showTips={images.length === 0}
-              compact={images.length > 0}
-            />
+            {/* Image Guidance - show when no images */}
+            {images.length === 0 && (
+              <ImageGuidance 
+                capturedAngles={[]}
+                showTips={true}
+                compact={false}
+              />
+            )}
 
             {/* Preview Grid */}
             {images.length > 0 && (
@@ -172,6 +244,42 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
                 images={images} 
                 onRemove={handleRemoveImage}
               />
+            )}
+
+            {/* Intake Quality Assessment - show when images exist */}
+            {intakeQuality && images.length > 0 && (
+              <IntakeQualityDisplay 
+                quality={{
+                  tier: intakeQuality.tier,
+                  overallScore: intakeQuality.overallScore,
+                  strongestFactors: intakeQuality.strongestFactors,
+                  weakestFactors: intakeQuality.weakestFactors,
+                  confidenceAdjustment: intakeQuality.confidenceAdjustment,
+                  errorBandWidening: intakeQuality.errorBandWidening,
+                  recommendations: intakeQuality.recommendations,
+                  summary: intakeQuality.summary,
+                }}
+                showRecommendations={true}
+                compact={true}
+                onAddPhoto={(angle) => {
+                  // Switch to camera mode with suggested angle
+                  setMode('camera')
+                  toast.info(angle ? `Add a ${angle} angle photo` : 'Add another photo')
+                }}
+              />
+            )}
+
+            {/* Best Next Photo Suggestion - prominent when quality is fair/poor */}
+            {bestNextPhoto && (intakeQuality?.tier === 'fair' || intakeQuality?.tier === 'poor') && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                  <Camera className="h-4 w-4" />
+                  <span className="text-sm font-medium">{bestNextPhoto.message}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 ml-6">
+                  {bestNextPhoto.reason}
+                </p>
+              </div>
             )}
 
             {/* Navigation */}

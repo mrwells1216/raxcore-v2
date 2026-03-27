@@ -15,14 +15,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Separator } from '@/components/ui/separator'
 import { GroundTruthForm } from './ground-truth-form'
 import { ConfidenceIndicator, ConfidenceExplanation, ConfidenceBadge } from './confidence-indicator'
+import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-display'
 import { BuckLocationLink } from '@/components/map/buck-location-link'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
-import type { ScoringResult, ScoringFormData, GroundTruthFormData } from '@/lib/types'
+import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 interface ScoringResultsProps {
-  result: ScoringResult
+  result: ScoringResult & { intakeQuality?: IntakeQualitySummary | null }
   formData: ScoringFormData
   onReset: () => void
 }
@@ -78,6 +79,12 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             </div>
             <div className="flex flex-col items-end gap-1.5">
               <ConfidenceBadge confidence={confidence} />
+              {result.intakeQuality && (
+                <IntakeQualityBadge 
+                  tier={result.intakeQuality.tier} 
+                  score={result.intakeQuality.overallScore} 
+                />
+              )}
               <Badge variant="secondary" className="text-xs gap-1">
                 {result.scoringMethod === 'vision' ? (
                   <>
@@ -186,6 +193,15 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           </div>
         </CardContent>
       </Card>
+
+      {/* Image Quality Summary - Phase 15 */}
+      {result.intakeQuality && (
+        <IntakeQualityDisplay 
+          quality={result.intakeQuality}
+          showRecommendations={result.intakeQuality.tier === 'fair' || result.intakeQuality.tier === 'poor'}
+          compact={result.intakeQuality.tier === 'excellent' || result.intakeQuality.tier === 'good'}
+        />
+      )}
 
       {/* Measurements Breakdown */}
       <Collapsible open={showMeasurements} onOpenChange={setShowMeasurements}>

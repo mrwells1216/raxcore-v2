@@ -710,3 +710,31 @@ export interface ErrorDistribution {
   count: number
   percent: number
 }
+
+// ========================================
+// INTAKE QUALITY TYPES (Phase 15)
+// ========================================
+
+export type IntakeQualityTier = 'excellent' | 'good' | 'fair' | 'poor'
+
+export interface IntakeQualitySummary {
+  tier: IntakeQualityTier
+  overallScore: number
+  strongestFactors: string[]
+  weakestFactors: string[]
+  confidenceAdjustment: number
+  errorBandWidening: number
+  recommendations: {
+    type: 'add_angle' | 'retake' | 'improve_quality'
+    priority: 'high' | 'medium' | 'low'
+    angle?: AngleType
+    message: string
+    reason: string
+  }[]
+  summary: string
+}
+
+// Extended prediction with intake quality
+export interface PredictionWithIntakeQuality extends Prediction {
+  intake_quality?: IntakeQualitySummary | null
+}
