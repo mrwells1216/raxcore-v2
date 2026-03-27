@@ -45,12 +45,16 @@ export async function POST(request: NextRequest) {
       runType = 'single_model',
       primaryModelVersionId,
       comparisonModelVersionIds = [],
+      primaryCalibrationProfileId,
+      comparisonCalibrationProfileIds = [],
       filters,
     } = body as {
       runName: string
       runType?: 'single_model' | 'model_comparison'
       primaryModelVersionId?: string
       comparisonModelVersionIds?: string[]
+      primaryCalibrationProfileId?: string
+      comparisonCalibrationProfileIds?: string[]
       filters?: BulkValidationFilters
     }
 
@@ -84,6 +88,8 @@ export async function POST(request: NextRequest) {
       runType,
       primaryModelVersionId,
       comparisonModelVersionIds,
+      primaryCalibrationProfileId,
+      comparisonCalibrationProfileIds,
       filters,
     })
 

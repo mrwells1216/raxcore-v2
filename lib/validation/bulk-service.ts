@@ -22,7 +22,11 @@ export interface CreateBulkRunParams {
   runType: 'single_model' | 'model_comparison'
   primaryModelVersionId?: string | null
   comparisonModelVersionIds?: string[]
+  primaryCalibrationProfileId?: string | null
+  comparisonCalibrationProfileIds?: string[]
   filters?: BulkValidationFilters
+  // Optional: pre-snapshotted example IDs (if not provided, will be computed from filters)
+  exampleIds?: string[]
 }
 
 export async function createBulkValidationRun(
@@ -33,6 +37,13 @@ export async function createBulkValidationRun(
   // Build filter snapshot string for human readability
   const filterSnapshot = buildFilterSnapshot(params.filters)
 
+  // Snapshot example IDs at creation time for reproducibility
+  let exampleIds = params.exampleIds
+  if (!exampleIds) {
+    const examples = await getFilteredTrainingExamples(params.filters)
+    exampleIds = examples.map(e => e.id)
+  }
+
   const { data, error } = await supabase
     .from('bulk_validation_runs')
     .insert({
@@ -41,9 +52,12 @@ export async function createBulkValidationRun(
       status: 'pending',
       primary_model_version_id: params.primaryModelVersionId || null,
       comparison_model_version_ids: params.comparisonModelVersionIds || [],
+      primary_calibration_profile_id: params.primaryCalibrationProfileId || null,
+      comparison_calibration_profile_ids: params.comparisonCalibrationProfileIds || [],
       filters: params.filters || null,
       filter_snapshot: filterSnapshot,
-      total_examples: 0,
+      example_ids: exampleIds,
+      total_examples: exampleIds.length,
       processed_examples: 0,
     })
     .select()
@@ -679,6 +693,90 @@ export async function getFilteredTrainingExamples(
   }
 
   return filtered
+}
+
+/**
+ * Get training examples by their IDs (for reproducible bulk runs).
+ * Returns full metadata for each example.
+ */
+export async function getTrainingExamplesByIds(
+  exampleIds: string[]
+): Promise<{
+  id: string
+  buck_id: string | null
+  ground_truth_score: number
+  ground_truth_net: number | null
+  image_urls: string[]
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  capture_device: string | null
+  frame_size: string | null
+  ears_fully_visible: boolean | null
+  angle_tags: string[] | null
+}[]> {
+  if (exampleIds.length === 0) return []
+  
+  const supabase = await createClient()
+
+  const { data: examples, error } = await supabase
+    .from('training_examples')
+    .select(`
+      id,
+      buck_id,
+      ground_truth_score,
+      ground_truth_net,
+      image_urls,
+      frame_size,
+      ears_fully_visible,
+      angle_tags
+    `)
+    .in('id', exampleIds)
+
+  if (error) throw new Error(`Failed to get examples by IDs: ${error.message}`)
+  if (!examples || examples.length === 0) return []
+
+  // Get buck details
+  const buckIds = examples.filter((e) => e.buck_id).map((e) => e.buck_id!)
+  
+  let bucksMap = new Map<string, { 
+    state: string | null
+    rack_type: string | null
+    source_type: string | null
+    capture_device: string | null 
+  }>()
+  
+  if (buckIds.length > 0) {
+    const { data: bucks } = await supabase
+      .from('bucks')
+      .select('id, state, rack_type, source_type, capture_device')
+      .in('id', buckIds)
+
+    bucksMap = new Map(bucks?.map((b) => [b.id, { 
+      state: b.state, 
+      rack_type: b.rack_type, 
+      source_type: b.source_type,
+      capture_device: b.capture_device || null,
+    }]) || [])
+  }
+
+  return examples.map((e) => {
+    const buck = e.buck_id ? bucksMap.get(e.buck_id) : null
+    return {
+      id: e.id,
+      buck_id: e.buck_id,
+      ground_truth_score: e.ground_truth_score,
+      ground_truth_net: e.ground_truth_net || null,
+      image_urls: e.image_urls || [],
+      state: buck?.state || null,
+      rack_type: buck?.rack_type || null,
+      source_type: buck?.source_type || null,
+      capture_device: buck?.capture_device || null,
+      frame_size: e.frame_size || null,
+      ears_fully_visible: e.ears_fully_visible ?? null,
+      angle_tags: e.angle_tags || null,
+    }
+  })
 }
 
 // ============================================================================

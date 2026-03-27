@@ -25,11 +25,12 @@ import {
 } from '@/components/ui/accordion'
 import { FlaskConical, GitCompare, Filter, Plus, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import type { BulkValidationFilters, RackType, SourceType, CaptureDevice } from '@/lib/types'
+import type { BulkValidationFilters, RackType, SourceType, CaptureDevice, CalibrationProfile } from '@/lib/types'
 import type { ModelVersionRecord } from '@/lib/storage/service'
 
 interface CreateBulkRunProps {
   modelVersions: ModelVersionRecord[]
+  calibrationProfiles?: CalibrationProfile[]
 }
 
 const US_STATES = [
@@ -44,7 +45,7 @@ const RACK_TYPES: RackType[] = ['typical', 'non-typical']
 const SOURCE_TYPES: SourceType[] = ['live_deer', 'mounted_photo', 'european_mount', 'trail_cam', 'harvest_photo', 'other']
 const CAPTURE_DEVICES: CaptureDevice[] = ['iphone', 'android', 'digital_camera', 'photo_of_photo', 'vintage_photo', 'unknown']
 
-export function CreateBulkRun({ modelVersions }: CreateBulkRunProps) {
+export function CreateBulkRun({ modelVersions, calibrationProfiles = [] }: CreateBulkRunProps) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -53,6 +54,8 @@ export function CreateBulkRun({ modelVersions }: CreateBulkRunProps) {
   const [runType, setRunType] = useState<'single_model' | 'model_comparison'>('single_model')
   const [primaryModelVersionId, setPrimaryModelVersionId] = useState<string>('')
   const [comparisonModelVersionIds, setComparisonModelVersionIds] = useState<string[]>([])
+  const [primaryCalibrationProfileId, setPrimaryCalibrationProfileId] = useState<string>('')
+  const [comparisonCalibrationProfileIds, setComparisonCalibrationProfileIds] = useState<string[]>([])
 
   // Filters
   const [filters, setFilters] = useState<BulkValidationFilters>({
@@ -121,6 +124,8 @@ export function CreateBulkRun({ modelVersions }: CreateBulkRunProps) {
           runType,
           primaryModelVersionId: primaryModelVersionId || null,
           comparisonModelVersionIds: runType === 'model_comparison' ? comparisonModelVersionIds : [],
+          primaryCalibrationProfileId: primaryCalibrationProfileId || null,
+          comparisonCalibrationProfileIds: runType === 'model_comparison' ? comparisonCalibrationProfileIds : [],
           filters: activeFilters,
         }),
       })

@@ -15,9 +15,16 @@ CREATE TABLE IF NOT EXISTS bulk_validation_runs (
   primary_model_version_id UUID REFERENCES model_versions(id),
   comparison_model_version_ids UUID[] DEFAULT ARRAY[]::UUID[],
   
+  -- Calibration profile snapshots for reproducibility
+  primary_calibration_profile_id UUID REFERENCES calibration_profiles(id),
+  comparison_calibration_profile_ids UUID[] DEFAULT ARRAY[]::UUID[],
+  
   -- Filters used for this run
   filters JSONB,
   filter_snapshot TEXT, -- Human-readable snapshot of filters at run time
+  
+  -- Snapshotted example IDs for reproducibility (source of truth for execution)
+  example_ids UUID[] DEFAULT NULL,
   
   -- Progress tracking
   total_examples INTEGER NOT NULL DEFAULT 0,

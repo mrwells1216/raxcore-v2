@@ -15,7 +15,8 @@ import {
 import { normalizeMeasurements, type NormalizationResult } from './normalization'
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
-import { computeLearningCorrection, toSimpleLearningSummary, getActiveCalibrationProfile } from './learning-correction'
+import { computeLearningCorrection, toSimpleLearningSummary } from './learning-correction'
+import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
 import type { ExtendedLearningSummary, CalibrationProfile } from '@/lib/types'
 
 export interface ImageAnalysisInput {
@@ -34,6 +35,9 @@ export interface ScoringInput {
   captureDevice?: CaptureDevice | string
   harvestYear?: number
   mainFramePoints?: number
+  // Phase 20: Optional explicit calibration profile for model comparison
+  // If not provided, uses the active calibration profile
+  calibrationProfile?: CalibrationProfile | null
 }
 
 export interface ScoringOutput {
@@ -563,9 +567,11 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
 
   if (visionResult.success) {
     // Vision scoring succeeded - use vision measurements with Phase 10 learning
+    // Pass explicit calibration profile if provided, otherwise uses active profile
     return buildVisionScoringOutput(
       input,
       visionResult,
+      input.calibrationProfile,
       stateCalibration,
       angleDiversity,
       startTime
@@ -600,6 +606,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
 async function buildVisionScoringOutput(
   input: ScoringInput,
   visionResult: VisionScoringResult,
+  explicitCalibrationProfile: CalibrationProfile | null | undefined,
   stateCalibration: StateCalibration,
   angleDiversity: number,
   startTime: number
@@ -632,8 +639,8 @@ async function buildVisionScoringOutput(
     consistencyResult
   )
 
-  // Phase 20: Fetch active calibration profile for learning corrections
-  const calibrationProfile = await getActiveCalibrationProfile()
+  // Phase 20: Use explicit calibration profile if provided, otherwise fetch active profile
+  const calibrationProfile = explicitCalibrationProfile ?? await getActiveCalibrationProfile()
 
   // STAGE 5: Phase 10 Learning Correction - similarity-weighted verified examples
   // Now includes calibration profile for weight/cap adjustments

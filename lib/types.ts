@@ -815,9 +815,14 @@ export interface BulkValidationRun {
   // Model versions being compared
   primary_model_version_id: string | null
   comparison_model_version_ids: string[]
+  // Calibration profile snapshot for reproducibility
+  primary_calibration_profile_id: string | null
+  comparison_calibration_profile_ids: string[]
   // Filters used
   filters: BulkValidationFilters | null
   filter_snapshot: string | null // JSON snapshot of filter state at run time
+  // Snapshotted example IDs for reproducibility (source of truth for execution)
+  example_ids: string[] | null
   // Progress
   total_examples: number
   processed_examples: number

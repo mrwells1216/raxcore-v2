@@ -7,10 +7,12 @@ import {
   createBulkValidationResult,
   getBulkValidationResults,
   getFilteredTrainingExamples,
+  getTrainingExamplesByIds,
   calculateModelRunMetrics,
   calculateImprovementMetrics,
   getModelVersionInfo,
 } from '@/lib/validation/bulk-service'
+import { getCalibrationProfileById } from '@/lib/calibration/utils'
 import { getBuckImages } from '@/lib/storage/service'
 import { scoreBuck } from '@/lib/scoring/ai-service'
 import type { BulkValidationFilters, ModelPredictionResult, BulkRunSummaryMetrics, RackType, SourceType } from '@/lib/types'
@@ -42,18 +44,42 @@ export async function POST(
     // Mark as running
     await updateBulkRunStatus(id, 'running')
 
-    // Get filtered training examples
-    const examples = await getFilteredTrainingExamples(run.filters as BulkValidationFilters | undefined)
+    // Use snapshotted example IDs if available (reproducibility), otherwise fall back to filter query
+    let examples: Awaited<ReturnType<typeof getTrainingExamplesByIds>>
+    
+    if (run.example_ids && run.example_ids.length > 0) {
+      // Use snapshotted IDs for reproducibility
+      examples = await getTrainingExamplesByIds(run.example_ids)
+    } else {
+      // Legacy support: fall back to filter query for older runs without snapshotted IDs
+      const filteredExamples = await getFilteredTrainingExamples(run.filters as BulkValidationFilters | undefined)
+      examples = filteredExamples.map(e => ({
+        ...e,
+        ground_truth_net: null,
+        capture_device: null,
+        frame_size: null,
+        ears_fully_visible: null,
+        angle_tags: null,
+      }))
+    }
 
     if (examples.length === 0) {
-      await updateBulkRunStatus(id, 'failed', 'No training examples match the filters')
+      await updateBulkRunStatus(id, 'failed', 'No training examples found for this run')
       return NextResponse.json(
-        { success: false, error: 'No training examples match the filters' },
+        { success: false, error: 'No training examples found for this run' },
         { status: 400 }
       )
     }
 
     await updateBulkRunProgress(id, examples.length, 0)
+    
+    // Load calibration profiles for model comparison
+    const primaryCalibration = run.primary_calibration_profile_id 
+      ? await getCalibrationProfileById(run.primary_calibration_profile_id)
+      : null
+    const comparisonCalibrations = await Promise.all(
+      (run.comparison_calibration_profile_ids || []).map((cpId: string) => getCalibrationProfileById(cpId))
+    )
 
     // Get model version info
     const primaryModelInfo = await getModelVersionInfo(run.primary_model_version_id)
@@ -93,16 +119,22 @@ export async function POST(
         // Primary model (or current active)
         try {
           const primaryStartTime = Date.now()
+          
+          // Use real metadata from the training example when available
           const primaryResult = await scoreBuck({
             images: imageUrls.map((url, i) => ({
               imageUrl: url,
-              angleType: i === 0 ? 'front' : 'other',
+              angleType: example.angle_tags?.[i] || (i === 0 ? 'front' : 'other'),
               width: 1024,
               height: 1024,
             })),
-            state: example.state || 'TX',
+            state: example.state || undefined, // Let scoring use defaults if not available
             rackType: (example.rack_type || 'typical') as RackType,
-            earsFullyVisible: true,
+            earsFullyVisible: example.ears_fully_visible ?? true,
+            sourceType: example.source_type || undefined,
+            captureDevice: example.capture_device || undefined,
+            // Pass calibration profile for this model version
+            calibrationProfile: primaryCalibration,
           })
           const primaryProcessingTime = Date.now() - primaryStartTime
 
@@ -142,20 +174,24 @@ export async function POST(
         if (run.run_type === 'model_comparison') {
           for (let i = 0; i < comparisonModelInfos.length; i++) {
             const compInfo = comparisonModelInfos[i]
+            const compCalibration = comparisonCalibrations[i]
             try {
               const compStartTime = Date.now()
-              // Note: In a real implementation, you would switch to the specific model version
-              // For now, we use the same scoring but track it separately
+              // Score with the comparison model's calibration profile
               const compResult = await scoreBuck({
                 images: imageUrls.map((url, idx) => ({
                   imageUrl: url,
-                  angleType: idx === 0 ? 'front' : 'other',
+                  angleType: example.angle_tags?.[idx] || (idx === 0 ? 'front' : 'other'),
                   width: 1024,
                   height: 1024,
                 })),
-                state: example.state || 'TX',
+                state: example.state || undefined,
                 rackType: (example.rack_type || 'typical') as RackType,
-                earsFullyVisible: true,
+                earsFullyVisible: example.ears_fully_visible ?? true,
+                sourceType: example.source_type || undefined,
+                captureDevice: example.capture_device || undefined,
+                // Pass the comparison model's calibration profile
+                calibrationProfile: compCalibration,
               })
               const compProcessingTime = Date.now() - compStartTime
 

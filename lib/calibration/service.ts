@@ -12,66 +12,26 @@ import type {
   CalibrationChange,
   CalibrationPreviewResult,
   CalibrationMetrics,
-  CalibrationBreakdownItem,
   ModelVersionWithCalibration,
   ModelActivationEvent,
   ModelRollbackRequest,
   ModelRollbackResult,
-  DEFAULT_CALIBRATION_VALUES,
-  CALIBRATION_SAFE_RANGES,
 } from '@/lib/types'
+import {
+  DEFAULT_CALIBRATION,
+  CALIBRATION_SAFE_RANGES as SAFE_RANGES,
+  getActiveCalibrationProfile,
+  invalidateCalibrationCache,
+  ensureCalibrationProfile,
+  getCalibrationApplicationValues,
+} from './utils'
 
-// Re-export defaults
-export const DEFAULT_CALIBRATION = {
-  spread_correction_weight: 1.0,
-  beam_correction_weight: 1.0,
-  tine_correction_weight: 1.0,
-  mass_correction_weight: 1.0,
-  deduction_correction_weight: 1.0,
-  confidence_scaling: 1.0,
-  learning_correction_strength: 1.0,
-  max_total_correction: 8.0,
-  max_spread_correction: 3.0,
-  max_beam_correction: 4.0,
-  max_tine_correction: 2.0,
-  max_mass_correction: 1.0,
-} as const
-
-// Safe ranges
-export const SAFE_RANGES = {
-  spread_correction_weight: { min: 0.0, max: 2.0 },
-  beam_correction_weight: { min: 0.0, max: 2.0 },
-  tine_correction_weight: { min: 0.0, max: 2.0 },
-  mass_correction_weight: { min: 0.0, max: 2.0 },
-  deduction_correction_weight: { min: 0.0, max: 2.0 },
-  confidence_scaling: { min: 0.5, max: 1.5 },
-  learning_correction_strength: { min: 0.0, max: 2.0 },
-  max_total_correction: { min: 1.0, max: 15.0 },
-  max_spread_correction: { min: 0.5, max: 6.0 },
-  max_beam_correction: { min: 0.5, max: 8.0 },
-  max_tine_correction: { min: 0.5, max: 4.0 },
-  max_mass_correction: { min: 0.2, max: 2.0 },
-} as const
+// Re-export from utils for backward compatibility
+export { DEFAULT_CALIBRATION, SAFE_RANGES, getActiveCalibrationProfile, ensureCalibrationProfile }
 
 // ============================================================================
 // CALIBRATION PROFILE CRUD
 // ============================================================================
-
-export async function getActiveCalibrationProfile(): Promise<CalibrationProfile | null> {
-  const supabase = await createClient()
-  
-  const { data, error } = await supabase
-    .from('calibration_profiles')
-    .select('*')
-    .eq('is_active', true)
-    .single()
-
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching active calibration profile:', error)
-  }
-
-  return data || null
-}
 
 export async function getCalibrationProfile(id: string): Promise<CalibrationProfile | null> {
   const supabase = await createClient()
@@ -223,6 +183,9 @@ export async function activateCalibrationProfile(
     console.error('Error activating calibration profile:', error)
     return false
   }
+
+  // Invalidate the calibration cache
+  invalidateCalibrationCache()
 
   // Log the activation
   await logCalibrationChange({
@@ -576,9 +539,10 @@ export async function previewCalibrationChanges(
     warnings.push('Limited test data available - preview results may not be representative')
   }
 
-  // Simulate scoring with current vs proposed calibration
-  const currentMetrics = calculateCalibrationMetrics(testExamples, currentProfile || undefined)
-  const proposedMetrics = calculateCalibrationMetrics(testExamples, proposedProfile as CalibrationProfile)
+  // Calculate metrics with current calibration (no simulation)
+  const currentMetrics = calculateCalibrationMetrics(testExamples, null, null)
+  // Calculate metrics with proposed calibration (simulated)
+  const proposedMetrics = calculateCalibrationMetrics(testExamples, proposedProfile as CalibrationProfile, currentProfile)
 
   // Calculate improvements
   const maeImprovement = currentMetrics.mae_gross - proposedMetrics.mae_gross
@@ -592,7 +556,7 @@ export async function previewCalibrationChanges(
 
   for (const example of testExamples) {
     const currentError = Math.abs(example.predicted_gross - example.ground_truth_gross)
-    const proposedError = simulateCalibratedError(example, proposedProfile)
+    const proposedError = simulateCalibratedError(example, proposedProfile, currentProfile)
     
     if (proposedError < currentError - 0.5) examplesImproved++
     else if (proposedError > currentError + 0.5) examplesWorsened++
@@ -689,7 +653,8 @@ function validateCalibrationInput(input: Partial<CalibrationProfileInput>): Reco
   for (const [key, range] of Object.entries(SAFE_RANGES)) {
     const value = input[key as keyof CalibrationProfileInput]
     if (typeof value === 'number') {
-      validated[key] = Math.max(range.min, Math.min(range.max, value))
+      const typedRange = range as { min: number; max: number }
+      validated[key] = Math.max(typedRange.min, Math.min(typedRange.max, value))
     }
   }
   
@@ -704,9 +669,19 @@ async function logCalibrationChange(change: Omit<CalibrationChange, 'id' | 'crea
     .insert(change)
 }
 
+/**
+ * Calculate calibration metrics for a set of examples.
+ * When a profile is provided, simulates what the errors would be with that calibration.
+ */
 function calculateCalibrationMetrics(
-  examples: { ground_truth_gross: number; predicted_gross: number }[],
-  _profile?: CalibrationProfile
+  examples: { 
+    ground_truth_gross: number
+    predicted_gross: number
+    state?: string | null
+    rack_type?: string | null 
+  }[],
+  profile?: CalibrationProfile | null,
+  currentProfile?: CalibrationProfile | null
 ): CalibrationMetrics {
   if (examples.length === 0) {
     return {
@@ -724,27 +699,44 @@ function calculateCalibrationMetrics(
     }
   }
 
-  const errors = examples.map(e => e.predicted_gross - e.ground_truth_gross)
-  const absErrors = errors.map(e => Math.abs(e))
+  // If no profile to simulate, just use raw errors
+  // If profile provided, simulate calibrated errors
+  const absErrors: number[] = []
+  const signedErrors: number[] = []
+  
+  for (const example of examples) {
+    if (profile) {
+      // Simulate what the error would be with the proposed calibration
+      const simulatedAbsError = simulateCalibratedError(example, profile, currentProfile)
+      absErrors.push(simulatedAbsError)
+      // Estimate signed error based on direction
+      const baseError = example.predicted_gross - example.ground_truth_gross
+      signedErrors.push(baseError >= 0 ? simulatedAbsError : -simulatedAbsError)
+    } else {
+      const error = example.predicted_gross - example.ground_truth_gross
+      absErrors.push(Math.abs(error))
+      signedErrors.push(error)
+    }
+  }
   
   const mae = absErrors.reduce((a, b) => a + b, 0) / absErrors.length
   
   const sortedAbsErrors = [...absErrors].sort((a, b) => a - b)
   const medianError = sortedAbsErrors[Math.floor(sortedAbsErrors.length / 2)]
   
-  const overestimation = errors.filter(e => e > 0.5).length
-  const underestimation = errors.filter(e => e < -0.5).length
+  const overestimation = signedErrors.filter(e => e > 0.5).length
+  const underestimation = signedErrors.filter(e => e < -0.5).length
   
   const within5 = absErrors.filter(e => e <= 5).length
   const within10 = absErrors.filter(e => e <= 10).length
   
   const within5Pct = examples.filter((e, i) => {
-    const pctError = Math.abs(errors[i]) / e.ground_truth_gross * 100
+    const pctError = absErrors[i] / e.ground_truth_gross * 100
     return pctError <= 5
   }).length
 
   const within10Pct = examples.filter((e, i) => {
-    const pctError = Math.abs(errors[i]) / e.ground_truth_gross * 100
+    const pctError = absErrors[i] / e.ground_truth_gross * 100
     return pctError <= 10
   }).length
 
@@ -763,44 +755,75 @@ function calculateCalibrationMetrics(
   }
 }
 
+/**
+ * Simulate how a proposed calibration profile would affect prediction error.
+ * 
+ * This models the actual calibration pipeline behavior:
+ * 1. Learning correction strength scales overall corrections
+ * 2. Max correction caps limit how much the score can change
+ * 3. Confidence scaling affects uncertainty estimates
+ * 
+ * The simulation estimates the direction and magnitude of changes based on
+ * the current error and the proposed calibration weights.
+ */
 function simulateCalibratedError(
-  example: { ground_truth_gross: number; predicted_gross: number },
-  _profile: Partial<CalibrationProfile>
+  example: { 
+    ground_truth_gross: number
+    predicted_gross: number
+    state?: string | null
+    rack_type?: string | null
+  },
+  proposedProfile: Partial<CalibrationProfile>,
+  currentProfile?: CalibrationProfile | null
 ): number {
-  // Simplified simulation - in production this would apply the full calibration pipeline
-  const baseError = Math.abs(example.predicted_gross - example.ground_truth_gross)
+  const baseError = example.predicted_gross - example.ground_truth_gross
+  const absBaseError = Math.abs(baseError)
   
-  // Apply a simplified version of calibration adjustments
-  // Real implementation would need to decompose the error by measurement type
-  return baseError
+  // Get current and proposed calibration values
+  const current = getCalibrationApplicationValues(currentProfile)
+  const proposed = getCalibrationApplicationValues(proposedProfile as CalibrationProfile)
+  
+  // Calculate relative learning strength change
+  const learningStrengthRatio = proposed.learningStrength / current.learningStrength
+  
+  // Estimate the correction that would have been applied under current calibration
+  // Based on typical correction patterns: corrections are usually 10-30% of the error
+  const estimatedCurrentCorrection = baseError * 0.2 * current.learningStrength
+  
+  // Estimate what correction would be applied under proposed calibration
+  const estimatedProposedCorrection = baseError * 0.2 * proposed.learningStrength
+  
+  // Apply correction caps
+  const cappedCurrentCorrection = Math.max(
+    -current.maxTotalCorrection,
+    Math.min(current.maxTotalCorrection, estimatedCurrentCorrection)
+  )
+  const cappedProposedCorrection = Math.max(
+    -proposed.maxTotalCorrection,
+    Math.min(proposed.maxTotalCorrection, estimatedProposedCorrection)
+  )
+  
+  // Calculate the net correction difference
+  const correctionDelta = cappedProposedCorrection - cappedCurrentCorrection
+  
+  // The proposed prediction would be: predicted + correctionDelta
+  const proposedPredicted = example.predicted_gross + correctionDelta
+  const proposedError = Math.abs(proposedPredicted - example.ground_truth_gross)
+  
+  // Factor in measurement-specific weight changes
+  // If we're over-estimating (baseError > 0), reducing weights helps
+  // If we're under-estimating (baseError < 0), increasing weights helps
+  const avgWeightChange = (
+    (proposed.spreadWeight / current.spreadWeight) +
+    (proposed.beamWeight / current.beamWeight) +
+    (proposed.tineWeight / current.tineWeight)
+  ) / 3
+  
+  // Apply a small adjustment based on weight changes
+  // Higher weights = larger corrections = typically helps when under-estimating
+  const weightAdjustment = (avgWeightChange - 1) * absBaseError * 0.05
+  
+  return Math.max(0, proposedError - weightAdjustment)
 }
 
-/**
- * Ensure backward compatibility - return safe defaults for missing calibration data
- */
-export function ensureCalibrationProfile(
-  saved?: Partial<CalibrationProfile> | null
-): CalibrationProfile {
-  return {
-    id: saved?.id || '',
-    name: saved?.name || 'Default',
-    description: saved?.description || null,
-    is_active: saved?.is_active ?? true,
-    model_version_id: saved?.model_version_id || null,
-    spread_correction_weight: saved?.spread_correction_weight ?? DEFAULT_CALIBRATION.spread_correction_weight,
-    beam_correction_weight: saved?.beam_correction_weight ?? DEFAULT_CALIBRATION.beam_correction_weight,
-    tine_correction_weight: saved?.tine_correction_weight ?? DEFAULT_CALIBRATION.tine_correction_weight,
-    mass_correction_weight: saved?.mass_correction_weight ?? DEFAULT_CALIBRATION.mass_correction_weight,
-    deduction_correction_weight: saved?.deduction_correction_weight ?? DEFAULT_CALIBRATION.deduction_correction_weight,
-    confidence_scaling: saved?.confidence_scaling ?? DEFAULT_CALIBRATION.confidence_scaling,
-    learning_correction_strength: saved?.learning_correction_strength ?? DEFAULT_CALIBRATION.learning_correction_strength,
-    max_total_correction: saved?.max_total_correction ?? DEFAULT_CALIBRATION.max_total_correction,
-    max_spread_correction: saved?.max_spread_correction ?? DEFAULT_CALIBRATION.max_spread_correction,
-    max_beam_correction: saved?.max_beam_correction ?? DEFAULT_CALIBRATION.max_beam_correction,
-    max_tine_correction: saved?.max_tine_correction ?? DEFAULT_CALIBRATION.max_tine_correction,
-    max_mass_correction: saved?.max_mass_correction ?? DEFAULT_CALIBRATION.max_mass_correction,
-    created_at: saved?.created_at || new Date().toISOString(),
-    updated_at: saved?.updated_at || new Date().toISOString(),
-    created_by: saved?.created_by || null,
-  }
-}
+

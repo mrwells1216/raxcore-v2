@@ -19,7 +19,11 @@ import type {
   CalibrationProfile 
 } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES } from '@/lib/constants'
-import { DEFAULT_CALIBRATION_VALUES } from '@/lib/types'
+import { 
+  DEFAULT_CALIBRATION,
+  getActiveCalibrationProfile as fetchActiveCalibrationProfile,
+  getCalibrationApplicationValues,
+} from '@/lib/calibration/utils'
 
 // ============================================================================
 // TYPES
@@ -543,10 +547,10 @@ export async function computeLearningCorrection(
       input.baseVisionConfidence
     )
 
-    // Phase 20: Apply calibration profile scaling
-    const calibration = input.calibrationProfile
-    const learningStrength = calibration?.learning_correction_strength ?? DEFAULT_CALIBRATION_VALUES.learning_correction_strength
-    const maxTotalCorrection = calibration?.max_total_correction ?? DEFAULT_CALIBRATION_VALUES.max_total_correction
+    // Phase 20: Apply calibration profile scaling using centralized utils
+    const calibrationValues = getCalibrationApplicationValues(input.calibrationProfile)
+    const learningStrength = calibrationValues.learningStrength
+    const maxTotalCorrection = calibrationValues.maxTotalCorrection
     
     // Scale correction by calibration learning strength
     let grossCorrection = baseGrossCorrection * learningStrength
@@ -587,11 +591,11 @@ export async function computeLearningCorrection(
     const measurementCorrections = new Map<string, number>()
     const measurementCorrectionsList: MeasurementCorrection[] = []
 
-    // Get calibration weights (default to 1.0 if no calibration profile)
-    const spreadWeight = calibration?.spread_correction_weight ?? DEFAULT_CALIBRATION_VALUES.spread_correction_weight
-    const beamWeight = calibration?.beam_correction_weight ?? DEFAULT_CALIBRATION_VALUES.beam_correction_weight
-    const maxSpreadCorr = calibration?.max_spread_correction ?? DEFAULT_CALIBRATION_VALUES.max_spread_correction
-    const maxBeamCorr = calibration?.max_beam_correction ?? DEFAULT_CALIBRATION_VALUES.max_beam_correction
+    // Get calibration weights from centralized values
+    const spreadWeight = calibrationValues.spreadWeight
+    const beamWeight = calibrationValues.beamWeight
+    const maxSpreadCorr = calibrationValues.maxSpreadCorrection
+    const maxBeamCorr = calibrationValues.maxBeamCorrection
 
     if (currentMeasurements && Math.abs(grossCorrection) >= 1) {
       // Distribute correction proportionally across measurement categories
@@ -715,24 +719,8 @@ export function toSimpleLearningSummary(extended: ExtendedLearningSummary) {
 
 /**
  * Phase 20: Get the currently active calibration profile
- * Returns null if no active profile exists (defaults will be used)
+ * Re-exported from centralized calibration utils for backward compatibility
  */
 export async function getActiveCalibrationProfile(): Promise<CalibrationProfile | null> {
-  try {
-    const supabase = await createClient()
-    
-    const { data, error } = await supabase
-      .from('calibration_profiles')
-      .select('*')
-      .eq('is_active', true)
-      .single()
-    
-    if (error || !data) {
-      return null
-    }
-    
-    return data as CalibrationProfile
-  } catch {
-    return null
-  }
+  return fetchActiveCalibrationProfile()
 }
