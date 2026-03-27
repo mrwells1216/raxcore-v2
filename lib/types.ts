@@ -1529,3 +1529,108 @@ export interface ScoringOutputWithRuntime {
     issues: ImageValidationIssueInfo[]
   } | null
 }
+
+// ========================================
+// PHASE 25: CONFIDENCE CALIBRATION + TRUST SCORING
+// ========================================
+
+export type ConfidenceTier = 'very_high' | 'high' | 'medium' | 'low' | 'very_low'
+export type TrustTier = 'excellent' | 'good' | 'fair' | 'limited' | 'uncertain'
+
+export interface CalibratedConfidenceInfo {
+  rawConfidence: number
+  calibratedConfidence: number
+  tier: ConfidenceTier
+  tierLabel: string
+  expectedMae: number
+  expectedErrorBandLow: number
+  expectedErrorBandHigh: number
+  calibrationSource: 'historical_data' | 'scenario_specific' | 'default_mapping'
+  scenarioUsed: string | null
+}
+
+export interface TrustScoreInfo {
+  overallScore: number
+  tier: TrustTier
+  tierLabel: string
+  componentScores: Record<string, number>
+  positiveFactors: string[]
+  negativeFactors: string[]
+  primaryConcerns: string[]
+  summary: string
+  recommendations: string[]
+}
+
+export interface ConfidenceTrustMetadata {
+  // Calibrated confidence
+  rawConfidence: number
+  calibratedConfidence: number
+  confidenceTier: ConfidenceTier
+  expectedMae: number
+  
+  // Trust score
+  trustScore: number
+  trustTier: TrustTier
+  
+  // Combined explanation
+  confidenceExplanation: string[]
+  trustExplanation: string[]
+  
+  // Top factors
+  topPositiveFactors: string[]
+  topNegativeFactors: string[]
+  recommendations: string[]
+}
+
+// Extended prediction with confidence/trust metadata
+export interface PredictionWithConfidenceTrust extends Prediction {
+  calibrated_confidence?: number | null
+  confidence_tier?: ConfidenceTier | null
+  raw_confidence?: number | null
+  trust_score?: number | null
+  trust_tier?: TrustTier | null
+  expected_mae?: number | null
+  confidence_trust_metadata?: ConfidenceTrustMetadata | null
+}
+
+// Confidence calibration metrics for admin
+export interface ConfidenceCalibrationMetrics {
+  // Overall calibration quality
+  totalPredictionsAnalyzed: number
+  
+  // Calibration accuracy
+  calibrationSlope: number | null // Should be close to 1.0
+  calibrationIntercept: number | null // Should be close to 0
+  calibrationR2: number | null // Higher is better
+  
+  // Tier accuracy
+  tierAccuracy: {
+    tier: ConfidenceTier
+    predictedMae: number
+    actualMae: number
+    sampleCount: number
+    accuracy: number // How close predicted was to actual
+  }[]
+  
+  // Overconfidence/underconfidence
+  overconfidentPercent: number // High confidence but high error
+  underconfidentPercent: number // Low confidence but low error
+  
+  // Confidence-error correlation
+  confidenceErrorCorrelation: number | null
+  
+  // Trust score effectiveness
+  trustScoreCorrelation: number | null
+  highTrustAvgError: number | null
+  lowTrustAvgError: number | null
+}
+
+export interface ConfidenceCalibrationPoint {
+  confidenceBucket: string
+  avgRawConfidence: number
+  avgCalibratedConfidence: number
+  actualMae: number
+  sampleCount: number
+  within5InchesPercent: number
+  within10InchesPercent: number
+}

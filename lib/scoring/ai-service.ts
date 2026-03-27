@@ -31,8 +31,10 @@ import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } f
 import { runSelfCheck, type SelfCheckResult } from './self-check'
 import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } from './second-pass'
 import { applyFallbackPenalties, type FallbackMetadata } from './fallback-handler'
+import { calibrateConfidence, getCalibrationMetadata, type CalibratedConfidenceResult } from './calibrated-confidence'
+import { calculateTrustScore, getTrustScoreMetadata, type TrustScoreResult } from './trust-score'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
-import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary } from '@/lib/types'
+import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary, ConfidenceTrustMetadata, ConfidenceTier, TrustTier } from '@/lib/types'
 
 export interface ImageAnalysisInput {
   imageUrl: string
@@ -95,6 +97,14 @@ export interface ScoringOutput {
     warningsOnly: boolean
     issueCount: number
   } | null
+  // Phase 25: Calibrated confidence and trust score
+  calibratedConfidence?: number
+  confidenceTier?: ConfidenceTier
+  rawConfidence?: number
+  trustScore?: number
+  trustTier?: TrustTier
+  expectedMae?: number
+  confidenceTrustMetadata?: ConfidenceTrustMetadata | null
 }
 
 // Learning summary exposed to UI
@@ -895,7 +905,58 @@ async function buildVisionScoringOutput(
     processingTimeMs: twoPassResult.processingTimeMs,
   }
 
-  const { low, high } = calculateErrorBands(gross, confidencePercent)
+  // STAGE 11: Phase 25 Calibrated Confidence
+  const calibratedConfidenceResult = await calibrateConfidence({
+    rawConfidence: confidencePercent,
+    scoringMethod: 'vision',
+    sourceType: input.sourceType,
+    imageCount: input.images.length,
+    angleDiversity,
+    usedFallback: false,
+    fallbackReason: null,
+  })
+
+  // STAGE 12: Phase 25 Trust Score
+  const trustScoreResult = calculateTrustScore({
+    imageCount: input.images.length,
+    validImageCount: input.images.length, // All images valid if we got here
+    angleTypes: input.images.map(img => img.angleType),
+    angleDiversity,
+    imageValidationIssues: [], // No validation issues in vision path
+    landmarks: rawLandmarks,
+    landmarkConsistencyScore: consistencyResult.consistencyScore,
+    usedFallback: false,
+    fallbackReason: null,
+    wasRetried: false,
+    totalAttempts: 1,
+    timedOut: false,
+    normalizationAdjustments: normalizationResult.adjustments.length,
+    normalizationOutliers: normalizationResult.outlierCount,
+    measurementConflicts: consistencyResult.issues.filter(i => i.severity === 'major').length,
+    secondPassRan: twoPassResult.secondPassRan,
+    sourceType: input.sourceType,
+    captureDevice: input.captureDevice,
+    earsFullyVisible: input.earsFullyVisible,
+    mainFramePoints: input.mainFramePoints,
+  })
+
+  // Use calibrated confidence for error bands
+  const { low, high } = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
+
+  // Build confidence/trust metadata
+  const confidenceTrustMetadata: ConfidenceTrustMetadata = {
+    rawConfidence: confidencePercent,
+    calibratedConfidence: calibratedConfidenceResult.calibratedConfidence,
+    confidenceTier: calibratedConfidenceResult.tier,
+    expectedMae: calibratedConfidenceResult.expectedErrorBand.expectedMae,
+    trustScore: trustScoreResult.overallScore,
+    trustTier: trustScoreResult.tier,
+    confidenceExplanation: calibratedConfidenceResult.explanation,
+    trustExplanation: [trustScoreResult.summary, ...trustScoreResult.positiveFactors.slice(0, 2)],
+    topPositiveFactors: trustScoreResult.positiveFactors.slice(0, 3),
+    topNegativeFactors: trustScoreResult.negativeFactors.slice(0, 3),
+    recommendations: trustScoreResult.recommendations,
+  }
 
   // Build explanations combining all stages
   const explanations: string[] = [
@@ -976,6 +1037,14 @@ async function buildVisionScoringOutput(
     measurementCorrectionSummary: measurementCorrectionResult.summary,
     // Phase 23 two-pass scoring metadata
     twoPassMetadata,
+    // Phase 25 calibrated confidence and trust score
+    calibratedConfidence: calibratedConfidenceResult.calibratedConfidence,
+    confidenceTier: calibratedConfidenceResult.tier,
+    rawConfidence: confidencePercent,
+    trustScore: trustScoreResult.overallScore,
+    trustTier: trustScoreResult.tier,
+    expectedMae: calibratedConfidenceResult.expectedErrorBand.expectedMae,
+    confidenceTrustMetadata,
   }
 }
 
