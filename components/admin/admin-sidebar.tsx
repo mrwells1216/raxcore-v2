@@ -14,7 +14,7 @@ import {
   BarChart3,
   FlaskConical,
   GitCompare,
-  Activity
+  Settings2,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils'
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
+  { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
   { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },

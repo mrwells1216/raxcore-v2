@@ -938,3 +938,181 @@ export interface BulkRunExportData {
   results: BulkValidationResult[]
   comparison_details: ModelComparisonDetail[]
 }
+
+// ========================================
+// CALIBRATION & MODEL ROLLBACK (Phase 20)
+// ========================================
+
+export interface CalibrationProfile {
+  id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  model_version_id: string | null
+  // Correction weights (0.0 to 2.0, 1.0 = default)
+  spread_correction_weight: number
+  beam_correction_weight: number
+  tine_correction_weight: number
+  mass_correction_weight: number
+  deduction_correction_weight: number
+  // Confidence and learning
+  confidence_scaling: number // 0.5 to 1.5
+  learning_correction_strength: number // 0.0 to 2.0
+  // Caps
+  max_total_correction: number // max absolute correction in inches
+  max_spread_correction: number
+  max_beam_correction: number
+  max_tine_correction: number
+  max_mass_correction: number
+  // Metadata
+  created_at: string
+  updated_at: string
+  created_by: string | null
+}
+
+export interface CalibrationProfileInput {
+  name: string
+  description?: string
+  model_version_id?: string | null
+  spread_correction_weight?: number
+  beam_correction_weight?: number
+  tine_correction_weight?: number
+  mass_correction_weight?: number
+  deduction_correction_weight?: number
+  confidence_scaling?: number
+  learning_correction_strength?: number
+  max_total_correction?: number
+  max_spread_correction?: number
+  max_beam_correction?: number
+  max_tine_correction?: number
+  max_mass_correction?: number
+}
+
+export interface CalibrationChange {
+  id: string
+  calibration_profile_id: string | null
+  model_version_id: string | null
+  change_type: 'calibration_created' | 'calibration_updated' | 'calibration_activated' | 'calibration_deactivated' | 'model_activated' | 'model_rollback'
+  old_values: Record<string, unknown> | null
+  new_values: Record<string, unknown> | null
+  changed_by: string | null
+  reason: string | null
+  created_at: string
+}
+
+export interface CalibrationPreviewRequest {
+  proposed_profile: Partial<CalibrationProfile>
+  validation_run_id?: string
+  sample_size?: number
+  include_breakdown?: boolean
+}
+
+export interface CalibrationPreviewResult {
+  // Current vs proposed comparison
+  current_profile_id: string | null
+  proposed_profile: Partial<CalibrationProfile>
+  // Metrics comparison
+  current_metrics: CalibrationMetrics
+  proposed_metrics: CalibrationMetrics
+  // Improvement summary
+  mae_improvement_inches: number
+  mae_improvement_percent: number
+  examples_improved: number
+  examples_worsened: number
+  examples_unchanged: number
+  // Breakdown by category if requested
+  breakdown_by_state?: CalibrationBreakdownItem[]
+  breakdown_by_rack_type?: CalibrationBreakdownItem[]
+  breakdown_by_score_range?: CalibrationBreakdownItem[]
+  // Warnings/recommendations
+  warnings: string[]
+  recommendations: string[]
+}
+
+export interface CalibrationMetrics {
+  mae_gross: number
+  mae_net: number | null
+  median_error_gross: number
+  median_error_net: number | null
+  overestimation_count: number
+  underestimation_count: number
+  within_5_inches: number
+  within_10_inches: number
+  within_5_percent: number
+  within_10_percent: number
+  sample_count: number
+}
+
+export interface CalibrationBreakdownItem {
+  category: string
+  current_mae: number
+  proposed_mae: number
+  improvement_inches: number
+  improvement_percent: number
+  sample_count: number
+}
+
+export interface ModelVersionWithCalibration extends ModelVersion {
+  active_calibration_profile?: CalibrationProfile | null
+  calibration_profiles?: CalibrationProfile[]
+  last_activated_at?: string | null
+  activation_history?: ModelActivationEvent[]
+}
+
+export interface ModelActivationEvent {
+  id: string
+  model_version_id: string
+  previous_model_version_id: string | null
+  calibration_profile_id: string | null
+  activated_at: string
+  activated_by: string | null
+  reason: string | null
+  is_rollback: boolean
+}
+
+export interface ModelRollbackRequest {
+  target_model_version_id: string
+  reason: string
+  include_calibration?: boolean // Whether to also restore the calibration profile
+}
+
+export interface ModelRollbackResult {
+  success: boolean
+  previous_model_version_id: string | null
+  new_model_version_id: string
+  calibration_profile_id: string | null
+  rollback_event_id: string
+  warnings: string[]
+}
+
+// Calibration defaults
+export const DEFAULT_CALIBRATION_VALUES = {
+  spread_correction_weight: 1.0,
+  beam_correction_weight: 1.0,
+  tine_correction_weight: 1.0,
+  mass_correction_weight: 1.0,
+  deduction_correction_weight: 1.0,
+  confidence_scaling: 1.0,
+  learning_correction_strength: 1.0,
+  max_total_correction: 8.0,
+  max_spread_correction: 3.0,
+  max_beam_correction: 4.0,
+  max_tine_correction: 2.0,
+  max_mass_correction: 1.0,
+} as const
+
+// Safe ranges for calibration values
+export const CALIBRATION_SAFE_RANGES = {
+  spread_correction_weight: { min: 0.0, max: 2.0 },
+  beam_correction_weight: { min: 0.0, max: 2.0 },
+  tine_correction_weight: { min: 0.0, max: 2.0 },
+  mass_correction_weight: { min: 0.0, max: 2.0 },
+  deduction_correction_weight: { min: 0.0, max: 2.0 },
+  confidence_scaling: { min: 0.5, max: 1.5 },
+  learning_correction_strength: { min: 0.0, max: 2.0 },
+  max_total_correction: { min: 1.0, max: 15.0 },
+  max_spread_correction: { min: 0.5, max: 6.0 },
+  max_beam_correction: { min: 0.5, max: 8.0 },
+  max_tine_correction: { min: 0.5, max: 4.0 },
+  max_mass_correction: { min: 0.2, max: 2.0 },
+} as const
