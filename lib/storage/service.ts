@@ -191,6 +191,7 @@ export interface PredictionRecord {
   tine_lengths: Record<string, number> | null
   circumferences: Record<string, number> | null
   raw_ai_response: Record<string, unknown> | null
+  intake_quality: Record<string, unknown> | null
   created_at: string
 }
 
@@ -199,6 +200,7 @@ export interface CreatePredictionParams {
   modelVersionId?: string
   result: ScoringResult
   rawResponse?: Record<string, unknown>
+  intakeQuality?: Record<string, unknown> | null
 }
 
 export async function createPrediction(params: CreatePredictionParams): Promise<PredictionRecord> {
@@ -221,7 +223,8 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       mass_estimate: params.result.massEstimate,
       tine_lengths: params.result.tineLengths || null,
       circumferences: params.result.circumferences || null,
-      raw_ai_response: params.rawResponse || null
+      raw_ai_response: params.rawResponse || null,
+      intake_quality: params.intakeQuality || null
     })
     .select()
     .single()

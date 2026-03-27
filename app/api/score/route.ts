@@ -170,7 +170,8 @@ export async function POST(request: Request) {
         ...scoringResult,
         state,
         rackType
-      }
+      },
+      intakeQuality: intakeQuality as Record<string, unknown> | null
     })
 
     // Update status to completed

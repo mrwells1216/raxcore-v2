@@ -24,6 +24,8 @@ import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { getBuckBundle } from '@/lib/storage/service'
 import { LearningExplainabilityPanel } from '@/components/admin/learning-explainability-panel'
+import { IntakeQualityDisplay, IntakeQualityBadge } from '@/components/scoring/intake-quality-display'
+import type { IntakeQualitySummary } from '@/lib/types'
 
 export default async function AdminSubmissionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -47,6 +49,9 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
   const netError = groundTruth && prediction?.predicted_net && groundTruth.official_net
     ? (prediction.predicted_net - groundTruth.official_net)
     : null
+
+  // Get intake quality from prediction if available
+  const intakeQuality = (prediction?.intake_quality as IntakeQualitySummary | null) || null
 
   return (
     <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
@@ -270,9 +275,17 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
                   Error Band: {prediction.error_band_low?.toFixed(1)}&quot; - {prediction.error_band_high?.toFixed(1)}&quot;
                 </CardDescription>
               </div>
-              <Badge variant="outline" className={confidenceColors[confidenceLevel]}>
-                {confidence.toFixed(0)}% Confidence
-              </Badge>
+              <div className="flex flex-col items-end gap-1.5">
+                <Badge variant="outline" className={confidenceColors[confidenceLevel]}>
+                  {confidence.toFixed(0)}% Confidence
+                </Badge>
+                {intakeQuality && (
+                  <IntakeQualityBadge 
+                    tier={intakeQuality.tier} 
+                    score={intakeQuality.overallScore}
+                  />
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -325,6 +338,15 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Intake Quality Summary - Phase 15 */}
+            {intakeQuality && (
+              <IntakeQualityDisplay 
+                quality={intakeQuality}
+                showRecommendations={intakeQuality.tier === 'fair' || intakeQuality.tier === 'poor'}
+                compact={intakeQuality.tier === 'excellent' || intakeQuality.tier === 'good'}
+              />
             )}
 
             {/* Measurements Grid */}
