@@ -12,7 +12,10 @@ import type {
   ErrorDistribution,
   RackType,
   MeasurementLevelMetrics,
-  MeasurementCategory
+  MeasurementCategory,
+  SecondPassAccuracyMetrics,
+  SelfCheckIssueType,
+  FinalSelectionMethod
 } from '@/lib/types'
 
 // ============================================================================
@@ -1007,4 +1010,285 @@ export async function getMeasurementAccuracyBreakdown(): Promise<MeasurementAccu
       sampleCount: categoryCounts.mass,
     },
   ]
+}
+
+// ============================================================================
+// PHASE 23: SECOND-PASS ACCURACY METRICS
+// ============================================================================
+
+export async function getSecondPassAccuracyMetrics(): Promise<SecondPassAccuracyMetrics | null> {
+  const supabase = await createClient()
+
+  // Get predictions with two-pass metadata
+  const { data: predictions } = await supabase
+    .from('predictions')
+    .select('two_pass_metadata, second_pass_ran, final_selection_method, self_check_stability')
+    .not('two_pass_metadata', 'is', null)
+    .limit(1000)
+
+  if (!predictions || predictions.length === 0) {
+    return null
+  }
+
+  // Get training examples with both first and second pass errors
+  const { data: examples } = await supabase
+    .from('training_examples')
+    .select('first_pass_error, error_amount, second_pass_improved, final_selection_method, two_pass_metadata')
+    .eq('verified_for_training', true)
+    .not('error_amount', 'is', null)
+    .limit(500)
+
+  // Calculate metrics
+  const totalPredictions = predictions.length
+  const secondPassTriggered = predictions.filter(p => p.second_pass_ran).length
+  const triggerRate = totalPredictions > 0 ? (secondPassTriggered / totalPredictions) * 100 : 0
+
+  // Selection method counts
+  const selectionMethodCounts: Record<FinalSelectionMethod, number> = {
+    first_pass: 0,
+    second_pass: 0,
+    blend_weighted: 0,
+    blend_conservative: 0,
+  }
+
+  for (const p of predictions) {
+    const method = p.final_selection_method as FinalSelectionMethod | null
+    if (method && method in selectionMethodCounts) {
+      selectionMethodCounts[method]++
+    }
+  }
+
+  // Stability distribution
+  let stableCount = 0
+  let uncertainCount = 0
+  let unstableCount = 0
+
+  for (const p of predictions) {
+    const stability = p.self_check_stability
+    if (stability === 'stable') stableCount++
+    else if (stability === 'uncertain') uncertainCount++
+    else if (stability === 'unstable') unstableCount++
+  }
+
+  // Issue type frequency
+  const issueTypeFrequency: Partial<Record<SelfCheckIssueType, number>> = {}
+
+  for (const p of predictions) {
+    const metadata = p.two_pass_metadata as { selfCheck?: { issues?: { type: SelfCheckIssueType }[] } } | null
+    const issues = metadata?.selfCheck?.issues
+    if (issues && Array.isArray(issues)) {
+      for (const issue of issues) {
+        if (issue.type) {
+          issueTypeFrequency[issue.type] = (issueTypeFrequency[issue.type] || 0) + 1
+        }
+      }
+    }
+  }
+
+  // Calculate error improvement from training examples
+  let firstPassOnlyMae: number | null = null
+  let withSecondPassMae: number | null = null
+  let maeImprovement: number | null = null
+
+  if (examples && examples.length > 0) {
+    const firstPassErrors: number[] = []
+    const finalErrors: number[] = []
+
+    for (const ex of examples) {
+      if (ex.first_pass_error !== null && ex.error_amount !== null) {
+        firstPassErrors.push(Math.abs(ex.first_pass_error))
+        finalErrors.push(Math.abs(ex.error_amount))
+      }
+    }
+
+    if (firstPassErrors.length > 0) {
+      firstPassOnlyMae = firstPassErrors.reduce((a, b) => a + b, 0) / firstPassErrors.length
+      withSecondPassMae = finalErrors.reduce((a, b) => a + b, 0) / finalErrors.length
+      maeImprovement = firstPassOnlyMae - withSecondPassMae
+    }
+  }
+
+  // Best improvement scenarios (placeholder - would need more detailed analysis)
+  const bestImprovementScenarios: SecondPassAccuracyMetrics['best_improvement_scenarios'] = []
+
+  // Analyze which stability levels benefit most
+  const stabilityLevels = ['stable', 'uncertain', 'unstable']
+  for (const stability of stabilityLevels) {
+    const stabExamples = examples?.filter(ex => {
+      const metadata = ex.two_pass_metadata as { selfCheck?: { overallStability?: string } } | null
+      return metadata?.selfCheck?.overallStability === stability
+    }) || []
+
+    if (stabExamples.length >= 5) {
+      const improved = stabExamples.filter(ex => ex.second_pass_improved === true).length
+      const improvementRate = (improved / stabExamples.length) * 100
+
+      if (improvementRate > 30) {
+        bestImprovementScenarios.push({
+          scenario: `${stability} stability`,
+          improvement: improvementRate,
+          sampleCount: stabExamples.length,
+        })
+      }
+    }
+  }
+
+  return {
+    total_predictions_with_two_pass: totalPredictions,
+    second_pass_trigger_rate: triggerRate,
+    first_pass_only_mae: firstPassOnlyMae,
+    with_second_pass_mae: withSecondPassMae,
+    mae_improvement: maeImprovement,
+    selection_method_counts: selectionMethodCounts,
+    issue_type_frequency: issueTypeFrequency as Record<SelfCheckIssueType, number>,
+    stable_count: stableCount,
+    uncertain_count: uncertainCount,
+    unstable_count: unstableCount,
+    best_improvement_scenarios: bestImprovementScenarios,
+  }
+}
+
+export interface SecondPassBreakdown {
+  category: string
+  totalPredictions: number
+  secondPassTriggered: number
+  triggerRate: number
+  firstPassMae: number | null
+  finalMae: number | null
+  improvement: number | null
+  selectionBreakdown: Record<FinalSelectionMethod, number>
+}
+
+export async function getSecondPassBreakdownByState(): Promise<SecondPassBreakdown[]> {
+  const supabase = await createClient()
+
+  // Get predictions with state info
+  const { data: predictions } = await supabase
+    .from('predictions')
+    .select('buck_id, two_pass_metadata, second_pass_ran, final_selection_method')
+    .not('two_pass_metadata', 'is', null)
+    .limit(500)
+
+  if (!predictions || predictions.length === 0) {
+    return []
+  }
+
+  // Get buck states
+  const buckIds = predictions.map(p => p.buck_id).filter(Boolean)
+  const { data: bucks } = await supabase
+    .from('bucks')
+    .select('id, state')
+    .in('id', buckIds)
+
+  const buckStateMap = new Map(bucks?.map(b => [b.id, b.state]) || [])
+
+  // Group by state
+  const stateGroups = new Map<string, typeof predictions>()
+  for (const p of predictions) {
+    const state = buckStateMap.get(p.buck_id) || 'Unknown'
+    if (!stateGroups.has(state)) {
+      stateGroups.set(state, [])
+    }
+    stateGroups.get(state)!.push(p)
+  }
+
+  // Calculate breakdown for each state
+  const breakdowns: SecondPassBreakdown[] = []
+
+  for (const [state, preds] of stateGroups) {
+    if (preds.length < 3) continue
+
+    const secondPassTriggered = preds.filter(p => p.second_pass_ran).length
+    const triggerRate = (secondPassTriggered / preds.length) * 100
+
+    const selectionBreakdown: Record<FinalSelectionMethod, number> = {
+      first_pass: 0,
+      second_pass: 0,
+      blend_weighted: 0,
+      blend_conservative: 0,
+    }
+
+    for (const p of preds) {
+      const method = p.final_selection_method as FinalSelectionMethod | null
+      if (method && method in selectionBreakdown) {
+        selectionBreakdown[method]++
+      }
+    }
+
+    breakdowns.push({
+      category: state,
+      totalPredictions: preds.length,
+      secondPassTriggered,
+      triggerRate,
+      firstPassMae: null, // Would need training examples
+      finalMae: null,
+      improvement: null,
+      selectionBreakdown,
+    })
+  }
+
+  return breakdowns.sort((a, b) => b.totalPredictions - a.totalPredictions)
+}
+
+export interface SelfCheckIssueAnalysis {
+  issueType: SelfCheckIssueType
+  count: number
+  avgSeverity: string
+  secondPassTriggeredPercent: number
+  avgImprovementWhenTriggered: number | null
+}
+
+export async function getSelfCheckIssueAnalysis(): Promise<SelfCheckIssueAnalysis[]> {
+  const supabase = await createClient()
+
+  const { data: logs } = await supabase
+    .from('self_check_issue_log')
+    .select('issue_type, severity, second_pass_triggered, second_pass_improved, final_error_gross')
+    .limit(1000)
+
+  if (!logs || logs.length === 0) {
+    return []
+  }
+
+  // Group by issue type
+  const issueGroups = new Map<string, typeof logs>()
+  for (const log of logs) {
+    const type = log.issue_type
+    if (!issueGroups.has(type)) {
+      issueGroups.set(type, [])
+    }
+    issueGroups.get(type)!.push(log)
+  }
+
+  const analyses: SelfCheckIssueAnalysis[] = []
+
+  for (const [issueType, issueLogs] of issueGroups) {
+    const count = issueLogs.length
+    
+    // Calculate average severity
+    const severityMap: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 }
+    const severitySum = issueLogs.reduce((sum, l) => sum + (severityMap[l.severity] || 0), 0)
+    const avgSeverityNum = severitySum / count
+    const avgSeverity = avgSeverityNum < 1.5 ? 'low' : avgSeverityNum < 2.5 ? 'medium' : avgSeverityNum < 3.5 ? 'high' : 'critical'
+
+    // Second pass trigger rate
+    const triggered = issueLogs.filter(l => l.second_pass_triggered).length
+    const secondPassTriggeredPercent = (triggered / count) * 100
+
+    // Average improvement when triggered
+    const triggeredLogs = issueLogs.filter(l => l.second_pass_triggered && l.second_pass_improved !== null)
+    const avgImprovementWhenTriggered = triggeredLogs.length > 0
+      ? triggeredLogs.filter(l => l.second_pass_improved).length / triggeredLogs.length * 100
+      : null
+
+    analyses.push({
+      issueType: issueType as SelfCheckIssueType,
+      count,
+      avgSeverity,
+      secondPassTriggeredPercent,
+      avgImprovementWhenTriggered,
+    })
+  }
+
+  return analyses.sort((a, b) => b.count - a.count)
 }

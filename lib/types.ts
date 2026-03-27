@@ -1214,3 +1214,153 @@ export interface AccuracyMetricsWithMeasurements extends AccuracyMetrics {
 export interface ExtendedLearningSummaryWithMeasurements extends ExtendedLearningSummary {
   measurementCorrectionSummary?: MeasurementCorrectionSummary | null
 }
+
+// ========================================
+// PHASE 23: SMART SECOND-PASS SCORING
+// ========================================
+
+export type SelfCheckIssueSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type SelfCheckIssueType = 
+  | 'spread_ear_mismatch'
+  | 'beam_angle_inconsistency'
+  | 'tine_pattern_inconsistent'
+  | 'mass_out_of_range'
+  | 'extreme_asymmetry'
+  | 'image_disagreement'
+  | 'confidence_stability_mismatch'
+  | 'anatomical_ratio_violation'
+  | 'normalization_heavy'
+  | 'landmark_consistency_poor'
+  | 'measurement_correction_large'
+  | 'score_range_implausible'
+  | 'component_variance_high'
+
+export interface SelfCheckIssue {
+  type: SelfCheckIssueType
+  severity: SelfCheckIssueSeverity
+  description: string
+  affectedMeasurements: string[]
+  suggestedAction: 'verify' | 'adjust_weights' | 'use_alternative_scaling' | 'reduce_confidence' | 'trigger_second_pass'
+  metadata?: Record<string, unknown>
+}
+
+export interface SelfCheckSummary {
+  issues: SelfCheckIssue[]
+  overallStability: 'stable' | 'uncertain' | 'unstable'
+  stabilityScore: number
+  triggerSecondPass: boolean
+  secondPassReasons: string[]
+  componentVariance: {
+    spread: number
+    beams: number
+    tines: number
+    mass: number
+  }
+  confidenceAdjustment: number
+  summary: string
+}
+
+export type FinalSelectionMethod = 
+  | 'first_pass' 
+  | 'second_pass' 
+  | 'blend_weighted' 
+  | 'blend_conservative'
+
+export interface FinalResultSelection {
+  method: FinalSelectionMethod
+  reason: string
+  confidence: number
+  firstPassWeight: number
+  secondPassWeight: number
+  blendingApplied: boolean
+}
+
+export interface PassComparisonMetrics {
+  grossDifference: number
+  netDifference: number
+  confidenceDifference: number
+  stabilityImprovement: number
+  measurementChanges: {
+    field: string
+    firstPass: number
+    secondPass: number
+    change: number
+    changePercent: number
+  }[]
+}
+
+export interface TwoPassScoringMetadata {
+  secondPassRan: boolean
+  selfCheck: SelfCheckSummary
+  firstPassGross: number
+  firstPassNet: number
+  firstPassConfidence: number
+  secondPassGross: number | null
+  secondPassNet: number | null
+  secondPassConfidence: number | null
+  passComparison: PassComparisonMetrics | null
+  selection: FinalResultSelection
+  adjustmentsSummary: string
+  secondPassReasons: string[]
+  processingTimeMs: number
+}
+
+export interface SecondPassAdjustmentsSummary {
+  angleWeightChanges: Record<string, number>
+  scalingEmphasis: 'ears' | 'eyes' | 'combined' | 'size_priors'
+  scalingStrength: number
+  tightenedConstraints: boolean
+  constraintStrength: number
+  adjustmentReasons: string[]
+}
+
+// Extended prediction with two-pass metadata
+export interface PredictionWithTwoPass extends Prediction {
+  two_pass_metadata?: TwoPassScoringMetadata | null
+}
+
+// Extended validation result with second-pass error tracking
+export interface ValidationResultWithSecondPass extends ValidationResult {
+  first_pass_error_gross?: number | null
+  first_pass_error_net?: number | null
+  second_pass_error_gross?: number | null
+  second_pass_error_net?: number | null
+  final_selection_method?: FinalSelectionMethod | null
+  second_pass_ran?: boolean
+  second_pass_improved?: boolean | null
+  improvement_amount?: number | null
+}
+
+// Accuracy metrics with second-pass breakdown
+export interface AccuracyMetricsWithSecondPass extends AccuracyMetrics {
+  second_pass_metrics?: SecondPassAccuracyMetrics | null
+}
+
+export interface SecondPassAccuracyMetrics {
+  // How often second pass runs
+  total_predictions_with_two_pass: number
+  second_pass_trigger_rate: number
+  
+  // Error comparison
+  first_pass_only_mae: number | null
+  with_second_pass_mae: number | null
+  mae_improvement: number | null
+  
+  // Selection method breakdown
+  selection_method_counts: Record<FinalSelectionMethod, number>
+  
+  // Issue type frequency
+  issue_type_frequency: Record<SelfCheckIssueType, number>
+  
+  // Stability distribution
+  stable_count: number
+  uncertain_count: number
+  unstable_count: number
+  
+  // Which scenarios benefit most
+  best_improvement_scenarios: {
+    scenario: string
+    improvement: number
+    sampleCount: number
+  }[]
+}

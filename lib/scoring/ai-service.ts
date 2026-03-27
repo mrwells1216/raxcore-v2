@@ -3,7 +3,16 @@
  * Vision-first scorer with heuristic fallback, learns from verified examples.
  */
 
-import type { Measurements, LandmarksDetected, StateCalibration, AngleType, CaptureDevice, SourceType } from '@/lib/types'
+import type { 
+  Measurements, 
+  LandmarksDetected, 
+  StateCalibration, 
+  AngleType, 
+  CaptureDevice, 
+  SourceType,
+  TwoPassScoringMetadata,
+  SelfCheckSummary 
+} from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES, ANATOMICAL_REFERENCES, CONFIDENCE_THRESHOLDS } from '@/lib/constants'
 import { createClient } from '@/lib/supabase/server'
 import { 
@@ -17,6 +26,8 @@ import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './land
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
 import { computeLearningCorrection, toSimpleLearningSummary } from './learning-correction'
 import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } from './measurement-correction'
+import { runSelfCheck, type SelfCheckResult } from './self-check'
+import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } from './second-pass'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
 import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary } from '@/lib/types'
 
@@ -69,6 +80,8 @@ export interface ScoringOutput {
   extendedLearningSummary?: ExtendedLearningSummary
   // Phase 21: Measurement-level correction summary
   measurementCorrectionSummary?: MeasurementCorrectionSummary
+  // Phase 23: Two-pass scoring metadata
+  twoPassMetadata?: TwoPassScoringMetadata
 }
 
 // Learning summary exposed to UI
@@ -598,14 +611,17 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
 /**
  * Build output from successful vision scoring
  * 
- * Pipeline stages (Phase 9 + 10 + 21):
+ * Pipeline stages (Phase 9 + 10 + 21 + 23):
  * 1. Vision output -> raw measurements
  * 2. Normalization -> reduce outliers, enforce ranges
  * 3. Landmark consistency -> validate anatomical ratios
  * 4. Confidence recalibration -> based on agreement/variance
  * 5. Phase 21 Measurement-level correction -> per-category corrections first
  * 6. Phase 10 Learning correction -> similarity-weighted verified examples (total score)
- * 7. Final score calculation with combined corrections
+ * 7. First-pass score calculation
+ * 8. Phase 23 Self-check analysis -> detect issues
+ * 9. Phase 23 Second pass (if triggered) -> rescoring with adjusted assumptions
+ * 10. Final result selection/blending
  */
 async function buildVisionScoringOutput(
   input: ScoringInput,
@@ -698,22 +714,95 @@ async function buildVisionScoringOutput(
     }
   }
 
-  // Calculate final scores from corrected measurements
+  // Calculate first-pass scores from corrected measurements
   const { gross: rawGross, net: rawNet } = calculateScores(correctedMeasurements)
 
   // Apply remaining overall score corrections (reduced since measurement-level already applied)
   // Scale down the learning correction since measurement corrections already applied
   const scaledGrossCorrection = learningResult.grossCorrection * 0.5
   const scaledNetCorrection = learningResult.netCorrection * 0.5
-  const gross = Number((rawGross + scaledGrossCorrection).toFixed(1))
-  const net = Number((rawNet + scaledNetCorrection).toFixed(1))
+  const firstPassGross = Number((rawGross + scaledGrossCorrection).toFixed(1))
+  const firstPassNet = Number((rawNet + scaledNetCorrection).toFixed(1))
 
   // Combine confidence from calibration and learning boost
   // Phase 20: Apply calibration profile's confidence scaling
   const confidenceScaling = calibrationProfile?.confidence_scaling ?? 1.0
   const baseConfidenceWithBoost = calibratedConfidence.finalConfidence + learningResult.confidenceBoost
   const scaledConfidence = baseConfidenceWithBoost * confidenceScaling
-  const confidencePercent = Math.min(97, Math.max(15, Math.round(scaledConfidence)))
+  const firstPassConfidence = Math.min(97, Math.max(15, Math.round(scaledConfidence)))
+
+  // STAGE 8: Phase 23 Self-Check Analysis
+  const selfCheckResult = runSelfCheck({
+    measurements: correctedMeasurements,
+    predictedGross: firstPassGross,
+    predictedNet: firstPassNet,
+    confidencePercent: firstPassConfidence,
+    landmarks: rawLandmarks,
+    angles: input.images.map(img => img.angleType),
+    imageCount: input.images.length,
+    angleDiversity,
+    normalizationResult,
+    landmarkConsistencyResult: consistencyResult,
+    measurementCorrectionResult,
+    visionConfidence: baseVisionConfidence,
+    state: input.state,
+    rackType: input.rackType,
+    mainFramePoints: input.mainFramePoints,
+    sourceType: input.sourceType,
+  })
+
+  // STAGE 9 & 10: Phase 23 Two-Pass Scoring (if triggered)
+  const secondPassInput: SecondPassInput = {
+    firstPassMeasurements: correctedMeasurements,
+    firstPassGross,
+    firstPassNet,
+    firstPassConfidence,
+    selfCheckResult,
+    rawVisionMeasurements: rawMeasurements,
+    rawLandmarks,
+    visionReportedEarLength: visionOutput.landmarks.ear_base_to_tip_estimated,
+    angles: input.images.map(img => img.angleType),
+    imageCount: input.images.length,
+    state: input.state,
+    rackType: input.rackType,
+    sourceType: input.sourceType,
+    earsFullyVisible: input.earsFullyVisible,
+    calibrationProfile,
+  }
+
+  const twoPassResult = await runTwoPassScoring(secondPassInput, startTime)
+
+  // Use final result from two-pass scoring
+  const finalMeasurements = twoPassResult.finalMeasurements
+  const gross = twoPassResult.finalGross
+  const net = twoPassResult.finalNet
+  const confidencePercent = twoPassResult.finalConfidence
+
+  // Build two-pass metadata for storage/admin
+  const twoPassMetadata: TwoPassScoringMetadata = {
+    secondPassRan: twoPassResult.secondPassRan,
+    selfCheck: {
+      issues: selfCheckResult.issues,
+      overallStability: selfCheckResult.overallStability,
+      stabilityScore: selfCheckResult.stabilityScore,
+      triggerSecondPass: selfCheckResult.triggerSecondPass,
+      secondPassReasons: selfCheckResult.secondPassReasons,
+      componentVariance: selfCheckResult.componentVariance,
+      confidenceAdjustment: selfCheckResult.confidenceAdjustment,
+      summary: selfCheckResult.summary,
+    },
+    firstPassGross,
+    firstPassNet,
+    firstPassConfidence,
+    secondPassGross: twoPassResult.secondPass?.predictedGross ?? null,
+    secondPassNet: twoPassResult.secondPass?.predictedNet ?? null,
+    secondPassConfidence: twoPassResult.secondPass?.confidencePercent ?? null,
+    passComparison: twoPassResult.passComparison,
+    selection: twoPassResult.selection,
+    adjustmentsSummary: twoPassResult.adjustmentsSummary,
+    secondPassReasons: twoPassResult.secondPassReasons,
+    processingTimeMs: twoPassResult.processingTimeMs,
+  }
 
   const { low, high } = calculateErrorBands(gross, confidencePercent)
 
@@ -744,6 +833,19 @@ async function buildVisionScoringOutput(
   // Add Phase 10 learning notes
   explanations.push(...learningResult.summary.notes)
 
+  // Add Phase 23 two-pass notes
+  if (twoPassResult.secondPassRan) {
+    explanations.push(`Second-pass scoring applied: ${twoPassResult.selection.method.replace('_', ' ')}.`)
+    if (twoPassResult.passComparison) {
+      const diff = Math.abs(twoPassResult.passComparison.grossDifference)
+      if (diff >= 2) {
+        explanations.push(`Pass difference: ${diff.toFixed(1)}".`)
+      }
+    }
+  } else {
+    explanations.push(`Self-check: ${selfCheckResult.overallStability} (${selfCheckResult.stabilityScore}% stability).`)
+  }
+
   // Build scaling references
   const scalingReferencesUsed: string[] = [...visionOutput.anatomical_references_used]
   if (input.mainFramePoints) {
@@ -760,10 +862,10 @@ async function buildVisionScoringOutput(
     confidencePercent,
     errorBandLow: Number(low.toFixed(1)),
     errorBandHigh: Number(high.toFixed(1)),
-    measurements: correctedMeasurements,
+    measurements: finalMeasurements,
     landmarks: rawLandmarks,
     stateCalibration,
-    processingTimeMs: Date.now() - startTime + visionResult.processingTimeMs,
+    processingTimeMs: twoPassResult.processingTimeMs + visionResult.processingTimeMs,
     imagesUsed: input.images.length,
     angleDiversityScore: Number(angleDiversity.toFixed(2)),
     confidenceExplanation: explanations,
@@ -781,6 +883,8 @@ async function buildVisionScoringOutput(
     extendedLearningSummary: learningResult.summary,
     // Phase 21 measurement-level correction summary
     measurementCorrectionSummary: measurementCorrectionResult.summary,
+    // Phase 23 two-pass scoring metadata
+    twoPassMetadata,
   }
 }
 
