@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Share2, AlertTriangle, Box } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AntlerGeometry, RenderSettings } from '@/lib/types'
+import { DEFAULT_RENDER_CONFIG, type RenderConfig } from '@/lib/render/adapter'
 
 interface RenderClientProps {
   buckId: string
@@ -25,9 +26,14 @@ export function RenderClient({
   netScore 
 }: RenderClientProps) {
   const [settings, setSettings] = useState<RenderSettings>(initialSettings)
+  const [renderConfig, setRenderConfig] = useState<RenderConfig>(DEFAULT_RENDER_CONFIG)
 
   const handleSettingsChange = (updates: Partial<RenderSettings>) => {
     setSettings(prev => ({ ...prev, ...updates }))
+  }
+
+  const handleRenderConfigChange = (updates: Partial<RenderConfig>) => {
+    setRenderConfig(prev => ({ ...prev, ...updates }))
   }
 
   const handleShare = async () => {
@@ -74,7 +80,9 @@ export function RenderClient({
       <AntlerViewer
         geometry={geometry}
         settings={settings}
+        renderConfig={renderConfig}
         onSettingsChange={handleSettingsChange}
+        onRenderConfigChange={handleRenderConfigChange}
       />
 
       {/* Disclaimer */}

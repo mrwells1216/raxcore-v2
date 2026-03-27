@@ -498,6 +498,19 @@ export interface RenderSettings {
   autoRotate: boolean
 }
 
+// Phase 16: Enhanced render configuration
+export type MountMode = 'antlers_only' | 'european_mount'
+export type RealismLevel = 'basic' | 'standard' | 'enhanced'
+
+export interface RenderConfig {
+  mountMode: MountMode
+  realismLevel: RealismLevel
+  asymmetrySensitivity: number // 0-1, how much to emphasize L/R differences
+  beamSweepBias: number // -1 to 1, backward to forward sweep
+  tineForwardTilt: number // 0-1, how much tines tilt forward
+  showSkullPlate: boolean
+}
+
 export interface RenderJob {
   id: string
   buck_id: string
