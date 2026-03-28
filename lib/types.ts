@@ -805,6 +805,13 @@ export interface BulkValidationFilters {
   dateRangeStart?: string
   dateRangeEnd?: string
   sampleSize?: number
+  // Health-based filters (Phase 27)
+  minHealthScore?: number
+  healthTiers?: ('excellent' | 'good' | 'fair' | 'poor')[]
+  excludeDuplicates?: boolean
+  excludeOutliers?: boolean
+  trainingEligibleOnly?: boolean
+  validationEligibleOnly?: boolean
 }
 
 export interface BulkValidationRun {
