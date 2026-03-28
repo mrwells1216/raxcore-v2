@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import {
   ComposableMap,
   Geographies,
@@ -10,14 +10,11 @@ import {
 } from 'react-simple-maps'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { MapPin, ZoomIn, ZoomOut, RotateCcw, X } from 'lucide-react'
 import type { MapPin as MapPinType, LocationType } from '@/lib/types'
 
-// US Atlas TopoJSON - only US states
 const US_TOPO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json'
 
-// State center coordinates for zooming
 const STATE_CENTERS: Record<string, { lat: number; lng: number }> = {
   'Alabama': { lat: 32.806671, lng: -86.791130 },
   'Alaska': { lat: 61.370716, lng: -152.404419 },
@@ -96,7 +93,7 @@ const LOCATION_TYPE_COLORS: Record<LocationType, string> = {
   food_plot: '#22c55e',
   bedding: '#a855f7',
   travel_corridor: '#64748b',
-  unknown: '#9ca3af'
+  unknown: '#9ca3af',
 }
 
 const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
@@ -112,35 +109,29 @@ const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   food_plot: 'Food Plot',
   bedding: 'Bedding',
   travel_corridor: 'Travel Corridor',
-  unknown: 'Unknown'
+  unknown: 'Unknown',
 }
 
-// Dark rustic pastel colors for the theme
 const MAP_COLORS = {
-  background: '#1a1612', // Deep dark brown
-  stateDefault: '#2d2520', // Dark rustic brown
-  stateHover: '#3d332a', // Lighter rustic brown
-  stateFocused: '#4a3f35', // Even lighter for focused state
-  stateBorder: '#6b5d52', // Rustic pastel tan for borders
-  stateBorderFocused: '#8b7d6b', // Brighter border when focused
-  landGradientStart: '#2a2318', // Dark earth
-  landGradientEnd: '#3d3428', // Warm earth
-  water: '#1e2a35', // Dark blue-gray for any water
+  background: '#1a1612',
+  stateDefault: '#2d2520',
+  stateHover: '#3d332a',
+  stateFocused: '#4a3f35',
+  stateBorder: '#6b5d52',
+  stateBorderFocused: '#8b7d6b',
+  landGradientStart: '#2a2318',
+  landGradientEnd: '#3d3428',
 }
 
-export function MapViewer({
-  pins,
-  onPinClick,
-  onMapClick,
-  selectedPinId,
-}: MapViewerProps) {
+export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapViewerProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ coordinates: [-98, 39] as [number, number], zoom: 1 })
   const [focusedState, setFocusedState] = useState<string | null>(null)
   const [hoveredState, setHoveredState] = useState<string | null>(null)
+  // Relative to container element so the CSS overlay pin is positioned correctly
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null)
   const [pendingPin, setPendingPin] = useState<{ lat: number; lng: number } | null>(null)
 
-  // Handle zoom
   const handleZoomIn = useCallback(() => {
     setPosition(pos => ({ ...pos, zoom: Math.min(pos.zoom * 1.5, 8) }))
   }, [])
@@ -153,50 +144,35 @@ export function MapViewer({
     setPosition({ coordinates: [-98, 39], zoom: 1 })
     setFocusedState(null)
     setPendingPin(null)
+    setClickPosition(null)
   }, [])
 
-  // Handle state click - zoom to state for pin placement
   const handleStateClick = useCallback((geo: any) => {
-    const stateName = geo.properties.name
+    const stateName: string = geo.properties.name
     const stateCenter = STATE_CENTERS[stateName]
-    
     if (stateCenter) {
       setFocusedState(stateName)
-      setPosition({
-        coordinates: [stateCenter.lng, stateCenter.lat],
-        zoom: 5,
-      })
+      setPosition({ coordinates: [stateCenter.lng, stateCenter.lat], zoom: 5 })
     }
   }, [])
 
-  // Handle click within focused state to place pin
   const handleMapAreaClick = useCallback((event: React.MouseEvent<SVGElement>) => {
     if (!focusedState || !onMapClick) return
-
-    // Get SVG element and compute coordinates
     const svg = event.currentTarget
-    const rect = svg.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    
-    // Convert screen coordinates to geographic coordinates
-    // This is an approximation - for precise conversion we'd need projection math
-    const width = rect.width
-    const height = rect.height
-    
-    // Approximate conversion based on current view
+    const svgRect = svg.getBoundingClientRect()
+    const containerRect = containerRef.current?.getBoundingClientRect()
+    const xInSvg = event.clientX - svgRect.left
+    const yInSvg = event.clientY - svgRect.top
     const [centerLng, centerLat] = position.coordinates
     const scale = position.zoom
-    
-    // Rough conversion (simplified)
-    const lng = centerLng + ((x - width / 2) / (width / 2)) * (180 / scale)
-    const lat = centerLat - ((y - height / 2) / (height / 2)) * (90 / scale)
-    
-    setClickPosition({ x: event.clientX, y: event.clientY })
+    const lng = centerLng + ((xInSvg - svgRect.width / 2) / (svgRect.width / 2)) * (180 / scale)
+    const lat = centerLat - ((yInSvg - svgRect.height / 2) / (svgRect.height / 2)) * (90 / scale)
+    const relX = containerRect ? event.clientX - containerRect.left : xInSvg
+    const relY = containerRect ? event.clientY - containerRect.top : yInSvg
+    setClickPosition({ x: relX, y: relY })
     setPendingPin({ lat, lng })
   }, [focusedState, onMapClick, position])
 
-  // Confirm pin placement
   const handleConfirmPin = useCallback(() => {
     if (pendingPin && onMapClick) {
       onMapClick(pendingPin.lat, pendingPin.lng)
@@ -205,32 +181,28 @@ export function MapViewer({
     }
   }, [pendingPin, onMapClick])
 
-  // Cancel pin placement
   const handleCancelPin = useCallback(() => {
     setPendingPin(null)
     setClickPosition(null)
   }, [])
 
-  // Get state fill color with gradient effect
   const getStateFill = useCallback((stateName: string) => {
-    if (focusedState === stateName) {
-      return `url(#landGradient)`
-    }
-    if (hoveredState === stateName) {
-      return MAP_COLORS.stateHover
-    }
+    if (focusedState === stateName) return 'url(#landGradient)'
+    if (hoveredState === stateName) return MAP_COLORS.stateHover
     return MAP_COLORS.stateDefault
   }, [focusedState, hoveredState])
 
-  // Filter pins for focused state
   const visiblePins = useMemo(() => {
     if (!focusedState) return []
-    return pins.filter(pin => pin.latitude != null && pin.longitude != null)
+    return pins.filter(p => p.latitude != null && p.longitude != null)
   }, [pins, focusedState])
 
   return (
-    <div className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden" style={{ backgroundColor: MAP_COLORS.background }}>
-      {/* SVG Definitions for gradients */}
+    <div
+      ref={containerRef}
+      className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden"
+      style={{ backgroundColor: MAP_COLORS.background }}
+    >
       <svg width="0" height="0" style={{ position: 'absolute' }}>
         <defs>
           <linearGradient id="landGradient" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -238,35 +210,29 @@ export function MapViewer({
             <stop offset="50%" stopColor={MAP_COLORS.landGradientEnd} />
             <stop offset="100%" stopColor={MAP_COLORS.landGradientStart} />
           </linearGradient>
-          <radialGradient id="landRadialGradient" cx="50%" cy="50%" r="70%">
-            <stop offset="0%" stopColor={MAP_COLORS.landGradientEnd} />
-            <stop offset="100%" stopColor={MAP_COLORS.landGradientStart} />
-          </radialGradient>
         </defs>
       </svg>
 
       <ComposableMap
         projection="geoAlbersUsa"
-        projectionConfig={{
-          scale: 1000,
-        }}
+        projectionConfig={{ scale: 1000 }}
         style={{ width: '100%', height: '100%' }}
         onClick={focusedState ? handleMapAreaClick : undefined}
       >
         <ZoomableGroup
           center={position.coordinates}
           zoom={position.zoom}
-          onMoveEnd={({ coordinates, zoom }) => setPosition({ coordinates: coordinates as [number, number], zoom })}
+          onMoveEnd={({ coordinates, zoom }) =>
+            setPosition({ coordinates: coordinates as [number, number], zoom })
+          }
           minZoom={1}
           maxZoom={8}
         >
           <Geographies geography={US_TOPO_URL}>
             {({ geographies }) =>
               geographies.map((geo) => {
-                const stateName = geo.properties.name
+                const stateName: string = geo.properties.name
                 const isFocused = focusedState === stateName
-                const isHovered = hoveredState === stateName
-                
                 return (
                   <Geography
                     key={geo.rsmKey}
@@ -275,19 +241,13 @@ export function MapViewer({
                     stroke={isFocused ? MAP_COLORS.stateBorderFocused : MAP_COLORS.stateBorder}
                     strokeWidth={isFocused ? 1.5 : 0.5}
                     style={{
-                      default: {
-                        outline: 'none',
-                        transition: 'all 0.2s ease-in-out',
-                      },
+                      default: { outline: 'none', transition: 'all 0.2s ease-in-out' },
                       hover: {
                         fill: isFocused ? undefined : MAP_COLORS.stateHover,
                         outline: 'none',
                         cursor: 'pointer',
                       },
-                      pressed: {
-                        fill: MAP_COLORS.stateFocused,
-                        outline: 'none',
-                      },
+                      pressed: { fill: MAP_COLORS.stateFocused, outline: 'none' },
                     }}
                     onMouseEnter={() => setHoveredState(stateName)}
                     onMouseLeave={() => setHoveredState(null)}
@@ -298,89 +258,69 @@ export function MapViewer({
             }
           </Geographies>
 
-          {/* Render pins when state is focused */}
+          {/* Existing location pins — these are safe because pin.latitude/longitude are persisted values */}
           {visiblePins.map((pin) => (
             <Marker
               key={pin.id}
-              coordinates={[pin.longitude!, pin.latitude!]}
-              onClick={(e) => {
-                e.stopPropagation()
-                onPinClick?.(pin)
-              }}
+              coordinates={[pin.longitude!, pin.latitude!] as [number, number]}
+              onClick={(e) => { e.stopPropagation(); onPinClick?.(pin) }}
             >
-              <g
-                style={{ cursor: 'pointer' }}
-                transform="translate(-12, -24)"
-              >
-                {/* Pin shadow */}
-                <ellipse
-                  cx="12"
-                  cy="26"
-                  rx="4"
-                  ry="2"
-                  fill="rgba(0,0,0,0.3)"
-                />
-                {/* Pin body */}
+              <g style={{ cursor: 'pointer' }} transform="translate(-12, -24)">
+                <ellipse cx="12" cy="26" rx="4" ry="2" fill="rgba(0,0,0,0.3)" />
                 <path
                   d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z"
                   fill={LOCATION_TYPE_COLORS[pin.location_type]}
                   stroke={selectedPinId === pin.id ? '#fff' : 'rgba(255,255,255,0.3)'}
                   strokeWidth={selectedPinId === pin.id ? 2 : 1}
                 />
-                {/* Pin inner circle */}
-                <circle
-                  cx="12"
-                  cy="8"
-                  r="3"
-                  fill="rgba(255,255,255,0.9)"
-                />
+                <circle cx="12" cy="8" r="3" fill="rgba(255,255,255,0.9)" />
               </g>
             </Marker>
           ))}
-
-          {/* Pending pin marker */}
-          {pendingPin && focusedState && typeof pendingPin.lat === 'number' && typeof pendingPin.lng === 'number' && !isNaN(pendingPin.lat) && !isNaN(pendingPin.lng) && isFinite(pendingPin.lat) && isFinite(pendingPin.lng) && (
-            <Marker coordinates={[pendingPin.lng, pendingPin.lat]}>
-              <g transform="translate(-12, -24)">
-                <path
-                  d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z"
-                  fill="#10b981"
-                  stroke="#fff"
-                  strokeWidth={2}
-                  strokeDasharray="4,2"
-                  opacity={0.8}
-                />
-                <circle cx="12" cy="8" r="3" fill="#fff" />
-              </g>
-            </Marker>
-          )}
         </ZoomableGroup>
       </ComposableMap>
 
+      {/*
+        PENDING PIN — rendered as a CSS-positioned div overlay, NOT as a <Marker>.
+
+        react-simple-maps Marker internally calls useMapContext() which throws
+        "non-iterable instance" the first render after a click because the
+        ZoomableGroup projection context hasn't updated yet. Using a plain div
+        positioned by click screen-coords avoids the crash entirely.
+      */}
+      {pendingPin && clickPosition && (
+        <div
+          aria-hidden="true"
+          className="absolute pointer-events-none z-40"
+          style={{
+            left: clickPosition.x,
+            top: clickPosition.y,
+            transform: 'translate(-12px, -28px)',
+          }}
+        >
+          <svg width="24" height="28" viewBox="0 0 24 24">
+            <path
+              d="M12 0C7.58 0 4 3.58 4 8c0 5.25 8 16 8 16s8-10.75 8-16c0-4.42-3.58-8-8-8z"
+              fill="#10b981"
+              stroke="#fff"
+              strokeWidth={2}
+              strokeDasharray="4,2"
+              opacity={0.9}
+            />
+            <circle cx="12" cy="8" r="3" fill="#fff" />
+          </svg>
+        </div>
+      )}
+
       {/* Zoom Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-2 z-50">
-        <Button
-          size="icon"
-          variant="secondary"
-          onClick={handleZoomIn}
-          className="bg-card/95 backdrop-blur hover:bg-card"
-        >
+        <Button size="icon" variant="secondary" onClick={handleZoomIn} className="bg-card/95 backdrop-blur hover:bg-card">
           <ZoomIn className="h-4 w-4" />
         </Button>
-        <Button
-          size="icon"
-          variant="secondary"
-          onClick={handleZoomOut}
-          className="bg-card/95 backdrop-blur hover:bg-card"
-        >
+        <Button size="icon" variant="secondary" onClick={handleZoomOut} className="bg-card/95 backdrop-blur hover:bg-card">
           <ZoomOut className="h-4 w-4" />
         </Button>
-        <Button
-          size="icon"
-          variant="secondary"
-          onClick={handleReset}
-          className="bg-card/95 backdrop-blur hover:bg-card"
-        >
+        <Button size="icon" variant="secondary" onClick={handleReset} className="bg-card/95 backdrop-blur hover:bg-card">
           <RotateCcw className="h-4 w-4" />
         </Button>
       </div>
@@ -394,12 +334,7 @@ export function MapViewer({
                 <div className="text-sm font-medium">{focusedState}</div>
                 <div className="text-xs text-muted-foreground">Click on map to add a pin</div>
               </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={handleReset}
-                className="h-8 w-8"
-              >
+              <Button size="icon" variant="ghost" onClick={handleReset} className="h-8 w-8">
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -407,13 +342,13 @@ export function MapViewer({
         </div>
       )}
 
-      {/* Pin Placement Confirmation - Fixed z-index */}
+      {/* Pin Placement Confirmation */}
       {pendingPin && clickPosition && (
         <div
-          className="fixed z-[9999] pointer-events-auto"
+          className="absolute z-[9999] pointer-events-auto"
           style={{
-            left: Math.min(clickPosition.x + 10, window.innerWidth - 200),
-            top: Math.min(clickPosition.y - 50, window.innerHeight - 120),
+            left: Math.min(clickPosition.x + 16, (containerRef.current?.offsetWidth ?? 400) - 200),
+            top: Math.max(clickPosition.y - 120, 8),
           }}
         >
           <Card className="p-3 bg-card/95 backdrop-blur shadow-xl border-2 border-primary/20">
@@ -422,12 +357,8 @@ export function MapViewer({
               {pendingPin.lat.toFixed(5)}, {pendingPin.lng.toFixed(5)}
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={handleConfirmPin} className="flex-1">
-                Confirm
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleCancelPin}>
-                Cancel
-              </Button>
+              <Button size="sm" onClick={handleConfirmPin} className="flex-1">Confirm</Button>
+              <Button size="sm" variant="outline" onClick={handleCancelPin}>Cancel</Button>
             </div>
           </Card>
         </div>
@@ -440,10 +371,7 @@ export function MapViewer({
           <div className="grid grid-cols-2 gap-1">
             {(['harvest', 'trailcam', 'sighting', 'stand'] as LocationType[]).map(type => (
               <div key={type} className="flex items-center gap-1.5">
-                <div 
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: LOCATION_TYPE_COLORS[type] }}
-                />
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: LOCATION_TYPE_COLORS[type] }} />
                 <span className="text-xs">{LOCATION_TYPE_LABELS[type]}</span>
               </div>
             ))}
@@ -451,7 +379,7 @@ export function MapViewer({
         </Card>
       </div>
 
-      {/* Instructions when no state focused */}
+      {/* Instructions when empty */}
       {!focusedState && pins.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
           <Card className="p-4 bg-card/95 backdrop-blur">
