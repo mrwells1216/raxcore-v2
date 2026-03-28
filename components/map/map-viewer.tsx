@@ -338,8 +338,8 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         </div>
       )}
 
-      {/* Switchboard control panel — 2×2 grid, bottom-right */}
-      <div className="absolute bottom-4 right-4 z-50">
+      {/* Switchboard control panel — 2×2 grid, top-right */}
+      <div className="absolute top-4 right-4 z-50">
         <div
           className="grid grid-cols-2 gap-px p-1 rounded-lg border border-border/60 shadow-2xl"
           style={{
@@ -390,9 +390,9 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
               </button>
             </PopoverTrigger>
             <PopoverContent
-              side="left"
+              side="bottom"
               align="end"
-              sideOffset={10}
+              sideOffset={8}
               className="w-64 p-4 text-sm"
             >
               <div className="space-y-3">
