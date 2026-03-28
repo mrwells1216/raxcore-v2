@@ -3,7 +3,7 @@ import { CalibrationDashboard } from '@/components/admin/calibration-dashboard'
 import { Loader2 } from 'lucide-react'
 
 export const metadata = {
-  title: 'Calibration Controls | xRack Admin',
+  title: 'Calibration Controls | RAXcore Admin',
   description: 'Manage scoring calibration profiles and model versions',
 }
 

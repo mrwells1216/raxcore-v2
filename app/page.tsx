@@ -184,9 +184,9 @@ export default function HomePage() {
         <div className="container max-w-screen-xl mx-auto px-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-xs">Xr</div>
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-xs">Rx</div>
               <span className="text-sm text-muted-foreground">
-                xRack
+                RAXcore
               </span>
             </div>
             <p className="text-xs text-muted-foreground text-center">

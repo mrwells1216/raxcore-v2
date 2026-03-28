@@ -47,7 +47,7 @@ export function RenderClient({
   const handleShare = async () => {
     try {
       await navigator.share({
-        title: 'xRack 3D Antler Visualization',
+        title: 'RAXcore 3D Antler Visualization',
         text: `Check out this ${geometry.mainFramePoints}-point ${geometry.rackType} buck! Estimated gross score: ${grossScore.toFixed(1)}"`,
         url: window.location.href,
       })

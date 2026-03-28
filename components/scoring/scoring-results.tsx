@@ -283,7 +283,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </div>
               <div>
                 <p className="font-medium">Training Data Submitted</p>
-                <p className="text-sm text-muted-foreground">Thank you for helping improve xRack!</p>
+                <p className="text-sm text-muted-foreground">Thank you for helping improve RAXcore!</p>
               </div>
             </div>
           </CardContent>
