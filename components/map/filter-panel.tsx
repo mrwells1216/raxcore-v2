@@ -49,13 +49,13 @@ export function FilterPanel({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="py-2 px-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Filter className="h-4 w-4" />
+          <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Filter className="h-3 w-3" />
             Filters
             {activeFilterCount > 0 && (
-              <Badge variant="secondary" className="ml-1">
+              <Badge variant="secondary" className="ml-1 h-4 text-[10px] px-1">
                 {activeFilterCount}
               </Badge>
             )}
@@ -65,89 +65,75 @@ export function FilterPanel({
               variant="ghost"
               size="sm"
               onClick={onClearFilters}
-              className="h-8 px-2"
+              className="h-6 px-2 text-xs"
             >
-              <X className="h-4 w-4 mr-1" />
+              <X className="h-3 w-3 mr-1" />
               Clear
             </Button>
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label className="text-xs uppercase text-muted-foreground flex items-center gap-1.5">
-            <Building2 className="h-3 w-3" />
-            Property
-          </Label>
+      <CardContent className="p-3 pt-0">
+        <div className="grid grid-cols-2 gap-2">
+          {/* Property */}
           <Select
             value={filters.property_id || 'all'}
-            onValueChange={(value) => 
+            onValueChange={(value) =>
               onFiltersChange({ ...filters, property_id: value === 'all' ? undefined : value })
             }
           >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="All properties" />
+            <SelectTrigger className="h-8 text-xs">
+              <Building2 className="h-3 w-3 mr-1 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Property" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All properties</SelectItem>
               {properties.map(prop => (
-                <SelectItem key={prop.id} value={prop.id}>
-                  {prop.name}
-                </SelectItem>
+                <SelectItem key={prop.id} value={prop.id}>{prop.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="space-y-2">
-          <Label className="text-xs uppercase text-muted-foreground flex items-center gap-1.5">
-            <Trees className="h-3 w-3" />
-            State
-          </Label>
+          {/* State */}
           <Select
             value={filters.state || 'all'}
-            onValueChange={(value) => 
+            onValueChange={(value) =>
               onFiltersChange({ ...filters, state: value === 'all' ? undefined : value })
             }
           >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="All states" />
+            <SelectTrigger className="h-8 text-xs">
+              <Trees className="h-3 w-3 mr-1 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="State" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All states</SelectItem>
-              {US_STATES.map((stateOption) => (
-                <SelectItem key={stateOption.value} value={stateOption.value}>
-                  {stateOption.label}
-                </SelectItem>
+              {US_STATES.map((s) => (
+                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="space-y-2">
-          <Label className="text-xs uppercase text-muted-foreground flex items-center gap-1.5">
-            <MapPin className="h-3 w-3" />
-            Pin Type
-          </Label>
+          {/* Pin Type */}
           <Select
             value={filters.location_type || 'all'}
-            onValueChange={(value) => 
-              onFiltersChange({ 
-                ...filters, 
-                location_type: value === 'all' ? undefined : value as LocationType 
+            onValueChange={(value) =>
+              onFiltersChange({
+                ...filters,
+                location_type: value === 'all' ? undefined : value as LocationType,
               })
             }
           >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="All types" />
+            <SelectTrigger className="h-8 text-xs">
+              <MapPin className="h-3 w-3 mr-1 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Pin type" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
               {Object.entries(LOCATION_TYPE_LABELS).map(([value, label]) => (
                 <SelectItem key={value} value={value}>
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="w-2 h-2 rounded-full"
+                    <div
+                      className="w-2 h-2 rounded-full shrink-0"
                       style={{ backgroundColor: LOCATION_TYPE_COLORS[value as LocationType] }}
                     />
                     {label}
@@ -156,28 +142,24 @@ export function FilterPanel({
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="space-y-2">
-          <Label className="text-xs uppercase text-muted-foreground">Year</Label>
+          {/* Year */}
           <Select
             value={filters.year?.toString() || 'all'}
-            onValueChange={(value) => 
-              onFiltersChange({ 
-                ...filters, 
-                year: value === 'all' ? undefined : parseInt(value) 
+            onValueChange={(value) =>
+              onFiltersChange({
+                ...filters,
+                year: value === 'all' ? undefined : parseInt(value),
               })
             }
           >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="All years" />
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Year" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All years</SelectItem>
               {YEARS.map(year => (
-                <SelectItem key={year} value={year.toString()}>
-                  {year}
-                </SelectItem>
+                <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
               ))}
             </SelectContent>
           </Select>

@@ -29,8 +29,8 @@ export function PropertyList({
   onSelectProperty
 }: PropertyListProps) {
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3 flex-shrink-0">
+    <Card>
+      <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
             <Building2 className="h-4 w-4" />
@@ -45,8 +45,8 @@ export function PropertyList({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
-        <ScrollArea className="h-full px-4 pb-4">
+      <CardContent className="p-0">
+        <ScrollArea className="h-[300px] px-4 pb-4">
           {properties.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
               <Building2 className="h-10 w-10 mx-auto mb-3 opacity-50" />
