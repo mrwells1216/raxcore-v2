@@ -1,22 +1,25 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Target, TrendingUp, CheckCircle2, BarChart3, Layers, Ruler, RefreshCw, Activity } from 'lucide-react'
-import { getAccuracyMetrics, getAccuracyBreakdown, getErrorDistribution, getMeasurementAccuracyBreakdown, getSecondPassAccuracyMetrics, getRuntimeHealthMetrics } from '@/lib/validation/service'
+import { Target, TrendingUp, CheckCircle2, BarChart3, Layers, Ruler, RefreshCw, Activity, Gauge } from 'lucide-react'
+import { getAccuracyMetrics, getAccuracyBreakdown, getErrorDistribution, getMeasurementAccuracyBreakdown, getSecondPassAccuracyMetrics, getRuntimeHealthMetrics, getConfidenceCalibrationMetrics, getConfidenceCalibrationPoints } from '@/lib/validation/service'
 import { AccuracyTrendChart } from '@/components/admin/accuracy-trend-chart'
 import { ErrorDistributionChart } from '@/components/admin/error-distribution-chart'
 import { AccuracyBreakdownTable } from '@/components/admin/accuracy-breakdown-table'
 import { MeasurementAccuracyChart, MeasurementCategoryStatus } from '@/components/admin/measurement-accuracy-chart'
 import { SecondPassMetricsPanel } from '@/components/admin/second-pass-metrics-panel'
 import { RuntimeHealthPanel } from '@/components/admin/runtime-health-panel'
+import { ConfidenceCalibrationPanel } from '@/components/admin/confidence-calibration-panel'
 
 export default async function AccuracyPage() {
-  const [metrics, byScoreBucket, byState, errorDistribution, measurementBreakdown, secondPassMetrics, runtimeHealthMetrics] = await Promise.all([
+  const [metrics, byScoreBucket, byState, errorDistribution, measurementBreakdown, secondPassMetrics, runtimeHealthMetrics, confidenceCalibrationMetrics, confidenceCalibrationPoints] = await Promise.all([
     getAccuracyMetrics(),
     getAccuracyBreakdown('score_bucket'),
     getAccuracyBreakdown('state'),
     getErrorDistribution(),
     getMeasurementAccuracyBreakdown(),
     getSecondPassAccuracyMetrics(),
-    getRuntimeHealthMetrics()
+    getRuntimeHealthMetrics(),
+    getConfidenceCalibrationMetrics(),
+    getConfidenceCalibrationPoints()
   ])
 
   return (
@@ -158,6 +161,29 @@ export default async function AccuracyPage() {
           </CardHeader>
           <CardContent>
             <RuntimeHealthPanel metrics={runtimeHealthMetrics} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Phase 25: Confidence Calibration Metrics */}
+      {confidenceCalibrationMetrics && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Gauge className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-lg">Confidence Calibration</CardTitle>
+                <CardDescription>
+                  How well confidence scores predict actual error rates
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ConfidenceCalibrationPanel 
+              metrics={confidenceCalibrationMetrics} 
+              calibrationPoints={confidenceCalibrationPoints}
+            />
           </CardContent>
         </Card>
       )}

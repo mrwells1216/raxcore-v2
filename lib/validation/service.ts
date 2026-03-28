@@ -19,7 +19,11 @@ import type {
   RuntimeHealthMetrics,
   VisionRuntimeErrorType,
   FallbackReason,
-  ImageValidationIssueType
+  ImageValidationIssueType,
+  ConfidenceCalibrationMetrics,
+  ConfidenceCalibrationPoint,
+  ConfidenceTier,
+  TrustTier
 } from '@/lib/types'
 
 // ============================================================================
@@ -1526,4 +1530,249 @@ export async function getFallbackBreakdown(): Promise<FallbackBreakdown[]> {
       }
     })
     .sort((a, b) => b.count - a.count)
+}
+
+// ============================================================================
+// PHASE 25: CONFIDENCE CALIBRATION METRICS
+// ============================================================================
+
+export async function getConfidenceCalibrationMetrics(): Promise<ConfidenceCalibrationMetrics | null> {
+  const supabase = await createClient()
+
+  // Get training examples with confidence data
+  const { data: examples } = await supabase
+    .from('training_examples')
+    .select(`
+      raw_confidence,
+      calibrated_confidence,
+      confidence_tier,
+      trust_score,
+      trust_tier,
+      error_amount,
+      ground_truth_score,
+      predicted_score
+    `)
+    .eq('verified_for_training', true)
+    .not('error_amount', 'is', null)
+    .limit(1000)
+
+  if (!examples || examples.length === 0) {
+    return null
+  }
+
+  const totalPredictionsAnalyzed = examples.length
+
+  // Calculate calibration accuracy by tier
+  const tierGroups = new Map<string, typeof examples>()
+  for (const ex of examples) {
+    const tier = ex.confidence_tier || 'unknown'
+    if (!tierGroups.has(tier)) {
+      tierGroups.set(tier, [])
+    }
+    tierGroups.get(tier)!.push(ex)
+  }
+
+  // Expected MAE by tier (these are the targets from calibration)
+  const expectedMaeByTier: Record<string, number> = {
+    very_high: 4.0,
+    high: 6.5,
+    medium: 9.5,
+    low: 14.0,
+    very_low: 20.0,
+  }
+
+  const tierAccuracy: ConfidenceCalibrationMetrics['tierAccuracy'] = []
+  for (const [tier, exs] of tierGroups) {
+    if (exs.length < 3) continue
+    
+    const errors = exs.map(e => Math.abs(e.error_amount || 0))
+    const actualMae = errors.reduce((a, b) => a + b, 0) / errors.length
+    const predictedMae = expectedMaeByTier[tier] || 10
+    const accuracy = 100 - Math.abs(actualMae - predictedMae) / predictedMae * 100
+
+    tierAccuracy.push({
+      tier: tier as ConfidenceTier,
+      predictedMae,
+      actualMae,
+      sampleCount: exs.length,
+      accuracy: Math.max(0, Math.min(100, accuracy)),
+    })
+  }
+
+  // Calculate overconfidence/underconfidence
+  let overconfidentCount = 0
+  let underconfidentCount = 0
+
+  for (const ex of examples) {
+    const confidence = ex.calibrated_confidence || ex.raw_confidence || 50
+    const error = Math.abs(ex.error_amount || 0)
+    
+    // High confidence (>75) but high error (>10")
+    if (confidence > 75 && error > 10) {
+      overconfidentCount++
+    }
+    // Low confidence (<50) but low error (<5")
+    if (confidence < 50 && error < 5) {
+      underconfidentCount++
+    }
+  }
+
+  const overconfidentPercent = (overconfidentCount / totalPredictionsAnalyzed) * 100
+  const underconfidentPercent = (underconfidentCount / totalPredictionsAnalyzed) * 100
+
+  // Calculate confidence-error correlation
+  const confidenceValues = examples.map(e => e.calibrated_confidence || e.raw_confidence || 50)
+  const errorValues = examples.map(e => Math.abs(e.error_amount || 0))
+  const confidenceErrorCorrelation = calculateCorrelation(confidenceValues, errorValues)
+
+  // Calculate trust score effectiveness
+  const trustScores = examples.map(e => e.trust_score).filter((t): t is number => t !== null)
+  const trustScoreCorrelation = trustScores.length > 10 
+    ? calculateCorrelation(trustScores, errorValues.slice(0, trustScores.length))
+    : null
+
+  // High vs low trust average error
+  const highTrustExamples = examples.filter(e => e.trust_score !== null && e.trust_score >= 70)
+  const lowTrustExamples = examples.filter(e => e.trust_score !== null && e.trust_score < 50)
+  
+  const highTrustAvgError = highTrustExamples.length > 0
+    ? highTrustExamples.map(e => Math.abs(e.error_amount || 0)).reduce((a, b) => a + b, 0) / highTrustExamples.length
+    : null
+  const lowTrustAvgError = lowTrustExamples.length > 0
+    ? lowTrustExamples.map(e => Math.abs(e.error_amount || 0)).reduce((a, b) => a + b, 0) / lowTrustExamples.length
+    : null
+
+  // Simple linear regression for calibration slope/intercept
+  const { slope, intercept, r2 } = calculateLinearRegression(confidenceValues, errorValues)
+
+  return {
+    totalPredictionsAnalyzed,
+    calibrationSlope: slope,
+    calibrationIntercept: intercept,
+    calibrationR2: r2,
+    tierAccuracy,
+    overconfidentPercent,
+    underconfidentPercent,
+    confidenceErrorCorrelation,
+    trustScoreCorrelation,
+    highTrustAvgError,
+    lowTrustAvgError,
+  }
+}
+
+function calculateCorrelation(x: number[], y: number[]): number {
+  const n = Math.min(x.length, y.length)
+  if (n < 3) return 0
+
+  const meanX = x.slice(0, n).reduce((a, b) => a + b, 0) / n
+  const meanY = y.slice(0, n).reduce((a, b) => a + b, 0) / n
+
+  let numerator = 0
+  let denomX = 0
+  let denomY = 0
+
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - meanX
+    const dy = y[i] - meanY
+    numerator += dx * dy
+    denomX += dx * dx
+    denomY += dy * dy
+  }
+
+  const denominator = Math.sqrt(denomX * denomY)
+  return denominator === 0 ? 0 : numerator / denominator
+}
+
+function calculateLinearRegression(x: number[], y: number[]): { slope: number; intercept: number; r2: number } {
+  const n = Math.min(x.length, y.length)
+  if (n < 3) return { slope: 0, intercept: 0, r2: 0 }
+
+  const meanX = x.slice(0, n).reduce((a, b) => a + b, 0) / n
+  const meanY = y.slice(0, n).reduce((a, b) => a + b, 0) / n
+
+  let ssXY = 0
+  let ssXX = 0
+  let ssYY = 0
+  let ssTot = 0
+
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - meanX
+    const dy = y[i] - meanY
+    ssXY += dx * dy
+    ssXX += dx * dx
+    ssYY += dy * dy
+    ssTot += dy * dy
+  }
+
+  const slope = ssXX === 0 ? 0 : ssXY / ssXX
+  const intercept = meanY - slope * meanX
+  
+  // Calculate R²
+  let ssRes = 0
+  for (let i = 0; i < n; i++) {
+    const predicted = slope * x[i] + intercept
+    const residual = y[i] - predicted
+    ssRes += residual * residual
+  }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot
+
+  return { slope, intercept, r2 }
+}
+
+export async function getConfidenceCalibrationPoints(): Promise<ConfidenceCalibrationPoint[]> {
+  const supabase = await createClient()
+
+  const { data: examples } = await supabase
+    .from('training_examples')
+    .select('raw_confidence, calibrated_confidence, error_amount')
+    .eq('verified_for_training', true)
+    .not('error_amount', 'is', null)
+    .limit(1000)
+
+  if (!examples || examples.length === 0) {
+    return []
+  }
+
+  // Group by confidence buckets
+  const buckets = [
+    { label: '0-50%', min: 0, max: 50 },
+    { label: '50-60%', min: 50, max: 60 },
+    { label: '60-70%', min: 60, max: 70 },
+    { label: '70-80%', min: 70, max: 80 },
+    { label: '80-90%', min: 80, max: 90 },
+    { label: '90-100%', min: 90, max: 101 },
+  ]
+
+  const points: ConfidenceCalibrationPoint[] = []
+
+  for (const bucket of buckets) {
+    const bucketExamples = examples.filter(e => {
+      const conf = e.calibrated_confidence || e.raw_confidence || 50
+      return conf >= bucket.min && conf < bucket.max
+    })
+
+    if (bucketExamples.length === 0) continue
+
+    const rawConfs = bucketExamples.map(e => e.raw_confidence || 50)
+    const calibratedConfs = bucketExamples.map(e => e.calibrated_confidence || e.raw_confidence || 50)
+    const errors = bucketExamples.map(e => Math.abs(e.error_amount || 0))
+
+    const avgRaw = rawConfs.reduce((a, b) => a + b, 0) / rawConfs.length
+    const avgCalibrated = calibratedConfs.reduce((a, b) => a + b, 0) / calibratedConfs.length
+    const actualMae = errors.reduce((a, b) => a + b, 0) / errors.length
+    const within5 = errors.filter(e => e <= 5).length
+    const within10 = errors.filter(e => e <= 10).length
+
+    points.push({
+      confidenceBucket: bucket.label,
+      avgRawConfidence: avgRaw,
+      avgCalibratedConfidence: avgCalibrated,
+      actualMae,
+      sampleCount: bucketExamples.length,
+      within5InchesPercent: (within5 / bucketExamples.length) * 100,
+      within10InchesPercent: (within10 / bucketExamples.length) * 100,
+    })
+  }
+
+  return points
 }
