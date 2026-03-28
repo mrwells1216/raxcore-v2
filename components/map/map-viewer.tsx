@@ -10,7 +10,8 @@ import {
 } from 'react-simple-maps'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MapPin, ZoomIn, ZoomOut, RotateCcw, X } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { MapPin, ZoomIn, ZoomOut, RotateCcw, Info } from 'lucide-react'
 import type { MapPin as MapPinType, LocationType } from '@/lib/types'
 
 const US_TOPO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json'
@@ -337,37 +338,119 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         </div>
       )}
 
-      {/* Zoom Controls */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2 z-50">
-        <Button size="icon" variant="secondary" onClick={handleZoomIn} className="bg-card/95 backdrop-blur hover:bg-card">
-          <ZoomIn className="h-4 w-4" />
-        </Button>
-        <Button size="icon" variant="secondary" onClick={handleZoomOut} className="bg-card/95 backdrop-blur hover:bg-card">
-          <ZoomOut className="h-4 w-4" />
-        </Button>
-        <Button size="icon" variant="secondary" onClick={handleReset} className="bg-card/95 backdrop-blur hover:bg-card">
-          <RotateCcw className="h-4 w-4" />
-        </Button>
-      </div>
+      {/* Switchboard control panel — 2×2 grid, bottom-right */}
+      <div className="absolute bottom-4 right-4 z-50">
+        <div
+          className="grid grid-cols-2 gap-px p-1 rounded-lg border border-border/60 shadow-2xl"
+          style={{
+            background: 'linear-gradient(145deg, hsl(var(--card) / 0.97), hsl(var(--muted) / 0.92))',
+            boxShadow: 'inset 0 1px 0 hsl(var(--border) / 0.4), 0 4px 24px rgba(0,0,0,0.5)',
+          }}
+        >
+          {/* Row 1 — Zoom In / Zoom Out */}
+          <button
+            onClick={handleZoomIn}
+            title="Zoom in"
+            className="flex flex-col items-center justify-center gap-1 w-11 h-11 rounded-md text-muted-foreground hover:text-foreground transition-all duration-100 hover:bg-accent/30 active:scale-95 active:shadow-inner border border-transparent hover:border-border/40"
+            style={{ fontSize: '9px', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+          >
+            <ZoomIn className="h-4 w-4" />
+            <span>IN</span>
+          </button>
+          <button
+            onClick={handleZoomOut}
+            title="Zoom out"
+            className="flex flex-col items-center justify-center gap-1 w-11 h-11 rounded-md text-muted-foreground hover:text-foreground transition-all duration-100 hover:bg-accent/30 active:scale-95 active:shadow-inner border border-transparent hover:border-border/40"
+            style={{ fontSize: '9px', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+          >
+            <ZoomOut className="h-4 w-4" />
+            <span>OUT</span>
+          </button>
 
-      {/* State Focus Indicator */}
-      {focusedState && (
-        <div className="absolute top-4 left-4 z-50">
-          <Card className="p-3 bg-card/95 backdrop-blur">
-            <div className="flex items-center gap-3">
-              <div>
-                <div className="text-sm font-medium">{focusedState}</div>
-                <div className={`text-xs transition-colors ${readyForPin ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
-                  {pinInstruction}
+          {/* Row 2 — Reset / Info */}
+          <button
+            onClick={handleReset}
+            title="Reset to full US view"
+            className="flex flex-col items-center justify-center gap-1 w-11 h-11 rounded-md text-muted-foreground hover:text-foreground transition-all duration-100 hover:bg-accent/30 active:scale-95 active:shadow-inner border border-transparent hover:border-border/40"
+            style={{ fontSize: '9px', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>RST</span>
+          </button>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                title="Map info & instructions"
+                className={`flex flex-col items-center justify-center gap-1 w-11 h-11 rounded-md transition-all duration-100 hover:bg-accent/30 active:scale-95 active:shadow-inner border border-transparent hover:border-border/40 ${focusedState ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                style={{ fontSize: '9px', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+              >
+                <Info className="h-4 w-4" />
+                <span>INFO</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              side="left"
+              align="end"
+              sideOffset={10}
+              className="w-64 p-4 text-sm"
+            >
+              <div className="space-y-3">
+                {/* Current state status */}
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Status</div>
+                  {focusedState ? (
+                    <div className="space-y-0.5">
+                      <div className="font-medium">{focusedState}</div>
+                      <div className={`text-xs ${readyForPin ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                        {pinInstruction}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground text-xs">No state selected</div>
+                  )}
                 </div>
+
+                <div className="border-t border-border/40" />
+
+                {/* How to use */}
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">How to use</div>
+                  <ol className="space-y-1.5 text-xs text-muted-foreground list-none">
+                    <li className="flex gap-2">
+                      <span className="flex-shrink-0 w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">1</span>
+                      <span>Click a state to zoom in and focus it</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="flex-shrink-0 w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">2</span>
+                      <span>Click the map once to arm pin-placement mode</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="flex-shrink-0 w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">3</span>
+                      <span>Click again to drop a pin at that location</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="flex-shrink-0 w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">4</span>
+                      <span>Use RST to return to the full US view</span>
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Pin count */}
+                {visiblePins.length > 0 && (
+                  <>
+                    <div className="border-t border-border/40" />
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Pins in view</span>
+                      <span className="font-semibold tabular-nums">{visiblePins.length}</span>
+                    </div>
+                  </>
+                )}
               </div>
-              <Button size="icon" variant="ghost" onClick={handleReset} className="h-8 w-8">
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </Card>
+            </PopoverContent>
+          </Popover>
         </div>
-      )}
+      </div>
 
       {/* Pin Placement Confirmation */}
       {pendingPin && clickPosition && (
@@ -406,15 +489,13 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         </Card>
       </div>
 
-      {/* Instructions when empty */}
+      {/* Empty state hint — non-blocking small text at map bottom center */}
       {!focusedState && pins.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
-          <Card className="p-4 bg-card/95 backdrop-blur">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <MapPin className="h-5 w-5" />
-              <span>Click on a state to focus and add pins</span>
-            </div>
-          </Card>
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-30">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 bg-card/50 backdrop-blur-sm px-3 py-1.5 rounded-full border border-border/20">
+            <MapPin className="h-3 w-3" />
+            <span>Click a state to focus, then click to add pins</span>
+          </div>
         </div>
       )}
     </div>
