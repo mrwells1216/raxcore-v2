@@ -82,19 +82,19 @@ interface MapViewerProps {
 }
 
 const LOCATION_TYPE_COLORS: Record<LocationType, string> = {
-  sighting: '#3b82f6',
-  trailcam: '#8b5cf6',
-  harvest: '#ef4444',
-  shed: '#f59e0b',
-  scoring_source: '#10b981',
-  stand: '#6366f1',
-  blind: '#8b5cf6',
-  scrape: '#d97706',
-  rub: '#ca8a04',
-  food_plot: '#22c55e',
-  bedding: '#a855f7',
-  travel_corridor: '#64748b',
-  unknown: '#9ca3af',
+  sighting:         '#4a7fa5',  // muted steel blue
+  trailcam:         '#6b5b93',  // muted plum
+  harvest:          '#8b3a3a',  // dark muted red
+  shed:             '#8a6a2a',  // dark muted amber
+  scoring_source:   '#2e7a5e',  // dark muted teal
+  stand:            '#3a4a8b',  // dark muted indigo
+  blind:            '#5a4a7a',  // dark muted violet
+  scrape:           '#7a5030',  // dark muted bronze
+  rub:              '#6b5520',  // dark muted gold
+  food_plot:        '#3a6e35',  // dark muted green
+  bedding:          '#6b3a7a',  // dark muted purple
+  travel_corridor:  '#445060',  // dark slate
+  unknown:          '#4a4f58',  // dark neutral
 }
 
 const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
@@ -474,30 +474,38 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-50">
-        <Card className="p-3 bg-card/95 backdrop-blur">
-          <div className="text-xs font-medium mb-2">Location Types</div>
-          <div className="grid grid-cols-2 gap-1">
-            {(['harvest', 'trailcam', 'sighting', 'stand'] as LocationType[]).map(type => (
-              <div key={type} className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: LOCATION_TYPE_COLORS[type] }} />
-                <span className="text-xs">{LOCATION_TYPE_LABELS[type]}</span>
-              </div>
-            ))}
+      {/* Legend — horizontal strip pinned to the bottom of the map card */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-50 flex items-center gap-x-4 gap-y-0 flex-wrap px-4 py-2.5 pointer-events-none"
+        style={{
+          background: 'linear-gradient(145deg, rgba(18,14,11,0.96), rgba(28,22,17,0.94))',
+          borderTop: '1px solid rgba(107,93,82,0.25)',
+          boxShadow: 'inset 0 1px 0 rgba(107,93,82,0.12)',
+        }}
+      >
+        {(Object.keys(LOCATION_TYPE_LABELS) as LocationType[]).map(type => (
+          <div key={type} className="flex items-center gap-1.5">
+            <div
+              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+              style={{ backgroundColor: LOCATION_TYPE_COLORS[type], boxShadow: `0 0 4px ${LOCATION_TYPE_COLORS[type]}60` }}
+            />
+            <span
+              className="whitespace-nowrap"
+              style={{
+                fontSize: '9px',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                color: 'rgba(180,163,145,0.75)',
+                fontWeight: 500,
+              }}
+            >
+              {LOCATION_TYPE_LABELS[type]}
+            </span>
           </div>
-        </Card>
+        ))}
       </div>
 
-      {/* Empty state hint — non-blocking small text at map bottom center */}
-      {!focusedState && pins.length === 0 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-30">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 bg-card/50 backdrop-blur-sm px-3 py-1.5 rounded-full border border-border/20">
-            <MapPin className="h-3 w-3" />
-            <span>Click a state to focus, then click to add pins</span>
-          </div>
-        </div>
-      )}
+
     </div>
   )
 }
