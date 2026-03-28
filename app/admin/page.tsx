@@ -2,11 +2,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Database, TrendingUp, CheckCircle, AlertTriangle, BarChart3 } from 'lucide-react'
 import { getAdminStats, listBucks, getActiveModelVersion } from '@/lib/storage/service'
+import { listAdminTasks } from '@/lib/notifications/service'
+import { AdminTaskPanel } from '@/components/admin/admin-task-panel'
 
 export default async function AdminDashboard() {
-  const stats = await getAdminStats()
-  const { data: recentBucks } = await listBucks({ limit: 5 })
-  const activeModel = await getActiveModelVersion()
+  const [stats, { data: recentBucks }, activeModel, openTasks] = await Promise.all([
+    getAdminStats(),
+    listBucks({ limit: 5 }),
+    getActiveModelVersion(),
+    listAdminTasks({ status: 'open', limit: 20 }),
+  ])
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -37,6 +42,8 @@ export default async function AdminDashboard() {
           </Card>
         ))}
       </div>
+
+      <AdminTaskPanel initialTasks={openTasks} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>

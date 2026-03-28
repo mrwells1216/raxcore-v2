@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Camera, Upload, Target, TrendingUp, Shield, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { BinaryCamoBackground } from '@/components/binary-camo-background'
 
 const features = [
@@ -31,7 +31,7 @@ const features = [
 export default function HomePage() {
   return (
     <div className="min-h-svh flex flex-col bg-background">
-      <Header />
+      <AppHeader />
       
       <main className="flex-1">
         {/* Hero Section */}

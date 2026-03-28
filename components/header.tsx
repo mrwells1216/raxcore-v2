@@ -27,7 +27,11 @@ const adminNavigation = [
   { name: 'Admin', href: '/admin', icon: Shield },
 ]
 
-export function Header() {
+interface HeaderProps {
+  bellSlot?: React.ReactNode
+}
+
+export function Header({ bellSlot }: HeaderProps) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
@@ -104,13 +108,15 @@ export function Header() {
           ))}
         </nav>
 
-        {/* Desktop user menu */}
-        <div className="hidden md:flex items-center">
+        {/* Desktop user menu + bell */}
+        <div className="hidden md:flex items-center gap-1">
+          {bellSlot}
           <UserMenu initialUser={user} />
         </div>
 
         {/* Mobile menu */}
-        <div className="flex flex-1 items-center justify-end gap-2 md:hidden">
+        <div className="flex flex-1 items-center justify-end gap-1 md:hidden">
+          {bellSlot}
           <UserMenu initialUser={user} />
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>

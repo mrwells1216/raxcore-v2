@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { ResultClient } from './result-client'
 import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
@@ -53,7 +53,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <AppHeader />
       <main className="container max-w-2xl mx-auto px-4 py-6 pb-24">
         <div className="mb-6">
           <Link href="/history" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">

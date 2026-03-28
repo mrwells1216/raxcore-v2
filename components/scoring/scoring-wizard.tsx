@@ -27,6 +27,7 @@ interface CapturedImage {
 
 interface ScoringWizardProps {
   initialMode: 'camera' | 'upload'
+  userId?: string | null
   onComplete: (result: ScoringResult, formData: ScoringFormData) => void
 }
 
@@ -36,7 +37,7 @@ const STEPS = [
   { id: 'analyze', title: 'Analyze', description: 'Get your score' },
 ]
 
-export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
+export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizardProps) {
   const [mode, setMode] = useState<'camera' | 'upload'>(initialMode)
   const [step, setStep] = useState(0)
   const [images, setImages] = useState<CapturedImage[]>([])
@@ -135,6 +136,9 @@ export function ScoringWizard({ initialMode, onComplete }: ScoringWizardProps) {
       }
       if (data.notes) apiFormData.append('notes', data.notes)
       
+      // Pass authenticated user ID for notifications
+      if (userId) apiFormData.append('user_id', userId)
+
       // Include intake quality summary
       if (finalQuality) {
         const qualitySummary: IntakeQualitySummary = {

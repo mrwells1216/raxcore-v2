@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/header'
 import { ScoringWizard } from '@/components/scoring/scoring-wizard'
 import { ScoringResults } from '@/components/scoring/scoring-results'
+import { createClient } from '@/lib/supabase/client'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default function ScorePage() {
@@ -13,6 +14,13 @@ export default function ScorePage() {
   
   const [result, setResult] = useState<ScoringResult | null>(null)
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    createClient().auth.getUser().then(({ data: { user } }) => {
+      setUserId(user?.id ?? null)
+    })
+  }, [])
 
   const handleScoringComplete = (scoringResult: ScoringResult, data: ScoringFormData) => {
     setResult(scoringResult)
@@ -37,7 +45,8 @@ export default function ScorePage() {
           />
         ) : (
           <ScoringWizard 
-            initialMode={initialMode as 'camera' | 'upload'} 
+            initialMode={initialMode as 'camera' | 'upload'}
+            userId={userId}
             onComplete={handleScoringComplete}
           />
         )}

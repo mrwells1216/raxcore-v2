@@ -10,6 +10,7 @@ import {
   getActiveModelVersion,
   getBuckImages
 } from '@/lib/storage/service'
+import { createUserNotification, createAdminTask } from '@/lib/notifications/service'
 import {
   createUsageRecord,
   completeUsageRecord,
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
     const location = formData.get('location') as string | null
     const harvestDate = formData.get('harvest_date') as string | null
     const intakeQualityRaw = formData.get('intake_quality') as string | null
+    const userId = formData.get('user_id') as string | null
     
     // Parse intake quality summary if provided
     let intakeQuality: IntakeQualitySummary | null = null
@@ -240,6 +242,59 @@ export async function POST(request: Request) {
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
+
+    // Phase 34: Fire notifications (fire-and-forget, never block the response)
+    const notificationPromises: Promise<void>[] = []
+
+    if (userId) {
+      // Always notify logged-in user to submit a real score for ground-truth
+      notificationPromises.push(
+        createUserNotification({
+          userId,
+          type: 'submit_real_score',
+          title: 'Submit your real score to improve accuracy',
+          body: 'Once you officially score this buck, adding the measurement helps train the AI.',
+          linkHref: `/results/${buck.id}`,
+          buckId: buck.id,
+          priority: 'normal',
+        })
+      )
+
+      // Notify if photo quality was poor
+      if (intakeQuality && intakeQuality.tier === 'poor') {
+        notificationPromises.push(
+          createUserNotification({
+            userId,
+            type: 'better_photos_needed',
+            title: 'Better photos would improve this score',
+            body: `Accuracy was limited by image quality. ${intakeQuality.weakestFactors?.[0] ?? 'Try better lighting or a clearer angle.'}`,
+            linkHref: `/results/${buck.id}`,
+            buckId: buck.id,
+            priority: 'high',
+          })
+        )
+      }
+    }
+
+    // Admin task: flag low-quality submissions for dataset review
+    if (intakeQuality && intakeQuality.tier === 'poor') {
+      notificationPromises.push(
+        createAdminTask({
+          type: 'data_gap',
+          title: `Low-quality submission: Buck ${buck.id.slice(-8)}`,
+          body: `Intake quality tier: ${intakeQuality.tier}. Confidence: ${adjustedConfidence}%. May not be suitable for training.`,
+          priority: 'low',
+          linkHref: `/admin/submissions/${buck.id}`,
+          relatedId: buck.id,
+          relatedType: 'buck',
+        })
+      )
+    }
+
+    // Fire all notifications in parallel, don't await
+    Promise.all(notificationPromises).catch(err =>
+      console.error('[score] notification error:', err)
+    )
 
     // Get stored images
     const buckImages = await getBuckImages(buck.id)

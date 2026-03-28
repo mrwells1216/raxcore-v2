@@ -3,7 +3,7 @@ import Image from 'next/image'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { ArrowRight, Camera } from 'lucide-react'
 import { listHistory } from '@/lib/storage/service'
 
@@ -12,7 +12,7 @@ export default async function HistoryPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <AppHeader />
       <main className="container max-w-2xl mx-auto px-4 py-6 pb-24">
         <div className="mb-6">
           <h1 className="text-2xl font-bold tracking-tight">Scoring History</h1>

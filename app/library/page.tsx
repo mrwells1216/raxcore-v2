@@ -3,7 +3,7 @@ import Image from 'next/image'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { ArrowRight, Camera, Library, Plus, FolderOpen } from 'lucide-react'
 import { listUserBucks } from '@/lib/storage/service'
 import { getUser, getProfile } from '@/lib/auth/actions'
@@ -38,7 +38,7 @@ export default async function LibraryPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <AppHeader />
       <main className="container max-w-4xl mx-auto px-4 py-6 pb-24">
         {/* Welcome header */}
         <div className="mb-6">

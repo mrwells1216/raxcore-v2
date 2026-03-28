@@ -156,7 +156,8 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
     }
   }, [])
 
-  const handleMapAreaClick = useCallback((event: React.MouseEvent<SVGElement>) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleMapAreaClick = useCallback((event: any) => {
     if (!focusedState || !onMapClick) return
     const svg = event.currentTarget
     const svgRect = svg.getBoundingClientRect()

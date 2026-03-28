@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHealthReviewDecision, getReviewDecisions } from '@/lib/health'
+import { createAdminTask } from '@/lib/notifications/service'
 import type { HealthReviewDecisionInput } from '@/lib/types'
 
 export async function GET(request: NextRequest) {
@@ -52,6 +53,19 @@ export async function POST(request: NextRequest) {
     }
 
     const decision = await createHealthReviewDecision(body)
+
+    // Phase 34: Create admin task when examples are flagged for review
+    if (body.decision === 'needs_review' || body.decision === 'reject') {
+      createAdminTask({
+        type: 'review_example',
+        title: `Training example flagged: ${body.decision}`,
+        body: body.decision_reason,
+        priority: body.decision === 'reject' ? 'high' : 'normal',
+        linkHref: `/admin/dataset-health`,
+        relatedId: body.training_example_id,
+        relatedType: 'training_example',
+      }).catch(err => console.error('[health-review] admin task error:', err))
+    }
 
     return NextResponse.json({ decision })
   } catch (error) {
