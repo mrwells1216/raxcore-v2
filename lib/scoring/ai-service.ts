@@ -798,6 +798,35 @@ async function buildVisionScoringOutput(
   const measurementCorrectedMeasurements = measurementCorrectionResult.correctedMeasurements
 
   // STAGE 5.5: Phase 41 Segmented Calibration — blended per-segment multipliers/biases
+  // PATCH D: derive richer context signals deterministically rather than leaving them undefined
+
+  // reference_visibility: strong if ears are clearly visible (good body reference),
+  // partial if ears visible but source is trail cam or single image, weak otherwise
+  const derivedReferenceVisibility = (() => {
+    if (input.earsFullyVisible === true) {
+      const isSingleOrTrailCam = input.images.length === 1 || input.sourceType === 'trail_cam'
+      return isSingleOrTrailCam ? 'partial' : 'strong'
+    }
+    if (input.earsFullyVisible === false) return 'weak'
+    // unknown — infer from image count + source
+    if (input.sourceType === 'trail_cam' || input.images.length === 1) return 'partial'
+    return 'partial' // safe default
+  })() as import('./segment-engine').ReferenceVisibility
+
+  // lighting_quality: trail cam night shots are low_light; mounted/European are normal;
+  // single-image trail cams have higher chance of harsh conditions
+  const derivedLightingQuality = (() => {
+    if (input.captureDevice === 'trail_camera') {
+      // No way to know night vs day from metadata alone — use 'low_light' as safe trail-cam default
+      return 'low_light'
+    }
+    if (input.sourceType === 'mounted_photo' || input.sourceType === 'european_mount') return 'normal'
+    if (input.sourceType === 'harvest_photo') return 'normal'
+    // live deer + single image has higher chance of harsh shadow / motion blur
+    if (input.sourceType === 'live_deer' && input.images.length === 1) return 'harsh_shadow'
+    return 'normal'
+  })() as import('./segment-engine').LightingQuality
+
   const segmentContext = {
     sourceType: input.sourceType,
     imageCount: input.images.length,
@@ -806,6 +835,8 @@ async function buildVisionScoringOutput(
     state: input.state,
     earsFullyVisible: input.earsFullyVisible,
     captureDevice: input.captureDevice,
+    referenceVisibility: derivedReferenceVisibility,
+    lightingQuality: derivedLightingQuality,
   }
   const segmentedCal = await resolveSegments(segmentContext)
   const segmentCorrectionResult = applySegmentedCalibration(
@@ -839,7 +870,9 @@ async function buildVisionScoringOutput(
   )
 
   // STAGE 7: Apply any remaining per-field corrections from learning result
-  const correctedMeasurements = { ...measurementCorrectedMeasurements }
+  // Phase 41 PATCH A: base must start from segmentCorrectedMeasurements so Phase 41
+  // corrections are reflected in the final first-pass gross/net, not just in learning inputs.
+  const correctedMeasurements = { ...segmentCorrectedMeasurements }
   for (const [field, correction] of learningResult.measurementCorrections) {
     const key = field as keyof typeof correctedMeasurements
     const currentVal = correctedMeasurements[key]

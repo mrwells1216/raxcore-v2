@@ -164,6 +164,13 @@ function matchesConditions(
         if (ctx.region !== value) return false
         break
       }
+      // PATCH C: explicit state matching
+      case 'state': {
+        const allowed = Array.isArray(value) ? value : [value]
+        const normalised = ctx.state?.toUpperCase()
+        if (!normalised || !allowed.map(s => String(s).toUpperCase()).includes(normalised)) return false
+        break
+      }
       case 'reference_visibility': {
         if (!ctx.referenceVisibility || ctx.referenceVisibility !== value) return false
         break
@@ -206,77 +213,150 @@ function gateSegment(
 }
 
 // ============================================================================
-// WEIGHT BLENDING
+// WEIGHT BLENDING — PATCH B + E: evidence-based, parent-aware
 // ============================================================================
 
+const MEASUREMENT_TYPES = ['spread', 'beam', 'tine', 'mass', 'deduction'] as const
+
 /**
- * Compute normalised blend weights.
+ * Compute an evidence score for a segment in [0, 1].
  *
- * Strategy:
- *  - Level-0 (global) always contributes at its activation_weight, capped to
- *    whatever remains after higher-level segments have claimed their share.
- *  - Level-1 primary segments each contribute proportionally to their
- *    activation_weight within the primary pool.
- *  - Level-2 overlay segments add on top but are down-scaled so the total
- *    never exceeds 1.
+ * Evidence = normalised sample size score * stability score, scaled by
+ * the segment's own activation_weight cap.
+ *
+ * State-level segments (level 3+) are additionally penalised unless they
+ * have strong evidence, to prevent tiny state sets from dominating.
  */
+function evidenceScore(seg: DbSegment): number {
+  // Sample size: log-scaled; saturates at 500 samples → 1.0
+  const sampleScore = Math.min(1.0, Math.log1p(seg.sample_size) / Math.log1p(500))
+  // Stability: direct 0-1
+  const stabilityScore = Math.max(0, Math.min(1, seg.stability_score))
+  // Combined evidence
+  const base = sampleScore * stabilityScore * seg.activation_weight
+  // Penalise high-specificity (state) segments unless evidence is strong
+  const levelPenalty = seg.level >= 3 ? 0.75 : 1.0
+  return base * levelPenalty
+}
+
+/**
+ * PATCH B: Resolve a segment's calibration values via parent-chain shrinkage.
+ *
+ * If a child segment has weak evidence (sample_size < SHRINKAGE_THRESHOLD),
+ * its calibration values are shrunk toward its parent's values proportionally.
+ * If parent is unavailable, shrink toward global (identity).
+ *
+ * shrinkage_factor = 1 - clamp(sample_size / SHRINKAGE_THRESHOLD, 0, 1)
+ *   → 0 means use child fully, 1 means use parent fully
+ */
+const SHRINKAGE_THRESHOLD = 200 // samples needed before a child stands on its own
+
+function resolveWithShrinkage(
+  seg: DbSegment,
+  mt: string,
+  allSegments: DbSegment[],
+  valuesBySegment: Map<string, DbCalibrationValue[]>,
+  visited = new Set<string>()
+): { multiplier: number; bias: number; confidenceAdjustment: number } {
+  const IDENTITY = { multiplier: 1.0, bias: 0.0, confidenceAdjustment: 0.0 }
+
+  if (visited.has(seg.id)) return IDENTITY
+  visited.add(seg.id)
+
+  const vals = valuesBySegment.get(seg.id) ?? []
+  const ownVal = vals.find(v => v.measurement_type === mt)
+  const own = ownVal
+    ? { multiplier: ownVal.multiplier, bias: ownVal.bias, confidenceAdjustment: ownVal.confidence_adjustment }
+    : IDENTITY
+
+  // Level 0 (global) — no shrinkage
+  if (seg.level === 0) return own
+
+  // Compute shrinkage factor: high when samples are few
+  const shrinkage = Math.max(0, 1 - Math.min(1, seg.sample_size / SHRINKAGE_THRESHOLD))
+  if (shrinkage < 0.001) return own // fully independent
+
+  // Find parent
+  const parent = seg.parent_id ? allSegments.find(s => s.id === seg.parent_id) : null
+  const parentVal = parent
+    ? resolveWithShrinkage(parent, mt, allSegments, valuesBySegment, visited)
+    : IDENTITY
+
+  // Blend child toward parent
+  return {
+    multiplier: own.multiplier * (1 - shrinkage) + parentVal.multiplier * shrinkage,
+    bias: own.bias * (1 - shrinkage) + parentVal.bias * shrinkage,
+    confidenceAdjustment: own.confidenceAdjustment * (1 - shrinkage) + parentVal.confidenceAdjustment * shrinkage,
+  }
+}
+
+/**
+ * PATCH E: Compute evidence-based blend weights, using each segment's
+ * evidence score as the raw weight instead of fixed per-level pools.
+ *
+ * Safety caps:
+ *  - Global always receives at least MIN_GLOBAL_WEIGHT
+ *  - No single non-global segment exceeds MAX_SINGLE_WEIGHT
+ *  - Weights are normalised to sum to 1.0
+ */
+const MIN_GLOBAL_WEIGHT = 0.10
+
 function computeBlendWeights(
   passing: DbSegment[]
 ): Map<string, number> {
   const weights = new Map<string, number>()
-
   const global = passing.find(s => s.level === 0)
-  const primary = passing.filter(s => s.level === 1)
-  const overlays = passing.filter(s => s.level === 2)
+  const nonGlobal = passing.filter(s => s.level > 0)
 
-  // Primary pool: normalise so the sum is at most 0.6
-  const primaryRawSum = primary.reduce((sum, s) => sum + s.activation_weight, 0)
-  const primaryBudget = 0.6
-  if (primary.length > 0) {
-    for (const s of primary) {
-      const w = primaryRawSum > 0
-        ? (s.activation_weight / primaryRawSum) * primaryBudget
-        : primaryBudget / primary.length
-      weights.set(s.id, Math.min(w, MAX_SINGLE_WEIGHT))
-    }
+  // Compute raw evidence scores for non-global segments
+  const rawScores = new Map<string, number>()
+  let totalRaw = 0
+  for (const seg of nonGlobal) {
+    const score = evidenceScore(seg)
+    rawScores.set(seg.id, score)
+    totalRaw += score
   }
 
-  // Overlay pool: takes up to 0.25 of remaining budget
-  const overlayRawSum = overlays.reduce((sum, s) => sum + s.activation_weight, 0)
-  const overlayBudget = 0.25
-  if (overlays.length > 0) {
-    for (const s of overlays) {
-      const w = overlayRawSum > 0
-        ? (s.activation_weight / overlayRawSum) * overlayBudget
-        : overlayBudget / overlays.length
-      weights.set(s.id, Math.min(w, MAX_SINGLE_WEIGHT))
-    }
+  // Allocate up to (1 - MIN_GLOBAL_WEIGHT) to non-global segments
+  const nonGlobalBudget = 1 - MIN_GLOBAL_WEIGHT
+  for (const seg of nonGlobal) {
+    const rawScore = rawScores.get(seg.id) ?? 0
+    const proportional = totalRaw > 0 ? (rawScore / totalRaw) * nonGlobalBudget : 0
+    weights.set(seg.id, Math.min(proportional, MAX_SINGLE_WEIGHT))
   }
 
-  // Global fills remaining budget
+  // Global fills remaining budget (always at least MIN_GLOBAL_WEIGHT)
   if (global) {
     const used = Array.from(weights.values()).reduce((s, v) => s + v, 0)
-    const remaining = Math.max(0, 1 - used)
+    const remaining = Math.max(MIN_GLOBAL_WEIGHT, 1 - used)
     weights.set(global.id, remaining)
+  }
+
+  // Final normalisation pass to ensure sum == 1.0
+  const total = Array.from(weights.values()).reduce((s, v) => s + v, 0)
+  if (total > 0 && Math.abs(total - 1.0) > 0.001) {
+    for (const [id, w] of weights) {
+      weights.set(id, w / total)
+    }
   }
 
   return weights
 }
 
 // ============================================================================
-// BLENDED CALIBRATION COMPUTATION
+// BLENDED CALIBRATION COMPUTATION — uses parent-chain shrinkage per value
 // ============================================================================
-
-const MEASUREMENT_TYPES = ['spread', 'beam', 'tine', 'mass', 'deduction'] as const
 
 function buildBlendedCalibration(
   passing: DbSegment[],
+  allSegments: DbSegment[],
   weights: Map<string, number>,
   valuesBySegment: Map<string, DbCalibrationValue[]>
 ): Pick<SegmentedCalibration, 'multipliers' | 'biases' | 'confidenceAdjustment'> {
   const multipliers: Record<string, number> = {}
   const biases: Record<string, number> = {}
-  let confidenceAdjustment = 0
+  let totalConfAdj = 0
+  let totalConfWeight = 0
 
   for (const mt of MEASUREMENT_TYPES) {
     let blendedMult = 0
@@ -286,30 +366,32 @@ function buildBlendedCalibration(
     for (const seg of passing) {
       const w = weights.get(seg.id) ?? 0
       if (w <= 0) continue
-      const vals = valuesBySegment.get(seg.id) ?? []
-      const val = vals.find(v => v.measurement_type === mt)
-      if (!val) continue
-      blendedMult += val.multiplier * w
-      blendedBias += val.bias * w
+      // PATCH B: use shrinkage-resolved values, not raw DB values
+      const resolved = resolveWithShrinkage(seg, mt, allSegments, valuesBySegment)
+      blendedMult += resolved.multiplier * w
+      blendedBias += resolved.bias * w
       totalWeight += w
     }
 
-    // Normalise by actual weight used (handles missing rows gracefully)
     multipliers[mt] = totalWeight > 0 ? blendedMult / totalWeight : 1.0
     biases[mt] = totalWeight > 0 ? blendedBias / totalWeight : 0.0
   }
 
-  // Confidence adjustment: weighted average across all passing segments
+  // Confidence adjustment: weighted average using shrinkage-resolved values
   for (const seg of passing) {
     const w = weights.get(seg.id) ?? 0
     if (w <= 0) continue
-    const vals = valuesBySegment.get(seg.id) ?? []
-    for (const val of vals) {
-      confidenceAdjustment += val.confidence_adjustment * w
+    // Average across measurement types for a single conf adjustment per segment
+    let segConfSum = 0
+    for (const mt of MEASUREMENT_TYPES) {
+      const resolved = resolveWithShrinkage(seg, mt, allSegments, valuesBySegment)
+      segConfSum += resolved.confidenceAdjustment
     }
+    totalConfAdj += (segConfSum / MEASUREMENT_TYPES.length) * w
+    totalConfWeight += w
   }
-  // Average out per measurement type
-  confidenceAdjustment = confidenceAdjustment / MEASUREMENT_TYPES.length
+
+  const confidenceAdjustment = totalConfWeight > 0 ? totalConfAdj / totalConfWeight : 0
 
   return { multipliers, biases, confidenceAdjustment }
 }
@@ -415,12 +497,13 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
       passing.push(globalSeg)
     }
 
-    // Step 3: compute blend weights
+    // Step 3: compute evidence-based blend weights (PATCH E)
     const weights = computeBlendWeights(passing)
 
-    // Step 4: blend calibration values
+    // Step 4: blend calibration values with parent-chain shrinkage (PATCH B)
     const { multipliers, biases, confidenceAdjustment } = buildBlendedCalibration(
       passing,
+      segments, // full segment list needed for parent chain traversal
       weights,
       valuesBySegment
     )
