@@ -15,6 +15,7 @@ import {
   FlaskConical,
   GitCompare,
   Settings2,
+  Package,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
   { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
+  { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },
   { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },
