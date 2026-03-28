@@ -6,6 +6,7 @@ import {
   getRenderOutputs 
 } from '@/lib/render/service'
 import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
+import { logEventFireForget } from '@/lib/monitoring/service'
 
 export async function GET(
   request: NextRequest,
@@ -55,9 +56,22 @@ export async function PATCH(
       return NextResponse.json({ error: 'Render job not found' }, { status: 404 })
     }
 
-    // Phase 34: Fire user + admin notifications on terminal status transitions
+    // Phase 34+39: Fire notifications + log monitoring events on terminal status transitions
     if (body.status === 'completed' || body.status === 'failed') {
       const userId = (job as Record<string, unknown>).user_id as string | undefined
+      const buckId = (job as Record<string, unknown>).buck_id as string | undefined
+
+      // Phase 39: Log render terminal event
+      logEventFireForget({
+        eventType: body.status === 'completed' ? 'render_completed' : 'render_failed',
+        service: 'render',
+        route: `/api/render/job/${jobId}`,
+        status: body.status === 'completed' ? 'success' : 'failure',
+        errorMessage: body.status === 'failed' ? (body.error_message ?? 'Render failed') : undefined,
+        renderJobId: jobId,
+        userId: userId ?? null,
+        buckId: buckId ?? null,
+      })
 
       if (userId) {
         if (body.status === 'completed') {

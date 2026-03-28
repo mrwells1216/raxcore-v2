@@ -27,6 +27,7 @@ import {
   createFallbackMetadata,
   type FallbackMetadata
 } from './fallback-handler'
+import { logEventFireForget } from '@/lib/monitoring/service'
 
 // Vision model to use - Gemini 2.0 Flash has strong vision capabilities
 const VISION_MODEL = 'google/gemini-2.0-flash-001'
@@ -46,6 +47,8 @@ export interface VisionScoringInput {
   sourceType?: string
   captureDevice?: string
   mainFramePoints?: number
+  /** Phase 39: optional correlation ID inherited from the parent score request */
+  traceId?: string
 }
 
 // Zod schema for structured vision output
@@ -233,6 +236,17 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   const startTime = Date.now()
   const visionErrors: VisionRuntimeError[] = []
 
+  // Phase 39: Log vision call started
+  logEventFireForget({
+    traceId: input.traceId,
+    eventType: 'vision_started',
+    service: 'vision',
+    route: '/api/score',
+    status: 'info',
+    imagesCount: input.images?.length ?? 0,
+    modelUsed: VISION_MODEL,
+  })
+
   // Phase 24: Comprehensive image validation
   if (!input.images || input.images.length === 0) {
     const fallbackDecision = makeFallbackDecision(
@@ -339,6 +353,23 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       timedOut: visionCallResult.metadata.timedOut,
     })
 
+    // Phase 39: Log vision failure + fallback
+    logEventFireForget({
+      traceId: input.traceId,
+      eventType: visionCallResult.metadata.wasRetried ? 'vision_retry' : 'vision_failed',
+      service: 'vision',
+      route: '/api/score',
+      status: 'failure',
+      errorType: runtimeError.type as import('@/lib/monitoring/service').ErrorType,
+      errorMessage: runtimeError.message,
+      durationMs: visionCallResult.metadata.totalTimeMs,
+      retryCount: visionCallResult.metadata.totalAttempts - 1,
+      imagesCount: input.images?.length ?? 0,
+      modelUsed: VISION_MODEL,
+      fallbackUsed: true,
+      metadata: { timedOut: visionCallResult.metadata.timedOut },
+    })
+
     return {
       success: false,
       error: runtimeError.message,
@@ -365,6 +396,20 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     const fallbackDecision = makeFallbackDecision(validationError, visionCallResult.metadata, imageValidation)
     
     console.error('Vision output validation failed:', outputValidation.issues)
+
+    // Phase 39: Log malformed output event
+    logEventFireForget({
+      traceId: input.traceId,
+      eventType: 'vision_output_invalid',
+      service: 'vision',
+      route: '/api/score',
+      status: 'warning',
+      errorType: 'malformed_response',
+      errorMessage: outputValidation.issues.join('; '),
+      durationMs: visionCallResult.metadata.totalTimeMs,
+      modelUsed: VISION_MODEL,
+      fallbackUsed: true,
+    })
 
     return {
       success: false,
@@ -408,11 +453,30 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     console.warn('Vision output has minor issues:', outputValidation.issues)
   }
 
+  // Phase 39: Log vision success
+  const processingTimeMs = Date.now() - startTime
+  logEventFireForget({
+    traceId: input.traceId,
+    eventType: 'vision_completed',
+    service: 'vision',
+    route: '/api/score',
+    status: 'success',
+    durationMs: processingTimeMs,
+    modelUsed: VISION_MODEL,
+    retryCount: visionCallResult.metadata.totalAttempts - 1,
+    imagesCount: validImages.length,
+    metadata: {
+      confidence: visionOutput.confidence_percent,
+      grossScore: visionOutput.gross_score,
+      outputIssues: outputValidation.issues.length,
+    },
+  })
+
   // Success!
   return {
     success: true,
     output: visionOutput,
-    processingTimeMs: Date.now() - startTime,
+    processingTimeMs,
     modelUsed: VISION_MODEL,
     runtimeMetadata: visionCallResult.metadata,
     imageValidation,

@@ -28,6 +28,7 @@ import {
   getUserPlanStatus,
 } from '@/lib/billing/service'
 import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
+import { logEventFireForget } from '@/lib/monitoring/service'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -48,6 +49,14 @@ export async function POST(request: Request) {
   
   // Track initial usage
   let usageRecordCreated = false
+  // Phase 39: Log score request started
+  logEventFireForget({
+    traceId: requestId,
+    eventType: 'score_started',
+    service: 'score',
+    route: '/api/score',
+    status: 'info',
+  })
   let imageCount = 0
   
   try {
@@ -213,7 +222,7 @@ export async function POST(request: Request) {
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
-    // Run AI scoring
+    // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
       images,
       state,
@@ -223,6 +232,7 @@ export async function POST(request: Request) {
       captureDevice: captureDevice || undefined,
       harvestYear: Number.isFinite(harvestYear) ? harvestYear ?? undefined : undefined,
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
+      traceId: requestId,
     })
 
     // Apply intake quality adjustments to confidence and error bands
@@ -405,6 +415,31 @@ export async function POST(request: Request) {
       await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
     }
 
+    // Phase 39: Log score completed
+    const totalDurationMs = Date.now() - requestStartTime
+    logEventFireForget({
+      traceId: requestId,
+      eventType: 'score_completed',
+      service: 'score',
+      route: '/api/score',
+      status: 'success',
+      durationMs: totalDurationMs,
+      modelUsed: scoringResult.visionModelUsed ?? undefined,
+      modelVersion: model?.slug ?? undefined,
+      fallbackUsed: scoringResult.scoringMethod !== 'vision',
+      retryCount: scoringResult.runtimeMetadata?.totalAttempts
+        ? scoringResult.runtimeMetadata.totalAttempts - 1
+        : 0,
+      imagesCount: imageCount,
+      userId: userId ?? null,
+      buckId: buck.id,
+      metadata: {
+        scoringMethod: scoringResult.scoringMethod,
+        confidence: adjustedConfidence,
+        predictedGross: scoringResult.predictedGross,
+      },
+    })
+
     // Return result
     return NextResponse.json({
       sessionId: buck.session_id,
@@ -461,6 +496,18 @@ export async function POST(request: Request) {
       error: errorMessage,
       errorType,
       stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    // Phase 39: Log score failure to runtime_events
+    logEventFireForget({
+      traceId: requestId,
+      eventType: 'score_failed',
+      service: 'score',
+      route: '/api/score',
+      status: 'failure',
+      errorType: errorType as import('@/lib/monitoring/service').ErrorType,
+      errorMessage,
+      durationMs: Date.now() - requestStartTime,
     })
 
     // Phase 30: Track failed request

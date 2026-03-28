@@ -55,6 +55,8 @@ export interface ScoringInput {
   // Phase 20: Optional explicit calibration profile for model comparison
   // If not provided, uses the active calibration profile
   calibrationProfile?: CalibrationProfile | null
+  /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
+  traceId?: string
 }
 
 export interface ScoringOutput {
@@ -603,6 +605,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     sourceType: input.sourceType,
     captureDevice: input.captureDevice,
     mainFramePoints: input.mainFramePoints,
+    traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 
   if (visionResult.success) {

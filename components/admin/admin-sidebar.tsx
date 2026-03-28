@@ -20,6 +20,7 @@ import {
   Scale,
   Activity,
   CreditCard,
+  Radio,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -27,6 +28,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { name: 'Monitoring', href: '/admin/monitoring', icon: Radio },
   { name: 'Operations', href: '/admin/operations', icon: Activity },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
   { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
