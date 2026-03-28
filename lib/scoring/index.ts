@@ -7,3 +7,7 @@ export * from './normalization'
 export * from './landmark-consistency'
 export * from './confidence-calibration'
 export * from './error-tracking'
+// Phase 10: Learning correction
+export * from './learning-correction'
+// Phase 28: Weighted learning correction
+export * from './weighted-learning-correction'

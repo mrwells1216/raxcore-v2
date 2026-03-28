@@ -2213,3 +2213,366 @@ export const DEFAULT_HEALTH_CONFIG: HealthComputationConfig = {
     poor: 30,
   }
 }
+
+// ========================================
+// INFLUENCE WEIGHTING + SAFE LEARNING (Phase 28)
+// ========================================
+
+// Influence factors breakdown for explainability
+export interface InfluenceFactors {
+  // Quality-based factors (0-1 scale)
+  health_score_factor: number
+  verification_strength_factor: number
+  image_quality_factor: number
+  metadata_completeness_factor: number
+  error_stability_factor: number // Low variance in corrections over time
+  
+  // Computed values
+  base_influence: number // Before similarity bonus
+  similarity_bonus: number // Added based on match to current buck
+  final_influence: number // After all factors
+  
+  // Explanations
+  top_boosters: string[]
+  top_reducers: string[]
+}
+
+// Similarity factors for matching
+export interface SimilarityFactors {
+  state_match: boolean
+  state_region_match: boolean
+  rack_type_match: boolean
+  frame_size_similarity: number // 0-1
+  source_type_match: boolean
+  capture_device_match: boolean
+  image_count_similarity: number // 0-1
+  ears_visibility_match: boolean
+  harvest_method_match: boolean
+  angle_diversity_similarity: number // 0-1
+  confidence_tier_match: boolean
+  
+  // Computed
+  total_similarity: number // 0-1
+  matching_features: string[]
+  missing_features: string[]
+}
+
+// Training example with influence weight
+export interface TrainingExampleWithInfluence extends TrainingExampleWithHealth {
+  influence_weight: number
+  influence_factors: InfluenceFactors | null
+  influence_computed_at: string | null
+  training_eligibility_reason: string | null
+}
+
+// Learning correction log entry
+export interface LearningCorrectionLog {
+  id: string
+  buck_id: string | null
+  prediction_id: string | null
+  gross_correction: number
+  net_correction: number | null
+  confidence_boost: number | null
+  aggregation_method: 'weighted_mean' | 'trimmed_mean' | 'median' | 'robust_mean'
+  pre_cap_gross_correction: number | null
+  cap_applied: boolean
+  cap_reason: string | null
+  contributing_examples_count: number
+  highly_similar_count: number | null
+  total_influence_weight: number | null
+  avg_similarity: number | null
+  max_similarity: number | null
+  min_similarity: number | null
+  correction_direction: 'increase' | 'decrease' | 'mixed' | 'none'
+  measurement_corrections: Record<string, number> | null
+  influential_examples: InfluentialExampleDetail[] | null
+  scenario_context: ScenarioContext | null
+  created_at: string
+}
+
+// Detailed contribution from one example
+export interface InfluentialExampleDetail {
+  example_id: string
+  buck_id: string
+  similarity_score: number
+  influence_weight: number
+  effective_weight: number
+  error_contribution: number
+  weighted_contribution: number
+  matching_features: string[]
+  ground_truth_score: number
+  predicted_score: number
+  state: string | null
+  rack_type: string | null
+}
+
+// Scenario context for a correction
+export interface ScenarioContext {
+  state: string
+  rack_type: string
+  source_type: string | null
+  capture_device: string | null
+  image_count: number
+  angle_diversity: number
+  base_vision_confidence: number
+}
+
+// Correction contribution tracking
+export interface CorrectionContribution {
+  id: string
+  correction_log_id: string
+  training_example_id: string
+  similarity_score: number
+  influence_weight: number
+  effective_weight: number
+  error_contribution: number
+  weighted_contribution: number
+  similarity_factors: SimilarityFactors | null
+  created_at: string
+}
+
+// Drift detection types
+export type DriftType = 
+  | 'directional_bias'
+  | 'magnitude_drift'
+  | 'measurement_drift'
+  | 'scenario_drift'
+  | 'confidence_divergence'
+
+export type DriftSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export type DriftAction = 
+  | 'none'
+  | 'reduced_learning_strength'
+  | 'increased_evidence_threshold'
+  | 'flagged_for_review'
+  | 'temporarily_disabled'
+
+// Drift detection log entry
+export interface DriftDetectionLog {
+  id: string
+  drift_type: DriftType
+  severity: DriftSeverity
+  detection_window_hours: number
+  samples_analyzed: number
+  drift_metrics: DriftMetrics
+  action_taken: DriftAction | null
+  action_details: Record<string, unknown> | null
+  is_resolved: boolean
+  resolved_by: string | null
+  resolved_at: string | null
+  resolution_notes: string | null
+  detected_at: string
+  created_at: string
+}
+
+// Drift metrics (varies by drift type)
+export interface DriftMetrics {
+  // For directional_bias
+  positive_corrections?: number
+  negative_corrections?: number
+  bias_ratio?: number
+  
+  // For magnitude_drift
+  avg_correction_magnitude?: number
+  magnitude_trend?: number // positive = increasing
+  
+  // For measurement_drift
+  affected_measurement?: string
+  measurement_bias?: number
+  
+  // For scenario_drift
+  scenario?: string
+  scenario_bias?: number
+  
+  // For confidence_divergence
+  correlation_with_confidence?: number
+  expected_direction_match_rate?: number
+}
+
+// Influence configuration
+export interface InfluenceConfig {
+  id: string
+  config_name: string
+  is_active: boolean
+  weight_factors: InfluenceWeightFactors
+  safety_caps: SafetyCaps
+  drift_protection: DriftProtectionSettings
+  eligibility_rules: EligibilityRules
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InfluenceWeightFactors {
+  health_score: number
+  verification_strength: number
+  image_quality: number
+  metadata_completeness: number
+  error_stability: number
+  similarity_bonus: number
+}
+
+export interface SafetyCaps {
+  max_per_example_influence: number
+  max_total_correction_inches: number
+  max_per_measurement_correction_percent: number
+  min_examples_for_correction: number
+  min_total_influence_weight: number
+}
+
+export interface DriftProtectionSettings {
+  enabled: boolean
+  directional_bias_threshold: number
+  magnitude_drift_threshold: number
+  detection_window_hours: number
+  min_samples_for_detection: number
+  auto_reduce_strength_on_drift: boolean
+  strength_reduction_factor: number
+}
+
+export interface EligibilityRules {
+  require_usable_for_training: boolean
+  min_health_score: number
+  exclude_outliers: boolean
+  exclude_duplicates: boolean
+  low_quality_weight_multiplier: number
+}
+
+// Default influence configuration
+export const DEFAULT_INFLUENCE_CONFIG: Omit<InfluenceConfig, 'id' | 'created_at' | 'updated_at'> = {
+  config_name: 'default',
+  is_active: true,
+  created_by: null,
+  weight_factors: {
+    health_score: 0.25,
+    verification_strength: 0.20,
+    image_quality: 0.15,
+    metadata_completeness: 0.10,
+    error_stability: 0.15,
+    similarity_bonus: 0.15,
+  },
+  safety_caps: {
+    max_per_example_influence: 0.25,
+    max_total_correction_inches: 8.0,
+    max_per_measurement_correction_percent: 0.15,
+    min_examples_for_correction: 3,
+    min_total_influence_weight: 0.5,
+  },
+  drift_protection: {
+    enabled: true,
+    directional_bias_threshold: 3.0,
+    magnitude_drift_threshold: 1.5,
+    detection_window_hours: 168,
+    min_samples_for_detection: 50,
+    auto_reduce_strength_on_drift: true,
+    strength_reduction_factor: 0.5,
+  },
+  eligibility_rules: {
+    require_usable_for_training: true,
+    min_health_score: 30,
+    exclude_outliers: true,
+    exclude_duplicates: true,
+    low_quality_weight_multiplier: 0.3,
+  },
+}
+
+// Weighted learning correction result (enhanced from Phase 10)
+export interface WeightedLearningCorrectionResult {
+  // Score adjustments
+  grossCorrection: number
+  netCorrection: number
+  confidenceBoost: number
+  
+  // Per-measurement corrections
+  measurementCorrections: Map<string, number>
+  
+  // Aggregation details
+  aggregationMethod: 'weighted_mean' | 'trimmed_mean' | 'median' | 'robust_mean'
+  preCap: {
+    grossCorrection: number
+    wasCapped: boolean
+    capReason: string | null
+  }
+  
+  // Influence breakdown
+  totalInfluenceWeight: number
+  contributingExamples: InfluentialExampleDetail[]
+  
+  // Safety flags
+  driftWarning: DriftWarning | null
+  
+  // Summary for UI/API
+  summary: WeightedLearningSummary
+}
+
+export interface DriftWarning {
+  type: DriftType
+  severity: DriftSeverity
+  message: string
+  strengthReduced: boolean
+  reductionFactor: number
+}
+
+export interface WeightedLearningSummary {
+  verifiedExamplesConsidered: number
+  eligibleExamplesUsed: number
+  highlySimilarExamplesUsed: number
+  totalInfluenceWeight: number
+  avgSimilarity: number
+  avgInfluenceWeight: number
+  strongestMatchingFeatures: string[]
+  weakestMatchingFeatures: string[]
+  correctionDirection: 'increase' | 'decrease' | 'mixed' | 'none'
+  grossAdjustmentApplied: number
+  netAdjustmentApplied: number
+  confidenceAdjustmentApplied: number
+  correctionStrength: 'none' | 'low' | 'medium' | 'high'
+  measurementCorrections: MeasurementCorrectionInfo[]
+  correctionCapped: boolean
+  cappingReason: string | null
+  exampleConsistency: number
+  aggregationMethod: string
+  driftWarning: DriftWarning | null
+  influentialExamples: InfluentialExampleDetail[]
+  notes: string[]
+  matchQuality: 'none' | 'weak' | 'moderate' | 'strong'
+}
+
+// Drift analysis result
+export interface DriftAnalysisResult {
+  hasActiveDrift: boolean
+  driftAlerts: DriftDetectionLog[]
+  currentBias: {
+    direction: 'positive' | 'negative' | 'balanced'
+    ratio: number
+    magnitude: number
+  }
+  recommendedAction: DriftAction
+  strengthMultiplier: number // 1.0 = normal, <1.0 = reduced
+}
+
+// Influence computation input
+export interface InfluenceComputationInput {
+  training_example_id: string
+  health_score: number | null
+  health_tier: HealthTier
+  verified_for_training: boolean
+  score_source: ScoreSource | string | null
+  images_used: number | null
+  angle_diversity_score: number | null
+  intake_quality: Record<string, unknown> | null
+  quality_flags: QualityFlags | null
+  is_outlier: boolean
+  is_duplicate: boolean
+  usable_for_training: boolean | null
+  state: string | null
+  rack_type: string | null
+}
+
+// Influence computation result
+export interface InfluenceComputationResult {
+  influence_weight: number
+  influence_factors: InfluenceFactors
+  eligibility_reason: string | null
+}
