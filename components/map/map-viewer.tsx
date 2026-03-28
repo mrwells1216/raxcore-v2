@@ -125,54 +125,71 @@ const MAP_COLORS = {
 
 export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ coordinates: [-98, 39] as [number, number], zoom: 1 })
+  // Always start (and reset) to the full US view; never allow it to drift
+  const US_CENTER: [number, number] = [-98, 39]
+  const [zoom, setZoom] = useState(1)
+  const [center, setCenter] = useState<[number, number]>(US_CENTER)
   const [focusedState, setFocusedState] = useState<string | null>(null)
   const [hoveredState, setHoveredState] = useState<string | null>(null)
-  // Relative to container element so the CSS overlay pin is positioned correctly
+  // After zooming to a state the user must click a second time to place a pin
+  const [readyForPin, setReadyForPin] = useState(false)
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null)
   const [pendingPin, setPendingPin] = useState<{ lat: number; lng: number } | null>(null)
 
   const handleZoomIn = useCallback(() => {
-    setPosition(pos => ({ ...pos, zoom: Math.min(pos.zoom * 1.5, 8) }))
+    setZoom(z => Math.min(z * 1.5, 8))
   }, [])
 
   const handleZoomOut = useCallback(() => {
-    setPosition(pos => ({ ...pos, zoom: Math.max(pos.zoom / 1.5, 1) }))
+    setZoom(z => Math.max(z / 1.5, 1))
   }, [])
 
   const handleReset = useCallback(() => {
-    setPosition({ coordinates: [-98, 39], zoom: 1 })
+    setZoom(1)
+    setCenter(US_CENTER)
     setFocusedState(null)
+    setReadyForPin(false)
     setPendingPin(null)
     setClickPosition(null)
   }, [])
 
+  // First click on a state: zoom to that state. Does NOT place a pin yet.
   const handleStateClick = useCallback((geo: any) => {
     const stateName: string = geo.properties.name
     const stateCenter = STATE_CENTERS[stateName]
     if (stateCenter) {
       setFocusedState(stateName)
-      setPosition({ coordinates: [stateCenter.lng, stateCenter.lat], zoom: 5 })
+      setCenter([stateCenter.lng, stateCenter.lat])
+      setZoom(5)
+      setReadyForPin(false) // arm — next click on the map body will place pin
+      setPendingPin(null)
+      setClickPosition(null)
     }
   }, [])
 
+  // Second click: anywhere on the map after focusing a state creates the pending pin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleMapAreaClick = useCallback((event: any) => {
     if (!focusedState || !onMapClick) return
+    if (!readyForPin) {
+      // The first "background" click after zooming just arms pin-placement mode
+      setReadyForPin(true)
+      return
+    }
     const svg = event.currentTarget
     const svgRect = svg.getBoundingClientRect()
     const containerRect = containerRef.current?.getBoundingClientRect()
     const xInSvg = event.clientX - svgRect.left
     const yInSvg = event.clientY - svgRect.top
-    const [centerLng, centerLat] = position.coordinates
-    const scale = position.zoom
+    const [centerLng, centerLat] = center
+    const scale = zoom
     const lng = centerLng + ((xInSvg - svgRect.width / 2) / (svgRect.width / 2)) * (180 / scale)
     const lat = centerLat - ((yInSvg - svgRect.height / 2) / (svgRect.height / 2)) * (90 / scale)
     const relX = containerRect ? event.clientX - containerRect.left : xInSvg
     const relY = containerRect ? event.clientY - containerRect.top : yInSvg
     setClickPosition({ x: relX, y: relY })
     setPendingPin({ lat, lng })
-  }, [focusedState, onMapClick, position])
+  }, [focusedState, onMapClick, readyForPin, center, zoom])
 
   const handleConfirmPin = useCallback(() => {
     if (pendingPin && onMapClick) {
@@ -198,6 +215,13 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
     return pins.filter(p => p.latitude != null && p.longitude != null)
   }, [pins, focusedState])
 
+  // Instruction shown inside the state focus card — changes after first click arms pin mode
+  const pinInstruction = !focusedState
+    ? null
+    : !readyForPin
+      ? 'Click anywhere on the map to enter pin-placement mode'
+      : 'Now click to place a pin'
+
   return (
     <div
       ref={containerRef}
@@ -221,11 +245,11 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         onClick={focusedState ? handleMapAreaClick : undefined}
       >
         <ZoomableGroup
-          center={position.coordinates}
-          zoom={position.zoom}
-          onMoveEnd={({ coordinates, zoom }) =>
-            setPosition({ coordinates: coordinates as [number, number], zoom })
-          }
+          center={center}
+          zoom={zoom}
+          // Disable drag panning — position is controlled programmatically only
+          // so the map cannot be dragged off the US view
+          filterZoomEvent={() => false}
           minZoom={1}
           maxZoom={8}
         >
@@ -333,7 +357,9 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
             <div className="flex items-center gap-3">
               <div>
                 <div className="text-sm font-medium">{focusedState}</div>
-                <div className="text-xs text-muted-foreground">Click on map to add a pin</div>
+                <div className={`text-xs transition-colors ${readyForPin ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                  {pinInstruction}
+                </div>
               </div>
               <Button size="icon" variant="ghost" onClick={handleReset} className="h-8 w-8">
                 <X className="h-4 w-4" />
