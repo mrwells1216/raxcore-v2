@@ -1,20 +1,29 @@
 'use client'
 
 import Link from 'next/link'
-import { X, Bell, CheckCircle, AlertTriangle, Camera, Map, Box } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { X, Bell, CheckCircle, AlertTriangle, Camera, Map, Box, Settings, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import type { UserNotification, NotificationType } from '@/lib/notifications/service'
 
-const TYPE_META: Record<NotificationType, { icon: React.ElementType; color: string }> = {
-  submit_real_score:    { icon: CheckCircle,    color: 'text-primary' },
-  render_complete:      { icon: Box,            color: 'text-accent' },
-  render_failed:        { icon: AlertTriangle,  color: 'text-destructive' },
-  better_photos_needed: { icon: Camera,         color: 'text-amber-500' },
-  missing_map:          { icon: Map,            color: 'text-amber-500' },
-  missing_render:       { icon: Box,            color: 'text-muted-foreground' },
+const TYPE_META: Record<NotificationType, { icon: React.ElementType; color: string; label: string }> = {
+  submit_real_score:    { icon: CheckCircle,   color: 'text-primary',          label: 'Score' },
+  render_complete:      { icon: Box,           color: 'text-accent',           label: 'Render' },
+  render_failed:        { icon: AlertTriangle, color: 'text-destructive',      label: 'Render' },
+  better_photos_needed: { icon: Camera,        color: 'text-amber-500',        label: 'Photos' },
+  missing_map:          { icon: Map,           color: 'text-amber-500',        label: 'Map' },
+  missing_render:       { icon: Box,           color: 'text-muted-foreground', label: 'Render' },
 }
+
+const FILTER_GROUPS = [
+  { value: 'all',    label: 'All' },
+  { value: 'unread', label: 'Unread' },
+  { value: 'action', label: 'Actions' },
+] as const
+
+type Filter = (typeof FILTER_GROUPS)[number]['value']
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -26,35 +35,102 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+const ACTION_TYPES: NotificationType[] = ['submit_real_score', 'better_photos_needed', 'missing_map', 'missing_render']
+
 interface NotificationCenterProps {
   notifications: UserNotification[]
   onDismiss: (id: string) => void
+  onDismissAll?: () => void
 }
 
-export function NotificationCenter({ notifications, onDismiss }: NotificationCenterProps) {
+export function NotificationCenter({ notifications, onDismiss, onDismissAll }: NotificationCenterProps) {
+  const [filter, setFilter] = useState<Filter>('all')
+  const [, startTransition] = useTransition()
+
   const active = notifications.filter(n => !n.is_dismissed)
+
+  const filtered = active.filter(n => {
+    if (filter === 'unread') return !n.is_read
+    if (filter === 'action') return ACTION_TYPES.includes(n.type)
+    return true
+  })
+
+  function handleDismissAll() {
+    startTransition(async () => {
+      const { dismissAllNotifications } = await import('@/lib/notifications/service')
+      await dismissAllNotifications()
+      onDismissAll?.()
+    })
+  }
 
   return (
     <div className="flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-border">
         <span className="text-sm font-semibold">Notifications</span>
-        {active.length > 0 && (
-          <span className="text-xs text-muted-foreground">{active.length} item{active.length !== 1 ? 's' : ''}</span>
-        )}
+        <div className="flex items-center gap-1">
+          {active.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={handleDismissAll}
+              title="Clear all"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            asChild
+            title="Notification settings"
+          >
+            <Link href="/settings/notifications">
+              <Settings className="h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {active.length === 0 ? (
+      {/* Filter tabs */}
+      <div className="flex gap-1 px-3 py-2 border-b border-border">
+        {FILTER_GROUPS.map(f => (
+          <button
+            key={f.value}
+            onClick={() => setFilter(f.value)}
+            className={cn(
+              'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+              filter === f.value
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+            )}
+          >
+            {f.label}
+            {f.value === 'unread' && active.filter(n => !n.is_read).length > 0 && (
+              <span className="ml-1 opacity-70">
+                {active.filter(n => !n.is_read).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-10 text-center px-4">
           <Bell className="h-8 w-8 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">All caught up</p>
+          <p className="text-sm text-muted-foreground">
+            {filter === 'all' ? 'All caught up' : `No ${filter} notifications`}
+          </p>
           <p className="text-xs text-muted-foreground/60">New activity will appear here</p>
         </div>
       ) : (
-        <ScrollArea className="max-h-[360px]">
+        <ScrollArea className="max-h-[340px]">
           <ul className="divide-y divide-border">
-            {active.map(notification => {
-              const meta = TYPE_META[notification.type] ?? { icon: Bell, color: 'text-muted-foreground' }
+            {filtered.map(notification => {
+              const meta = TYPE_META[notification.type] ?? { icon: Bell, color: 'text-muted-foreground', label: '' }
               const Icon = meta.icon
 
               const inner = (
@@ -67,7 +143,7 @@ export function NotificationCenter({ notifications, onDismiss }: NotificationCen
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={cn(
-                      'text-sm leading-snug truncate',
+                      'text-sm leading-snug',
                       !notification.is_read && 'font-medium',
                     )}>
                       {notification.title}
@@ -107,6 +183,18 @@ export function NotificationCenter({ notifications, onDismiss }: NotificationCen
             })}
           </ul>
         </ScrollArea>
+      )}
+
+      {/* Footer link */}
+      {active.length > 0 && (
+        <div className="px-4 py-2 border-t border-border">
+          <Link
+            href="/settings/notifications"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Manage notification preferences
+          </Link>
+        </div>
       )}
     </div>
   )

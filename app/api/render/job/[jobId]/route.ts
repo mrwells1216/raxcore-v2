@@ -5,7 +5,7 @@ import {
   deleteRenderJob,
   getRenderOutputs 
 } from '@/lib/render/service'
-import { createUserNotification, createAdminTask } from '@/lib/notifications/service'
+import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
 
 export async function GET(
   request: NextRequest,
@@ -61,7 +61,7 @@ export async function PATCH(
 
       if (userId) {
         if (body.status === 'completed') {
-          createUserNotification({
+          createGatedUserNotification({
             userId,
             type: 'render_complete',
             title: '3D render is ready',
@@ -71,7 +71,7 @@ export async function PATCH(
             priority: 'normal',
           }).catch(err => console.error('[render] notification error:', err))
         } else {
-          createUserNotification({
+          createGatedUserNotification({
             userId,
             type: 'render_failed',
             title: '3D render failed',

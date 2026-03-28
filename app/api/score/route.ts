@@ -10,7 +10,7 @@ import {
   getActiveModelVersion,
   getBuckImages
 } from '@/lib/storage/service'
-import { createUserNotification, createAdminTask } from '@/lib/notifications/service'
+import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
 import {
   createUsageRecord,
   completeUsageRecord,
@@ -248,8 +248,9 @@ export async function POST(request: Request) {
 
     if (userId) {
       // Always notify logged-in user to submit a real score for ground-truth
+      // createGatedUserNotification respects user prefs + quiet period
       notificationPromises.push(
-        createUserNotification({
+        createGatedUserNotification({
           userId,
           type: 'submit_real_score',
           title: 'Submit your real score to improve accuracy',
@@ -263,7 +264,7 @@ export async function POST(request: Request) {
       // Notify if photo quality was poor
       if (intakeQuality && intakeQuality.tier === 'poor') {
         notificationPromises.push(
-          createUserNotification({
+          createGatedUserNotification({
             userId,
             type: 'better_photos_needed',
             title: 'Better photos would improve this score',

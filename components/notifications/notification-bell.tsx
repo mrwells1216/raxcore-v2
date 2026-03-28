@@ -40,10 +40,20 @@ export function NotificationBell({
 
   function handleDismiss(id: string) {
     setNotifications(prev => prev.filter(n => n.id !== id))
+    setUnreadCount(prev => {
+      const n = notifications.find(x => x.id === id)
+      return n && !n.is_read ? Math.max(0, prev - 1) : prev
+    })
     startTransition(async () => {
       const { dismissNotification } = await import('@/lib/notifications/service')
       await dismissNotification(id)
     })
+  }
+
+  function handleDismissAll() {
+    setNotifications([])
+    setUnreadCount(0)
+    // dismissAllNotifications is called from inside NotificationCenter
   }
 
   return (
@@ -71,6 +81,7 @@ export function NotificationBell({
         <NotificationCenter
           notifications={notifications}
           onDismiss={handleDismiss}
+          onDismissAll={handleDismissAll}
         />
       </PopoverContent>
     </Popover>
