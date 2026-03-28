@@ -156,3 +156,28 @@
     opacity: 0.92;
   }
 }
+
+/* Map Component Styles */
+@layer components {
+  /* Ensure map dialogs appear above map */
+  .map-dialog-overlay {
+    z-index: 10000 !important;
+  }
+  .map-dialog-content {
+    z-index: 10001 !important;
+  }
+  
+  /* Custom marker styles for react-simple-maps */
+  .rsm-marker {
+    cursor: pointer;
+  }
+  .rsm-marker:hover {
+    transform: scale(1.1);
+    transition: transform 0.15s ease-in-out;
+  }
+  
+  /* State geography hover effects */
+  .rsm-geography {
+    transition: fill 0.2s ease-in-out, stroke 0.2s ease-in-out;
+  }
+}
