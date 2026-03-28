@@ -17,14 +17,23 @@ import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES, MIDWEST_STATES, PLAINS_STATES, N
 // CONSTANTS — data-quality gates
 // ============================================================================
 
-/** Minimum recorded samples before a segment can influence calibration */
+/** Minimum recorded samples before a level-1/2 segment can influence calibration */
 const GATE_MIN_SAMPLES = 30
+
+/** PATCH F: Stricter sample gate for high-specificity segments (level ≥ 3) */
+const GATE_MIN_SAMPLES_SPECIFIC = 80
 
 /** Minimum rolling stability score (0–1 MAE stability) before activation */
 const GATE_MIN_STABILITY = 0.55
 
-/** Max allowed weight for any single segment (prevents a noisy segment dominating) */
-const MAX_SINGLE_WEIGHT = 0.85
+/** PATCH F: Stricter stability gate for high-specificity segments (level ≥ 3) */
+const GATE_MIN_STABILITY_SPECIFIC = 0.68
+
+/** PATCH F: Max allowed weight for any single non-global segment — tightened from 0.85 */
+const MAX_SINGLE_WEIGHT = 0.55
+
+/** PATCH F: Absolute maximum share for high-specificity (level ≥ 3) segments */
+const MAX_SINGLE_WEIGHT_SPECIFIC = 0.35
 
 // ============================================================================
 // TYPES
@@ -72,6 +81,8 @@ export interface SegmentedCalibration {
     effectiveWeight: number
     gated: boolean
     gateReason?: string
+    /** true = directly matched by conditions; false = included as ancestor fallback */
+    directMatch: boolean
   }>
   /** Whether any non-global segment contributed */
   hasSpecificSegments: boolean
@@ -99,6 +110,14 @@ interface DbCalibrationValue {
   multiplier: number
   bias: number
   confidence_adjustment: number
+}
+
+interface DbSegmentMetric {
+  segment_id: string
+  avg_gross_error: number | null
+  avg_abs_gross_error: number | null
+  confidence_calib_error: number | null
+  regression_flagged: boolean
 }
 
 // ============================================================================
@@ -192,23 +211,38 @@ function matchesConditions(
 // ============================================================================
 
 function gateSegment(
-  seg: DbSegment
+  seg: DbSegment,
+  latestMetric?: DbSegmentMetric | null
 ): { pass: boolean; reason?: string } {
   // Level-0 global always passes
   if (seg.level === 0) return { pass: true }
 
-  if (seg.sample_size < GATE_MIN_SAMPLES) {
+  // PATCH F: use stricter thresholds for high-specificity segments
+  const isSpecific = seg.level >= 3
+  const minSamples = isSpecific ? GATE_MIN_SAMPLES_SPECIFIC : GATE_MIN_SAMPLES
+  const minStability = isSpecific ? GATE_MIN_STABILITY_SPECIFIC : GATE_MIN_STABILITY
+
+  if (seg.sample_size < minSamples) {
     return {
       pass: false,
-      reason: `Insufficient samples (${seg.sample_size} < ${GATE_MIN_SAMPLES})`,
+      reason: `Insufficient samples (${seg.sample_size} < ${minSamples}${isSpecific ? ', strict gate' : ''})`,
     }
   }
-  if (seg.stability_score < GATE_MIN_STABILITY) {
+  if (seg.stability_score < minStability) {
     return {
       pass: false,
-      reason: `Low stability score (${seg.stability_score.toFixed(2)} < ${GATE_MIN_STABILITY})`,
+      reason: `Low stability (${seg.stability_score.toFixed(2)} < ${minStability}${isSpecific ? ', strict gate' : ''})`,
     }
   }
+
+  // PATCH B/F: regression-flagged segments are gated unless they have very strong sample depth
+  if (latestMetric?.regression_flagged && seg.sample_size < 300) {
+    return {
+      pass: false,
+      reason: `Regression flagged with insufficient sample depth (${seg.sample_size} < 300)`,
+    }
+  }
+
   return { pass: true }
 }
 
@@ -219,24 +253,47 @@ function gateSegment(
 const MEASUREMENT_TYPES = ['spread', 'beam', 'tine', 'mass', 'deduction'] as const
 
 /**
- * Compute an evidence score for a segment in [0, 1].
+ * PATCH B: Compute an evidence score for a segment in [0, 1].
  *
- * Evidence = normalised sample size score * stability score, scaled by
- * the segment's own activation_weight cap.
- *
- * State-level segments (level 3+) are additionally penalised unless they
- * have strong evidence, to prevent tiny state sets from dominating.
+ * Incorporates:
+ *   1. Log-scaled sample size (saturates at 500)
+ *   2. Stability score (direct 0-1)
+ *   3. activation_weight cap from admin
+ *   4. Level penalty for high-specificity segments
+ *   5. Performance lift factor vs expected baseline when segment_metrics available:
+ *      - Low avg_abs_gross_error  → boost (segment is accurately calibrated)
+ *      - High avg_abs_gross_error → penalise (segment is poorly calibrated)
+ *      - Regression flagged       → apply hard 0.25 ceiling multiplier
  */
-function evidenceScore(seg: DbSegment): number {
+function evidenceScore(seg: DbSegment, metric?: DbSegmentMetric | null): number {
   // Sample size: log-scaled; saturates at 500 samples → 1.0
   const sampleScore = Math.min(1.0, Math.log1p(seg.sample_size) / Math.log1p(500))
   // Stability: direct 0-1
   const stabilityScore = Math.max(0, Math.min(1, seg.stability_score))
-  // Combined evidence
+  // Base
   const base = sampleScore * stabilityScore * seg.activation_weight
-  // Penalise high-specificity (state) segments unless evidence is strong
-  const levelPenalty = seg.level >= 3 ? 0.75 : 1.0
-  return base * levelPenalty
+
+  // PATCH F: level penalty — high-specificity segments start at 0.65 of their score
+  const levelPenalty = seg.level >= 3 ? 0.65 : 1.0
+
+  // PATCH B: performance lift factor from segment_metrics
+  let perfFactor = 1.0
+  if (metric) {
+    if (metric.regression_flagged) {
+      // Regression: hard ceiling on contribution
+      perfFactor = 0.25
+    } else if (metric.avg_abs_gross_error !== null) {
+      // Expected baseline MAE ~ 8" for raw unblended scoring
+      // If segment MAE is lower → reward; higher → penalise
+      const BASELINE_MAE = 8.0
+      const relativeError = metric.avg_abs_gross_error / BASELINE_MAE
+      // Map: MAE=0 → 1.3x, MAE=baseline → 1.0x, MAE=2x baseline → 0.6x
+      // f(r) = clamp(1.3 - 0.7 * r, 0.3, 1.3)
+      perfFactor = Math.max(0.3, Math.min(1.3, 1.3 - 0.7 * relativeError))
+    }
+  }
+
+  return base * levelPenalty * perfFactor
 }
 
 /**
@@ -302,17 +359,19 @@ function resolveWithShrinkage(
 const MIN_GLOBAL_WEIGHT = 0.10
 
 function computeBlendWeights(
-  passing: DbSegment[]
+  passing: DbSegment[],
+  latestMetrics: Map<string, DbSegmentMetric>
 ): Map<string, number> {
   const weights = new Map<string, number>()
   const global = passing.find(s => s.level === 0)
   const nonGlobal = passing.filter(s => s.level > 0)
 
-  // Compute raw evidence scores for non-global segments
+  // PATCH B: compute evidence scores using metrics where available
   const rawScores = new Map<string, number>()
   let totalRaw = 0
   for (const seg of nonGlobal) {
-    const score = evidenceScore(seg)
+    const metric = latestMetrics.get(seg.id) ?? null
+    const score = evidenceScore(seg, metric)
     rawScores.set(seg.id, score)
     totalRaw += score
   }
@@ -322,7 +381,9 @@ function computeBlendWeights(
   for (const seg of nonGlobal) {
     const rawScore = rawScores.get(seg.id) ?? 0
     const proportional = totalRaw > 0 ? (rawScore / totalRaw) * nonGlobalBudget : 0
-    weights.set(seg.id, Math.min(proportional, MAX_SINGLE_WEIGHT))
+    // PATCH F: apply per-level weight cap
+    const cap = seg.level >= 3 ? MAX_SINGLE_WEIGHT_SPECIFIC : MAX_SINGLE_WEIGHT
+    weights.set(seg.id, Math.min(proportional, cap))
   }
 
   // Global fills remaining budget (always at least MIN_GLOBAL_WEIGHT)
@@ -400,14 +461,19 @@ function buildBlendedCalibration(
 // PUBLIC API — resolveSegments
 // ============================================================================
 
-/** Fetch all enabled segments + their calibration values (with short-lived cache) */
-let _segmentCache: { segments: DbSegment[]; values: Map<string, DbCalibrationValue[]> } | null = null
+/** Fetch all enabled segments + their calibration values + latest metrics (short-lived cache) */
+let _segmentCache: {
+  segments: DbSegment[]
+  values: Map<string, DbCalibrationValue[]>
+  latestMetrics: Map<string, DbSegmentMetric>
+} | null = null
 let _segmentCacheTs = 0
 const SEGMENT_CACHE_TTL = 60_000 // 60 s
 
 async function loadSegments(): Promise<{
   segments: DbSegment[]
   values: Map<string, DbCalibrationValue[]>
+  latestMetrics: Map<string, DbSegmentMetric>
 }> {
   const now = Date.now()
   if (_segmentCache && now - _segmentCacheTs < SEGMENT_CACHE_TTL) {
@@ -416,17 +482,24 @@ async function loadSegments(): Promise<{
 
   const supabase = await createClient()
 
-  const [segRes, valRes] = await Promise.all([
+  // Load all segments (enabled=true for active, but we also need disabled parents for
+  // shrinkage/fallback chain — so load all and filter matching separately)
+  const [segRes, valRes, metricRes] = await Promise.all([
     supabase
       .from('calibration_segments')
-      .select('id,name,description,parent_id,level,segment_type,conditions,sample_size,stability_score,activation_weight,enabled')
-      .eq('enabled', true),
+      .select('id,name,description,parent_id,level,segment_type,conditions,sample_size,stability_score,activation_weight,enabled'),
     supabase
       .from('calibration_values')
       .select('segment_id,measurement_type,multiplier,bias,confidence_adjustment'),
+    supabase
+      .from('segment_metrics')
+      .select('segment_id,avg_gross_error,avg_abs_gross_error,confidence_calib_error,regression_flagged')
+      .order('evaluated_at', { ascending: false })
+      .limit(500),
   ])
 
   const segments: DbSegment[] = segRes.data ?? []
+
   const values = new Map<string, DbCalibrationValue[]>()
   for (const v of (valRes.data ?? []) as DbCalibrationValue[]) {
     const existing = values.get(v.segment_id) ?? []
@@ -434,7 +507,15 @@ async function loadSegments(): Promise<{
     values.set(v.segment_id, existing)
   }
 
-  _segmentCache = { segments, values }
+  // Only keep the latest metric row per segment
+  const latestMetrics = new Map<string, DbSegmentMetric>()
+  for (const m of (metricRes.data ?? []) as DbSegmentMetric[]) {
+    if (!latestMetrics.has(m.segment_id)) {
+      latestMetrics.set(m.segment_id, m)
+    }
+  }
+
+  _segmentCache = { segments, values, latestMetrics }
   _segmentCacheTs = now
   return _segmentCache
 }
@@ -461,7 +542,7 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
   }
 
   try {
-    const { segments, values: valuesBySegment } = await loadSegments()
+    const { segments, values: valuesBySegment, latestMetrics } = await loadSegments()
 
     const imageCountTier = deriveImageCountTier(ctx.imageCount)
     const angleQuality = deriveAngleQuality(ctx.angleDiversity)
@@ -469,21 +550,50 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
 
     const enrichedCtx = { ...ctx, imageCountTier, angleQuality, region }
 
-    // Step 1: find all matching segments
-    const matched: DbSegment[] = []
+    // Build a lookup map for fast parent traversal
+    const segById = new Map<string, DbSegment>(segments.map(s => [s.id, s]))
+
+    // Step 1: find all directly matching enabled segments
+    const directMatched = new Set<string>()
     for (const seg of segments) {
+      if (!seg.enabled) continue
       if (matchesConditions(seg.conditions as Record<string, unknown>, enrichedCtx)) {
-        matched.push(seg)
+        directMatched.add(seg.id)
       }
     }
 
+    // PATCH A: walk parent chains of directly matched segments and include any
+    // ancestors that are not already present. This ensures parents are always
+    // explicit blend contributors rather than only implicit shrinkage targets.
+    const matchedIds = new Set<string>(directMatched)
+    for (const id of directMatched) {
+      let current = segById.get(id)
+      while (current?.parent_id) {
+        const parent = segById.get(current.parent_id)
+        if (!parent) break
+        if (!matchedIds.has(parent.id)) {
+          matchedIds.add(parent.id)
+        }
+        current = parent
+      }
+    }
+
+    // Also always include the global segment (level 0)
+    const globalSeg = segments.find(s => s.level === 0)
+    if (globalSeg) matchedIds.add(globalSeg.id)
+
+    const matched: DbSegment[] = Array.from(matchedIds)
+      .map(id => segById.get(id)!)
+      .filter(Boolean)
+
     if (matched.length === 0) return IDENTITY
 
-    // Step 2: gate segments
+    // Step 2: gate segments — use latest metrics for regression/quality gating
     const passing: DbSegment[] = []
     const gatedInfo: Array<{ seg: DbSegment; reason: string }> = []
     for (const seg of matched) {
-      const gate = gateSegment(seg)
+      const metric = latestMetrics.get(seg.id) ?? null
+      const gate = gateSegment(seg, metric)
       if (gate.pass) {
         passing.push(seg)
       } else {
@@ -491,16 +601,15 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
       }
     }
 
-    // Always keep global even if gated (it's the identity fallback)
-    const globalSeg = matched.find(s => s.level === 0)
+    // Always keep global even if somehow gated (identity fallback)
     if (globalSeg && !passing.includes(globalSeg)) {
       passing.push(globalSeg)
     }
 
-    // Step 3: compute evidence-based blend weights (PATCH E)
-    const weights = computeBlendWeights(passing)
+    // Step 3: compute evidence-based blend weights with metrics (PATCH B + F)
+    const weights = computeBlendWeights(passing, latestMetrics)
 
-    // Step 4: blend calibration values with parent-chain shrinkage (PATCH B)
+    // Step 4: blend calibration values with parent-chain shrinkage (PATCH A/B)
     const { multipliers, biases, confidenceAdjustment } = buildBlendedCalibration(
       passing,
       segments, // full segment list needed for parent chain traversal
@@ -517,6 +626,8 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
         level: seg.level,
         effectiveWeight: weights.get(seg.id) ?? 0,
         gated: false,
+        // PATCH A: flag whether this segment was directly matched or included as ancestor fallback
+        directMatch: directMatched.has(seg.id),
       })),
       ...gatedInfo.map(({ seg, reason }) => ({
         id: seg.id,
@@ -526,6 +637,7 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
         effectiveWeight: 0,
         gated: true,
         gateReason: reason,
+        directMatch: directMatched.has(seg.id),
       })),
     ]
 
@@ -551,29 +663,49 @@ export async function resolveSegments(ctx: SegmentContext): Promise<SegmentedCal
 // ============================================================================
 
 /**
- * Fire-and-forget audit log for which segments were used in a prediction.
+ * PATCH E: Fire-and-forget audit log for which segments were used in a prediction.
+ *
+ * Stores segment IDs, blend weights, per-field calibration deltas, and a
+ * structured segment_trace for explainability (directMatch, level, gateStatus).
  * Never throws.
  */
 export function logPredictionSegments(params: {
   buckId?: string | null
-  traceId?: string
+  predictionId?: string | null
+  traceId?: string | null
   calibration: SegmentedCalibration
-  calibrationDeltas?: Record<string, unknown>
+  calibrationDeltas?: Record<string, number>
 }): void {
   const passing = params.calibration.matchedSegments.filter(s => !s.gated)
   if (passing.length === 0) return
 
+  // Build a clean, typed deltas object — no unsafe cast
+  const deltas: Record<string, unknown> = {
+    per_field: params.calibrationDeltas ?? {},
+    gross_confidence_adj: params.calibration.confidenceAdjustment,
+    segment_trace: params.calibration.matchedSegments.map(s => ({
+      id: s.id,
+      name: s.name,
+      level: s.level,
+      weight: s.effectiveWeight,
+      gated: s.gated,
+      gate_reason: s.gateReason ?? null,
+      direct_match: s.directMatch,
+    })),
+  }
+
   createClient().then(supabase => {
     supabase.from('prediction_segment_log').insert({
+      prediction_id: params.predictionId ?? null,
       buck_id: params.buckId ?? null,
       trace_id: params.traceId ?? null,
       segment_ids: passing.map(s => s.id),
       blend_weights: passing.map(s => s.effectiveWeight),
-      calibration_deltas: params.calibrationDeltas ?? {},
+      calibration_deltas: deltas,
     }).then(({ error }) => {
       if (error) console.warn('[segment-engine] logPredictionSegments insert error:', error.message)
     })
-  }).catch(() => {/* ignore */})
+  }).catch(() => {/* silent — never block scoring */})
 }
 
 // ============================================================================

@@ -139,7 +139,15 @@ function DeltaCell({ value, decimals = 3 }: { value: number | null; decimals?: n
 }
 
 const MEASUREMENT_TYPES = ['spread', 'beam', 'tine', 'mass', 'deduction'] as const
-const LEVEL_LABELS: Record<number, string> = { 0: 'Global', 1: 'Primary', 2: 'Overlay' }
+function levelLabel(level: number): string {
+  const labels: Record<number, string> = {
+    0: 'Global',
+    1: 'Primary',
+    2: 'Overlay',
+    3: 'State / Specific',
+  }
+  return labels[level] ?? `Level ${level}`
+}
 
 // ============================================================================
 // PAGE
@@ -152,12 +160,14 @@ export default async function SegmentsPage() {
 
   const { segments, valuesBySegment, latestMetric } = await getSegmentsData()
 
-  const byLevel: Record<number, typeof segments> = { 0: [], 1: [], 2: [] }
+  // PATCH D: no longer clamp to max level 2 — support all levels present in DB
+  const byLevel: Record<number, typeof segments> = {}
   for (const seg of segments) {
-    const lvl = Math.min(seg.level, 2)
-    byLevel[lvl] ??= []
-    byLevel[lvl].push(seg)
+    byLevel[seg.level] ??= []
+    byLevel[seg.level].push(seg)
   }
+  // Sorted unique level list
+  const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b)
 
   const activeCount = segments.filter(s => getGateStatus(s) === 'pass').length
   const gatedCount = segments.filter(s => {
@@ -195,15 +205,15 @@ export default async function SegmentsPage() {
         </CardContent>
       </Card>
 
-      {/* Level groups */}
-      {([0, 1, 2] as const).map(level => {
+      {/* Level groups — PATCH D: render all levels present, not just 0–2 */}
+      {levels.map(level => {
         const segs = byLevel[level] ?? []
         if (segs.length === 0) return null
         return (
           <div key={level} className="space-y-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Level {level} — {LEVEL_LABELS[level]}
+                Level {level} — {levelLabel(level)}
               </h2>
               <Separator className="flex-1" />
             </div>
@@ -214,13 +224,20 @@ export default async function SegmentsPage() {
                 const calValues = valuesBySegment.get(seg.id) ?? []
                 const metric = latestMetric.get(seg.id)
                 const isIdentity = calValues.every(v => v.multiplier === 1.0 && v.bias === 0.0 && v.confidence_adjustment === 0.0)
+                // PATCH D: resolve parent name for breadcrumb display
+                const parentSeg = seg.parent_id ? segments.find(s => s.id === seg.parent_id) : null
 
                 return (
                   <Card key={seg.id} className={`${!seg.enabled ? 'opacity-50' : ''}`}>
                     <CardHeader className="pb-2">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {parentSeg && (
+                              <span className="text-xs text-muted-foreground font-mono">
+                                {parentSeg.name} /
+                              </span>
+                            )}
                             <CardTitle className="text-base font-semibold">{seg.name}</CardTitle>
                             <GateStatusBadge status={gateStatus} />
                             {isIdentity && gateStatus !== 'global' && (

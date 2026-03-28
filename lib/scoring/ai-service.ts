@@ -1085,11 +1085,12 @@ async function buildVisionScoringOutput(
   // Convert to simple learning summary for backward compatibility
   const simpleSummary = toSimpleLearningSummary(learningResult.summary)
 
-  // Phase 41: Fire-and-forget segment audit log
+  // Phase 41: Fire-and-forget segment audit log (PATCH E: clean typed deltas, no unsafe cast)
   logPredictionSegments({
-    traceId: input.traceId,
+    traceId: input.traceId ?? null,
+    predictionId: null, // populated downstream when the prediction row is persisted
     calibration: segmentedCal,
-    calibrationDeltas: segmentCorrectionResult.deltas as Record<string, unknown>,
+    calibrationDeltas: segmentCorrectionResult.deltas,
   })
 
   return {
