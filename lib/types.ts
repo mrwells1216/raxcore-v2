@@ -1634,3 +1634,269 @@ export interface ConfidenceCalibrationPoint {
   within5InchesPercent: number
   within10InchesPercent: number
 }
+
+// ========================================
+// BENCHMARK PACKS & PROMOTION (Phase 26)
+// ========================================
+
+export interface BenchmarkPack {
+  id: string
+  name: string
+  description: string | null
+  tags: string[]
+  is_archived: boolean
+  example_count: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BenchmarkPackInput {
+  name: string
+  description?: string
+  tags?: string[]
+  example_ids: string[]
+}
+
+export interface BenchmarkPackExample {
+  id: string
+  benchmark_pack_id: string
+  training_example_id: string
+  ground_truth_gross: number | null
+  ground_truth_net: number | null
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  added_at: string
+}
+
+export interface BenchmarkRun {
+  id: string
+  benchmark_pack_id: string
+  bulk_validation_run_id: string
+  run_purpose: 'release_candidate' | 'regression_test' | 'ad_hoc' | null
+  run_notes: string | null
+  active_model_version_id: string | null
+  candidate_model_version_id: string | null
+  active_calibration_profile_id: string | null
+  candidate_calibration_profile_id: string | null
+  guardrail_config: RegressionGuardrailConfig | null
+  guardrail_results: GuardrailEvaluationResult | null
+  all_guardrails_passed: boolean | null
+  created_at: string
+}
+
+export interface BenchmarkRunWithDetails extends BenchmarkRun {
+  pack_name: string
+  pack_example_count: number
+  bulk_run_status: string
+  total_examples: number
+  processed_examples: number
+  active_model_name: string | null
+  candidate_model_name: string | null
+  active_calibration_name: string | null
+  candidate_calibration_name: string | null
+}
+
+export interface BenchmarkRunInput {
+  benchmark_pack_id: string
+  run_purpose?: 'release_candidate' | 'regression_test' | 'ad_hoc'
+  run_notes?: string
+  active_model_version_id?: string
+  candidate_model_version_id?: string
+  active_calibration_profile_id?: string
+  candidate_calibration_profile_id?: string
+  guardrail_config?: RegressionGuardrailConfig
+}
+
+// Guardrails configuration
+export interface RegressionGuardrailConfig {
+  // Absolute error thresholds
+  max_avg_gross_error_inches: number
+  max_avg_net_error_inches: number | null
+  
+  // Regression vs active model thresholds
+  max_regression_vs_active_inches: number
+  max_regression_vs_active_percent: number
+  
+  // Accuracy thresholds
+  min_within_5_inches_percent: number
+  min_within_10_inches_percent: number
+  
+  // Confidence calibration drift
+  max_overconfidence_drift_percent: number
+  
+  // Subgroup regression limits
+  max_subgroup_regression_inches: number
+  subgroups_to_check: ('state' | 'rack_type' | 'source_type')[]
+}
+
+export const DEFAULT_GUARDRAIL_CONFIG: RegressionGuardrailConfig = {
+  max_avg_gross_error_inches: 8.0,
+  max_avg_net_error_inches: 6.0,
+  max_regression_vs_active_inches: 1.0,
+  max_regression_vs_active_percent: 10.0,
+  min_within_5_inches_percent: 40.0,
+  min_within_10_inches_percent: 70.0,
+  max_overconfidence_drift_percent: 5.0,
+  max_subgroup_regression_inches: 2.0,
+  subgroups_to_check: ['state', 'rack_type', 'source_type']
+}
+
+// Individual guardrail result
+export interface GuardrailCheckResult {
+  name: string
+  description: string
+  passed: boolean
+  threshold: number
+  actual: number
+  unit: string
+  severity: 'critical' | 'warning' | 'info'
+}
+
+// Full guardrail evaluation
+export interface GuardrailEvaluationResult {
+  overall_passed: boolean
+  critical_failures: number
+  warning_failures: number
+  checks: GuardrailCheckResult[]
+  subgroup_results: {
+    subgroup_type: string
+    subgroup_value: string
+    passed: boolean
+    active_mae: number
+    candidate_mae: number
+    regression_inches: number
+  }[]
+  summary: string
+}
+
+// Promotion decisions
+export type PromotionDecisionType = 'promote' | 'reject' | 'defer'
+
+export interface PromotionDecision {
+  id: string
+  benchmark_run_id: string | null
+  decision: PromotionDecisionType
+  decision_reason: string | null
+  decision_notes: string | null
+  candidate_model_version_id: string | null
+  candidate_calibration_profile_id: string | null
+  active_model_version_id: string | null
+  active_calibration_profile_id: string | null
+  metrics_snapshot: PromotionMetricsSnapshot | null
+  guardrail_results: GuardrailEvaluationResult | null
+  decided_by: string | null
+  decided_at: string
+  created_at: string
+}
+
+export interface PromotionDecisionWithDetails extends PromotionDecision {
+  candidate_model_name: string | null
+  active_model_name: string | null
+  candidate_calibration_name: string | null
+  active_calibration_name: string | null
+  benchmark_pack_id: string | null
+  benchmark_pack_name: string | null
+}
+
+export interface PromotionDecisionInput {
+  benchmark_run_id?: string
+  decision: PromotionDecisionType
+  decision_reason: string
+  decision_notes?: string
+  candidate_model_version_id?: string
+  candidate_calibration_profile_id?: string
+  active_model_version_id?: string
+  active_calibration_profile_id?: string
+  metrics_snapshot?: PromotionMetricsSnapshot
+  guardrail_results?: GuardrailEvaluationResult
+  decided_by?: string
+}
+
+// Metrics snapshot for promotion decisions
+export interface PromotionMetricsSnapshot {
+  active_model: {
+    model_version_id: string
+    model_name: string
+    avg_gross_error: number
+    avg_net_error: number | null
+    within_5_inches_percent: number
+    within_10_inches_percent: number
+    sample_count: number
+  }
+  candidate_model: {
+    model_version_id: string
+    model_name: string
+    avg_gross_error: number
+    avg_net_error: number | null
+    within_5_inches_percent: number
+    within_10_inches_percent: number
+    sample_count: number
+  }
+  comparison: {
+    gross_error_improvement_inches: number
+    gross_error_improvement_percent: number
+    net_error_improvement_inches: number | null
+    net_error_improvement_percent: number | null
+    examples_improved: number
+    examples_regressed: number
+    examples_unchanged: number
+  }
+  confidence_metrics?: {
+    active_overconfident_percent: number
+    candidate_overconfident_percent: number
+    overconfidence_drift: number
+  }
+}
+
+// Promotion readiness summary for UI
+export interface PromotionReadinessSummary {
+  benchmark_pack: BenchmarkPack
+  benchmark_run: BenchmarkRunWithDetails | null
+  active_model: {
+    id: string
+    name: string
+    metrics: ModelBenchmarkMetrics
+  } | null
+  candidate_model: {
+    id: string
+    name: string
+    metrics: ModelBenchmarkMetrics
+  }
+  comparison: ModelComparisonSummary | null
+  guardrail_evaluation: GuardrailEvaluationResult | null
+  recommendation: 'ready_to_promote' | 'needs_review' | 'not_recommended' | 'insufficient_data'
+  recommendation_reasons: string[]
+}
+
+export interface ModelBenchmarkMetrics {
+  avg_gross_error: number
+  avg_net_error: number | null
+  median_gross_error: number
+  median_net_error: number | null
+  within_5_inches_count: number
+  within_5_inches_percent: number
+  within_10_inches_count: number
+  within_10_inches_percent: number
+  overestimation_count: number
+  underestimation_count: number
+  sample_count: number
+  by_state?: Record<string, { avg_error: number; count: number }>
+  by_rack_type?: Record<string, { avg_error: number; count: number }>
+  by_source_type?: Record<string, { avg_error: number; count: number }>
+}
+
+export interface ModelComparisonSummary {
+  gross_error_diff_inches: number
+  gross_error_diff_percent: number
+  net_error_diff_inches: number | null
+  net_error_diff_percent: number | null
+  accuracy_5_inch_diff: number
+  accuracy_10_inch_diff: number
+  examples_improved: number
+  examples_regressed: number
+  examples_unchanged: number
+  improvement_rate: number // % of examples that improved
+  regression_rate: number // % of examples that regressed
+}
