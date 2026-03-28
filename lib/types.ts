@@ -1,4 +1,4 @@
-// Database types for RutAI/XRacks
+// Database types for RAXcore
 
 export type RackType = 'typical' | 'non-typical'
 export type HarvestMethod = 'bow' | 'rifle' | 'muzzleloader' | 'crossbow' | 'other'
@@ -1899,4 +1899,310 @@ export interface ModelComparisonSummary {
   examples_unchanged: number
   improvement_rate: number // % of examples that improved
   regression_rate: number // % of examples that regressed
+}
+
+// ========================================
+// DATASET HEALTH + QUALITY CONTROLS (Phase 27)
+// ========================================
+
+export type HealthTier = 'excellent' | 'good' | 'fair' | 'poor' | 'excluded' | 'unknown'
+export type ScoreSourceStrength = 'official' | 'verified' | 'self_reported' | 'estimated' | 'unknown'
+export type OutlierType = 'score_outlier' | 'error_outlier' | 'measurement_outlier' | 'metadata_outlier' | 'correction_instability'
+export type OutlierSeverity = 'mild' | 'moderate' | 'severe'
+export type DuplicateClusterType = 'exact' | 'near' | 'suspected'
+export type HealthReviewDecision = 'approve_training' | 'validation_only' | 'exclude' | 'mark_duplicate' | 'needs_more_info' | 'defer'
+
+// Health factors breakdown for explainability
+export interface HealthFactors {
+  // Score-related factors (0-100 scale each)
+  score_source_quality: number // official=100, verified=80, self=50, estimated=20
+  verification_status: number // verified=100, unverified=50
+  
+  // Image quality factors
+  image_count_factor: number // 4+=100, 3=85, 2=70, 1=50
+  angle_diversity_factor: number // based on angle_diversity_score
+  image_quality_factor: number // from intake_quality
+  
+  // Metadata completeness factors
+  metadata_completeness: number // % of key fields filled
+  
+  // Consistency factors
+  measurement_consistency: number // from quality_flags
+  error_stability: number // low variance in corrections over time
+  
+  // Trust signals
+  trust_score_factor: number // from trust score if available
+  confidence_factor: number // from prediction confidence
+  
+  // Negative signals (reduce health)
+  outlier_penalty: number // 0 if not outlier, -10 to -50 if outlier
+  duplicate_penalty: number // 0 if not duplicate, -20 to -40 if duplicate
+  suspect_metadata_penalty: number // 0 or -20
+  
+  // Computed totals
+  raw_score: number // sum before normalization
+  normalized_score: number // 0-100 final health score
+  
+  // Explanation
+  top_strengths: string[]
+  top_weaknesses: string[]
+}
+
+// Extended TrainingExample with health fields
+export interface TrainingExampleWithHealth extends TrainingExample {
+  // Health scoring
+  health_score: number | null
+  health_tier: HealthTier
+  health_computed_at: string | null
+  health_factors: HealthFactors | null
+  
+  // Usability flags
+  usable_for_training: boolean | null
+  usable_for_validation: boolean | null
+  is_low_quality: boolean
+  is_duplicate: boolean
+  is_near_duplicate: boolean
+  duplicate_of_id: string | null
+  has_suspect_metadata: boolean
+  is_outlier: boolean
+  needs_review: boolean
+  review_reason: string | null
+  
+  // Score source strength
+  score_source_strength: ScoreSourceStrength
+}
+
+// Health review decision record
+export interface HealthReviewDecisionRecord {
+  id: string
+  training_example_id: string
+  decision: HealthReviewDecision
+  previous_usable_for_training: boolean | null
+  previous_usable_for_validation: boolean | null
+  decision_reason: string | null
+  decision_notes: string | null
+  decided_by: string | null
+  decided_at: string
+  created_at: string
+}
+
+// Input for submitting a health review decision
+export interface HealthReviewDecisionInput {
+  training_example_id: string
+  decision: HealthReviewDecision
+  decision_reason: string
+  decision_notes?: string
+  decided_by?: string
+}
+
+// Duplicate cluster
+export interface DuplicateCluster {
+  id: string
+  cluster_type: DuplicateClusterType
+  cluster_reason: string | null
+  primary_example_id: string | null
+  example_count: number
+  is_resolved: boolean
+  resolved_by: string | null
+  resolved_at: string | null
+  resolution_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+// Duplicate cluster member
+export interface DuplicateClusterMember {
+  id: string
+  cluster_id: string
+  training_example_id: string
+  similarity_score: number | null
+  similarity_factors: {
+    same_buck: boolean
+    image_similarity?: number
+    measurement_similarity?: number
+    metadata_similarity?: number
+  } | null
+  is_primary: boolean
+  added_at: string
+}
+
+// Duplicate cluster with members
+export interface DuplicateClusterWithMembers extends DuplicateCluster {
+  members: (DuplicateClusterMember & {
+    example?: TrainingExampleWithHealth
+    buck?: Buck
+    prediction?: Prediction
+    ground_truth?: GroundTruthScore
+  })[]
+}
+
+// Outlier record
+export interface OutlierRecord {
+  id: string
+  training_example_id: string
+  outlier_type: OutlierType
+  severity: OutlierSeverity
+  outlier_reason: string
+  statistical_details: {
+    z_score?: number
+    percentile?: number
+    expected_range?: [number, number]
+    actual_value?: number
+    comparison_group_size?: number
+  } | null
+  is_resolved: boolean
+  resolution_action: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  detected_at: string
+  created_at: string
+}
+
+// Health computation run
+export interface HealthComputationRun {
+  id: string
+  run_type: 'full' | 'incremental' | 'single'
+  examples_processed: number
+  duplicates_detected: number
+  outliers_detected: number
+  examples_flagged_for_review: number
+  computation_time_ms: number | null
+  run_config: {
+    include_duplicate_detection?: boolean
+    include_outlier_detection?: boolean
+    duplicate_threshold?: number
+    outlier_z_threshold?: number
+  } | null
+  run_stats: {
+    by_health_tier?: Record<HealthTier, number>
+    avg_health_score?: number
+    median_health_score?: number
+  } | null
+  started_at: string
+  completed_at: string | null
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  error_message: string | null
+  created_at: string
+}
+
+// Dataset health summary (from view)
+export interface DatasetHealthSummary {
+  health_tier: HealthTier
+  example_count: number
+  avg_health_score: number | null
+  training_eligible: number
+  validation_eligible: number
+  low_quality_count: number
+  duplicate_count: number
+  outlier_count: number
+  needs_review_count: number
+}
+
+// Health summary totals
+export interface DatasetHealthTotals {
+  total_examples: number
+  healthy_examples: number // excellent + good
+  fair_examples: number
+  unhealthy_examples: number // poor + excluded
+  training_eligible: number
+  validation_eligible: number
+  needs_review: number
+  duplicates: number
+  outliers: number
+  uncomputed: number // health_score is null
+  avg_health_score: number | null
+}
+
+// Health by breakdown (source type, image count, etc.)
+export interface DatasetHealthBreakdown {
+  category: string
+  example_count: number
+  avg_health_score: number | null
+  excellent_count: number
+  good_count: number
+  fair_count: number
+  poor_count: number
+  training_eligible: number
+}
+
+// Filters for querying training examples with health
+export interface HealthFilterOptions {
+  health_tier?: HealthTier | HealthTier[]
+  min_health_score?: number
+  max_health_score?: number
+  usable_for_training?: boolean
+  usable_for_validation?: boolean
+  is_low_quality?: boolean
+  is_duplicate?: boolean
+  is_outlier?: boolean
+  needs_review?: boolean
+  score_source_strength?: ScoreSourceStrength | ScoreSourceStrength[]
+  verified_only?: boolean
+  exclude_duplicates?: boolean
+  exclude_outliers?: boolean
+}
+
+// Config for health computation
+export interface HealthComputationConfig {
+  // Duplicate detection settings
+  enable_duplicate_detection: boolean
+  duplicate_same_buck_check: boolean
+  duplicate_measurement_similarity_threshold: number // 0-1
+  
+  // Outlier detection settings
+  enable_outlier_detection: boolean
+  outlier_z_score_threshold: number // typically 2.5 or 3
+  outlier_error_percentile_threshold: number // e.g., 95
+  
+  // Health score weights
+  weights: {
+    score_source: number
+    verification: number
+    image_count: number
+    angle_diversity: number
+    image_quality: number
+    metadata_completeness: number
+    measurement_consistency: number
+    trust_score: number
+    confidence: number
+  }
+  
+  // Tier thresholds
+  tier_thresholds: {
+    excellent: number // e.g., 85
+    good: number // e.g., 70
+    fair: number // e.g., 50
+    poor: number // e.g., 30
+    // below poor = excluded
+  }
+}
+
+// Default health computation config
+export const DEFAULT_HEALTH_CONFIG: HealthComputationConfig = {
+  enable_duplicate_detection: true,
+  duplicate_same_buck_check: true,
+  duplicate_measurement_similarity_threshold: 0.95,
+  
+  enable_outlier_detection: true,
+  outlier_z_score_threshold: 2.5,
+  outlier_error_percentile_threshold: 95,
+  
+  weights: {
+    score_source: 20,
+    verification: 15,
+    image_count: 12,
+    angle_diversity: 10,
+    image_quality: 10,
+    metadata_completeness: 8,
+    measurement_consistency: 10,
+    trust_score: 8,
+    confidence: 7,
+  },
+  
+  tier_thresholds: {
+    excellent: 85,
+    good: 70,
+    fair: 50,
+    poor: 30,
+  }
 }

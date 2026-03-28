@@ -16,6 +16,7 @@ import {
   GitCompare,
   Settings2,
   Package,
+  HeartPulse,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,7 @@ const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
   { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
+  { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },
   { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },
   { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
@@ -44,8 +46,8 @@ export function AdminSidebar() {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
         <Link href="/admin" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Xr</div>
-          <span className="font-semibold">xRack Admin</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
+          <span className="font-semibold">RAXcore Admin</span>
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -68,8 +70,8 @@ export function AdminSidebar() {
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
             <Link href="/admin" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Xr</div>
-              <span className="font-semibold text-sidebar-foreground">xRack Admin</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
+              <span className="font-semibold text-sidebar-foreground">RAXcore Admin</span>
             </Link>
             <Button 
               variant="ghost" 

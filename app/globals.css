@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* xRack Premium Outdoor Theme - Light Mode */
+  /* RAXcore Premium Outdoor Theme - Light Mode */
   --background: oklch(0.98 0.008 45);
   --foreground: oklch(0.15 0.02 40);
   --card: oklch(1 0 0);
@@ -47,7 +47,7 @@
 }
 
 .dark {
-  /* xRack Premium Outdoor Theme - Dark Mode */
+  /* RAXcore Premium Outdoor Theme - Dark Mode */
   --background: oklch(0.14 0.018 35);
   --foreground: oklch(0.92 0.012 50);
   --card: oklch(0.18 0.018 35);

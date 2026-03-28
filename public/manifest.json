@@ -1,6 +1,6 @@
 {
-  "name": "xRack - AI Antler Scoring",
-  "short_name": "xRack",
+  "name": "RAXcore - AI Antler Scoring",
+  "short_name": "RAXcore",
   "description": "AI-powered whitetail antler scoring from photos",
   "start_url": "/",
   "display": "standalone",
