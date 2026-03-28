@@ -4,22 +4,40 @@ import { createClient } from '@/lib/supabase/server'
 
 /**
  * Server component — fetches notification data then passes it to the client bell.
- * Returns null if not authenticated.
+ * Fail-open: returns null on any error so public pages always render.
  */
 export async function NotificationBellLoader() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  try {
+    const supabase = await createClient()
 
-  const [notifications, unreadCount] = await Promise.all([
-    listMyNotifications(),
-    countUnreadNotifications(),
-  ])
+    let user
+    try {
+      const { data } = await supabase.auth.getUser()
+      user = data?.user
+    } catch {
+      return null
+    }
 
-  return (
-    <NotificationBell
-      initialNotifications={notifications}
-      initialUnreadCount={unreadCount}
-    />
-  )
+    if (!user) return null
+
+    let notifications: Awaited<ReturnType<typeof listMyNotifications>> = []
+    let unreadCount = 0
+    try {
+      ;[notifications, unreadCount] = await Promise.all([
+        listMyNotifications(),
+        countUnreadNotifications(),
+      ])
+    } catch {
+      // Notifications unavailable — still render bell with empty state
+    }
+
+    return (
+      <NotificationBell
+        initialNotifications={notifications}
+        initialUnreadCount={unreadCount}
+      />
+    )
+  } catch {
+    return null
+  }
 }
