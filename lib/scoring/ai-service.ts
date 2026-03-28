@@ -33,6 +33,7 @@ import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } fr
 import { applyFallbackPenalties, type FallbackMetadata } from './fallback-handler'
 import { calibrateConfidence, getCalibrationMetadata, type CalibratedConfidenceResult } from './calibrated-confidence'
 import { calculateTrustScore, getTrustScoreMetadata, type TrustScoreResult } from './trust-score'
+import { resolveSegments, applySegmentedCalibration, logPredictionSegments, type SegmentedCalibration } from './segment-engine'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
 import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary, ConfidenceTrustMetadata, ConfidenceTier, TrustTier } from '@/lib/types'
 
@@ -107,6 +108,14 @@ export interface ScoringOutput {
   trustTier?: TrustTier
   expectedMae?: number
   confidenceTrustMetadata?: ConfidenceTrustMetadata | null
+  // Phase 41: Segmented calibration metadata
+  segmentedCalibration?: {
+    matchedSegments: SegmentedCalibration['matchedSegments']
+    hasSpecificSegments: boolean
+    totalSampleCount: number
+    confidenceAdjustment: number
+    grossDelta: number
+  } | null
 }
 
 // Learning summary exposed to UI
@@ -788,8 +797,29 @@ async function buildVisionScoringOutput(
   // Use measurement-corrected measurements as the base for further processing
   const measurementCorrectedMeasurements = measurementCorrectionResult.correctedMeasurements
 
+  // STAGE 5.5: Phase 41 Segmented Calibration — blended per-segment multipliers/biases
+  const segmentContext = {
+    sourceType: input.sourceType,
+    imageCount: input.images.length,
+    angleDiversity,
+    rackType: input.rackType,
+    state: input.state,
+    earsFullyVisible: input.earsFullyVisible,
+    captureDevice: input.captureDevice,
+  }
+  const segmentedCal = await resolveSegments(segmentContext)
+  const segmentCorrectionResult = applySegmentedCalibration(
+    measurementCorrectedMeasurements as unknown as Record<string, number | null>,
+    segmentedCal
+  )
+  // Merge segment-corrected values back into a typed Measurements object
+  const segmentCorrectedMeasurements = {
+    ...measurementCorrectedMeasurements,
+    ...segmentCorrectionResult.correctedMeasurements,
+  } as typeof measurementCorrectedMeasurements
+
   // STAGE 6: Phase 10 Learning Correction - additional total-score adjustment
-  // This provides supplemental correction on top of measurement-level corrections
+  // This provides supplemental correction on top of measurement-level + segment corrections
   const learningResult = await computeLearningCorrection(
     {
       state: input.state,
@@ -805,7 +835,7 @@ async function buildVisionScoringOutput(
       normalizedConfidence: calibratedConfidence.finalConfidence,
       calibrationProfile,
     },
-    measurementCorrectedMeasurements
+    segmentCorrectedMeasurements  // Phase 41: use segment-corrected as base
   )
 
   // STAGE 7: Apply any remaining per-field corrections from learning result
@@ -830,8 +860,10 @@ async function buildVisionScoringOutput(
 
   // Combine confidence from calibration and learning boost
   // Phase 20: Apply calibration profile's confidence scaling
+  // Phase 41: Additionally apply segment-level confidence adjustment (clamped ±15)
   const confidenceScaling = calibrationProfile?.confidence_scaling ?? 1.0
-  const baseConfidenceWithBoost = calibratedConfidence.finalConfidence + learningResult.confidenceBoost
+  const segmentConfAdj = Math.max(-15, Math.min(15, segmentedCal.confidenceAdjustment))
+  const baseConfidenceWithBoost = calibratedConfidence.finalConfidence + learningResult.confidenceBoost + segmentConfAdj
   const scaledConfidence = baseConfidenceWithBoost * confidenceScaling
   const firstPassConfidence = Math.min(97, Math.max(15, Math.round(scaledConfidence)))
 
@@ -984,6 +1016,15 @@ async function buildVisionScoringOutput(
   if (measurementCorrectionResult.summary.totalCategoriesCorrected > 0) {
     explanations.push(...measurementCorrectionResult.summary.notes)
   }
+
+  // Phase 41: Add segment calibration note
+  if (segmentedCal.hasSpecificSegments) {
+    const activeNames = segmentedCal.matchedSegments
+      .filter(s => !s.gated && s.level > 0)
+      .map(s => s.name)
+      .join(', ')
+    explanations.push(`Segment calibration applied (${activeNames}): gross delta ${segmentCorrectionResult.grossDelta >= 0 ? '+' : ''}${segmentCorrectionResult.grossDelta.toFixed(1)}".`)
+  }
   
   // Add Phase 10 learning notes
   explanations.push(...learningResult.summary.notes)
@@ -1010,6 +1051,13 @@ async function buildVisionScoringOutput(
 
   // Convert to simple learning summary for backward compatibility
   const simpleSummary = toSimpleLearningSummary(learningResult.summary)
+
+  // Phase 41: Fire-and-forget segment audit log
+  logPredictionSegments({
+    traceId: input.traceId,
+    calibration: segmentedCal,
+    calibrationDeltas: segmentCorrectionResult.deltas as Record<string, unknown>,
+  })
 
   return {
     predictedGross: gross,
@@ -1048,8 +1096,16 @@ async function buildVisionScoringOutput(
     trustTier: trustScoreResult.tier,
     expectedMae: calibratedConfidenceResult.expectedErrorBand.expectedMae,
     confidenceTrustMetadata,
+    // Phase 41: Segment calibration summary
+    segmentedCalibration: {
+      matchedSegments: segmentedCal.matchedSegments,
+      hasSpecificSegments: segmentedCal.hasSpecificSegments,
+      totalSampleCount: segmentedCal.totalSampleCount,
+      confidenceAdjustment: segmentedCal.confidenceAdjustment,
+      grossDelta: segmentCorrectionResult.grossDelta,
+    },
   }
-}
+
 
 /**
  * Build output from heuristic scoring (fallback path)

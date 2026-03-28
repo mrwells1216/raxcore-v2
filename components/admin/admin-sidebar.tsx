@@ -21,6 +21,7 @@ import {
   Activity,
   CreditCard,
   Radio,
+  Layers,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ const navigation = [
   { name: 'Operations', href: '/admin/operations', icon: Activity },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
   { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
+  { name: 'Segments', href: '/admin/segments', icon: Layers },
   { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },
   { name: 'Influence', href: '/admin/influence', icon: Scale },
   { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },

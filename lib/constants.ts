@@ -55,6 +55,13 @@ export const US_STATES = [
 export const HIGH_OUTPUT_STATES = ['IL', 'IA', 'WI', 'KS', 'OH', 'IN', 'MO', 'KY', 'NE', 'MN'] as const
 export const LOW_OUTPUT_STATES = ['AZ', 'NV', 'NM', 'CA', 'WA', 'OR', 'UT'] as const
 
+// Phase 41: Geographic region groupings for segmented calibration
+export const MIDWEST_STATES = ['IL', 'IA', 'WI', 'OH', 'IN', 'MO', 'MN', 'MI', 'ND', 'SD', 'WI'] as const
+export const SOUTH_STATES   = ['TX', 'AL', 'MS', 'GA', 'FL', 'SC', 'NC', 'TN', 'AR', 'LA', 'KY', 'VA', 'WV', 'OK'] as const
+export const NORTHEAST_STATES = ['NY', 'PA', 'VT', 'NH', 'ME', 'MA', 'CT', 'RI', 'NJ', 'DE', 'MD'] as const
+export const PLAINS_STATES  = ['KS', 'NE', 'CO', 'WY', 'MT', 'ID'] as const
+export const WEST_STATES    = ['AZ', 'NV', 'NM', 'CA', 'WA', 'OR', 'UT'] as const
+
 export const RACK_TYPES = [
   { value: 'typical', label: 'Typical' },
   { value: 'non-typical', label: 'Non-Typical' },
