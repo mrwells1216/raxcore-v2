@@ -339,7 +339,7 @@ export function MapViewer({
           ))}
 
           {/* Pending pin marker */}
-          {pendingPin && focusedState && (
+          {pendingPin && focusedState && !isNaN(pendingPin.lat) && !isNaN(pendingPin.lng) && isFinite(pendingPin.lat) && isFinite(pendingPin.lng) && (
             <Marker coordinates={[pendingPin.lng, pendingPin.lat]}>
               <g transform="translate(-12, -24)">
                 <path

@@ -1366,6 +1366,116 @@ export async function listHistory(): Promise<(Buck & {
 }
 
 /**
+ * List bucks for a specific user (for their library)
+ */
+export async function listUserBucks(userId: string): Promise<(Buck & {
+  buck_images: BuckImage[]
+  predictions: Prediction[]
+})[]> {
+  const supabase = await createClient()
+  
+  const { data: bucks, error: bucksError } = await supabase
+    .from('bucks')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  
+  if (bucksError || !bucks?.length) return []
+  
+  const buckIds = bucks.map(b => b.id)
+  
+  const [imagesResult, predictionsResult] = await Promise.all([
+    supabase.from('buck_images').select('*').in('buck_id', buckIds),
+    supabase.from('predictions').select('*').in('buck_id', buckIds).order('created_at', { ascending: false }),
+  ])
+  
+  const images: BuckImage[] = (imagesResult.data as BuckImage[]) ?? []
+  const predictions: Prediction[] = (predictionsResult.data as Prediction[]) ?? []
+  
+  return (bucks as Buck[]).map(buck => ({
+    ...buck,
+    buck_images: images.filter(img => img.buck_id === buck.id),
+    predictions: predictions.filter(p => p.buck_id === buck.id).slice(0, 1),
+  }))
+}
+
+// ============================================================================
+// BUCK SHARING
+// ============================================================================
+
+/**
+ * Generate a share token for a buck
+ */
+export async function generateBuckShareToken(buckId: string): Promise<string> {
+  const supabase = await createClient()
+  
+  // Generate a random token
+  const token = crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+  
+  const { error } = await supabase
+    .from('bucks')
+    .update({ 
+      share_token: token,
+      is_public: true 
+    })
+    .eq('id', buckId)
+
+  if (error) throw new Error(`Failed to generate share token: ${error.message}`)
+  return token
+}
+
+/**
+ * Get a buck by its share token (for public sharing)
+ */
+export async function getBuckByShareToken(token: string): Promise<(Buck & {
+  buck_images: BuckImage[]
+  predictions: Prediction[]
+}) | null> {
+  const supabase = await createClient()
+  
+  const { data: buck, error: buckError } = await supabase
+    .from('bucks')
+    .select('*')
+    .eq('share_token', token)
+    .eq('is_public', true)
+    .single()
+
+  if (buckError || !buck) return null
+  
+  const [imagesResult, predictionsResult] = await Promise.all([
+    supabase.from('buck_images').select('*').eq('buck_id', buck.id),
+    supabase.from('predictions').select('*').eq('buck_id', buck.id).order('created_at', { ascending: false }),
+  ])
+
+  return {
+    ...(buck as Buck),
+    buck_images: (imagesResult.data as BuckImage[]) ?? [],
+    predictions: (predictionsResult.data as Prediction[])?.slice(0, 1) ?? [],
+  }
+}
+
+/**
+ * Disable sharing for a buck
+ */
+export async function disableBuckSharing(buckId: string): Promise<void> {
+  const supabase = await createClient()
+  
+  const { error } = await supabase
+    .from('bucks')
+    .update({ 
+      share_token: null,
+      is_public: false 
+    })
+    .eq('id', buckId)
+
+  if (error) throw new Error(`Failed to disable sharing: ${error.message}`)
+}
+
+// ============================================================================
+// RENDER JOBS
+// ============================================================================
+
+/**
  * Admin: list all render jobs with pagination and optional status filter.
  */
 export async function listRenderJobsAdmin(options?: {
