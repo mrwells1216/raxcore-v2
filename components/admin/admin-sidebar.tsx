@@ -19,6 +19,7 @@ import {
   HeartPulse,
   Scale,
   Activity,
+  CreditCard,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -39,6 +40,7 @@ const navigation = [
   { name: 'Error Patterns', href: '/admin/error-patterns', icon: BarChart3 },
   { name: 'Teach AI', href: '/admin/teach', icon: Wand2 },
   { name: 'Export', href: '/admin/export', icon: FileDown },
+  { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
 export function AdminSidebar() {

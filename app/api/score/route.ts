@@ -20,6 +20,14 @@ import {
   calculateCost,
   getActiveProductionConfig,
 } from '@/lib/usage/service'
+import {
+  checkUserLimit,
+  checkGuestLimit,
+  recordScoringRun,
+  ensureUserHasPlan,
+  getUserPlanStatus,
+} from '@/lib/billing/service'
+import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -101,6 +109,58 @@ export async function POST(request: Request) {
     
     imageCount = images.length
 
+    // Phase 38: Per-user plan limit enforcement (runs before any DB writes or AI calls)
+    const sessionId = formData.get('session_id') as string | null
+    const clientIp = clientKey.replace('ip:', '')
+
+    if (userId) {
+      // Authenticated user — check plan limits
+      await ensureUserHasPlan(userId)
+      const limitCheck = await checkUserLimit(userId, imageCount)
+      if (!limitCheck.allowed) {
+        // Record the blocked attempt in ledger then return
+        await recordScoringRun({
+          userId,
+          sessionId: sessionId ?? undefined,
+          clientIp,
+          imagesCount: imageCount,
+          status: 'blocked',
+          blockReason: limitCheck.reason,
+        })
+        return NextResponse.json({
+          error: 'Plan limit reached',
+          userMessage: limitCheck.userMessage,
+          errorType: 'plan_limit',
+          reason: limitCheck.reason,
+          plan: limitCheck.plan ? {
+            id: limitCheck.plan.plan_id,
+            name: limitCheck.plan.plan_name,
+          } : null,
+        }, { status: 429 })
+      }
+    } else {
+      // Guest — check session-based limit
+      const guestSessionId = sessionId ?? `anon_${clientIp}`
+      const guestCheck = await checkGuestLimit(guestSessionId, imageCount)
+      if (!guestCheck.allowed) {
+        await recordScoringRun({
+          sessionId: guestSessionId,
+          clientIp,
+          imagesCount: imageCount,
+          planId: 'guest',
+          status: 'blocked',
+          blockReason: guestCheck.reason,
+        })
+        return NextResponse.json({
+          error: 'Guest limit reached',
+          userMessage: guestCheck.userMessage,
+          errorType: 'plan_limit',
+          reason: guestCheck.reason,
+          requiresAuth: true,
+        }, { status: 429 })
+      }
+    }
+
     // Phase 30: Validate request and check rate limits
     const productionConfig = await getActiveProductionConfig()
     const validationResult = await validateScoringRequest(imageCount, clientKey)
@@ -134,12 +194,12 @@ export async function POST(request: Request) {
       }, { status: 503 })
     }
 
-    // Generate session ID
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+    // Generate internal buck session ID (distinct from the form session_id)
+    const buckSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 
     // Create buck record in Supabase
     const buck = await createBuck({
-      sessionId,
+      sessionId: buckSessionId,
       nickname: nickname || undefined,
       location: location || state,
       harvestDate: harvestDate || undefined,
@@ -242,6 +302,29 @@ export async function POST(request: Request) {
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
+
+    // Phase 38: Record successful scoring run + fire low-credits notification (fire-and-forget)
+    {
+      const guestSessionId = sessionId ?? `anon_${clientIp}`;
+      (async () => {
+        const planStatus = userId ? await getUserPlanStatus(userId).catch(() => null) : null
+        await recordScoringRun({
+          userId: userId ?? null,
+          sessionId: userId ? (sessionId ?? buckSessionId) : guestSessionId,
+          clientIp,
+          buckId: buck.id,
+          imagesCount: imageCount,
+          planId: planStatus?.plan_id ?? (userId ? 'free' : 'guest'),
+          periodStart: planStatus?.period_start ?? null,
+          periodEnd: planStatus?.period_end ?? null,
+          status: 'success',
+        })
+        // Notify user if they're running low on credits
+        if (userId && planStatus) {
+          await maybeNotifyLowCredits(userId, planStatus).catch(() => null)
+        }
+      })().catch(err => console.error('[billing] post-score tasks failed:', err))
+    }
 
     // Phase 34: Fire notifications (fire-and-forget, never block the response)
     const notificationPromises: Promise<void>[] = []

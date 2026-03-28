@@ -29,9 +29,10 @@ const adminNavigation = [
 
 interface HeaderProps {
   bellSlot?: React.ReactNode
+  usageSlot?: React.ReactNode
 }
 
-export function Header({ bellSlot }: HeaderProps) {
+export function Header({ bellSlot, usageSlot }: HeaderProps) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
@@ -108,8 +109,9 @@ export function Header({ bellSlot }: HeaderProps) {
           ))}
         </nav>
 
-        {/* Desktop user menu + bell */}
-        <div className="hidden md:flex items-center gap-1">
+        {/* Desktop user menu + usage badge + bell */}
+        <div className="hidden md:flex items-center gap-2">
+          {usageSlot}
           {bellSlot}
           <UserMenu initialUser={user} />
         </div>

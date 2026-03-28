@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { User as UserIcon, Library, LogOut, Settings, LogIn } from 'lucide-react'
+import { User as UserIcon, Library, LogOut, Settings, LogIn, CreditCard } from 'lucide-react'
 
 interface UserMenuProps {
   initialUser?: User | null
@@ -105,6 +105,12 @@ export function UserMenu({ initialUser }: UserMenuProps) {
           <Link href="/library" className="flex items-center cursor-pointer">
             <Library className="mr-2 h-4 w-4" />
             My Library
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/settings/plan" className="flex items-center cursor-pointer">
+            <CreditCard className="mr-2 h-4 w-4" />
+            Plan &amp; Usage
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
