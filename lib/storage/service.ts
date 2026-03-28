@@ -1332,71 +1332,103 @@ export async function getBuckBundle(id: string): Promise<{
 }
 
 /**
- * List all bucks with their latest prediction + thumbnail — mirrors local-db.listHistory.
+ * List bucks with their latest prediction + thumbnail — paginated.
+ * Replaces the old listHistory which fetched all rows with no limit.
  */
-export async function listHistory(): Promise<(Buck & {
-  buck_images: BuckImage[]
-  predictions: Prediction[]
-})[]> {
+export async function listHistory(options?: {
+  limit?: number
+  offset?: number
+}): Promise<{
+  data: (Buck & { buck_images: BuckImage[]; predictions: Prediction[] })[]
+  count: number
+}> {
   const supabase = await createClient()
+  const limit = options?.limit ?? 20
+  const offset = options?.offset ?? 0
 
-  const { data: bucks, error: bucksError } = await supabase
+  const { data: bucks, error: bucksError, count } = await supabase
     .from('bucks')
-    .select('*')
+    .select('id, session_id, nickname, location, state, rack_type, main_frame_points, status, created_at, updated_at', { count: 'exact' })
     .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
 
-  if (bucksError || !bucks?.length) return []
+  if (bucksError || !bucks?.length) return { data: [], count: count ?? 0 }
 
   const buckIds = bucks.map(b => b.id)
 
   const [imagesResult, predictionsResult] = await Promise.all([
-    supabase.from('buck_images').select('*').in('buck_id', buckIds),
-    supabase.from('predictions').select('*').in('buck_id', buckIds).order('created_at', { ascending: false }),
+    supabase
+      .from('buck_images')
+      .select('id, buck_id, public_url, image_type, display_order')
+      .in('buck_id', buckIds)
+      .order('display_order', { ascending: true }),
+    supabase
+      .from('predictions')
+      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, created_at')
+      .in('buck_id', buckIds)
+      .order('created_at', { ascending: false }),
   ])
 
   const images: BuckImage[] = (imagesResult.data as BuckImage[]) ?? []
   const predictions: Prediction[] = (predictionsResult.data as Prediction[]) ?? []
 
-  return (bucks as Buck[]).map(buck => ({
+  const data = (bucks as Buck[]).map(buck => ({
     ...buck,
     buck_images: images.filter(img => img.buck_id === buck.id),
-    // keep only the latest prediction per buck
     predictions: predictions.filter(p => p.buck_id === buck.id).slice(0, 1),
   }))
+
+  return { data, count: count ?? 0 }
 }
 
 /**
- * List bucks for a specific user (for their library)
+ * List bucks for a specific user (for their library) — paginated.
  */
-export async function listUserBucks(userId: string): Promise<(Buck & {
-  buck_images: BuckImage[]
-  predictions: Prediction[]
-})[]> {
+export async function listUserBucks(
+  userId: string,
+  options?: { limit?: number; offset?: number }
+): Promise<{
+  data: (Buck & { buck_images: BuckImage[]; predictions: Prediction[] })[]
+  count: number
+}> {
   const supabase = await createClient()
-  
-  const { data: bucks, error: bucksError } = await supabase
+  const limit = options?.limit ?? 20
+  const offset = options?.offset ?? 0
+
+  const { data: bucks, error: bucksError, count } = await supabase
     .from('bucks')
-    .select('*')
+    .select('id, session_id, nickname, location, state, rack_type, main_frame_points, status, created_at, updated_at', { count: 'exact' })
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
-  
-  if (bucksError || !bucks?.length) return []
-  
+    .range(offset, offset + limit - 1)
+
+  if (bucksError || !bucks?.length) return { data: [], count: count ?? 0 }
+
   const buckIds = bucks.map(b => b.id)
-  
+
   const [imagesResult, predictionsResult] = await Promise.all([
-    supabase.from('buck_images').select('*').in('buck_id', buckIds),
-    supabase.from('predictions').select('*').in('buck_id', buckIds).order('created_at', { ascending: false }),
+    supabase
+      .from('buck_images')
+      .select('id, buck_id, public_url, image_type, display_order')
+      .in('buck_id', buckIds)
+      .order('display_order', { ascending: true }),
+    supabase
+      .from('predictions')
+      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, created_at')
+      .in('buck_id', buckIds)
+      .order('created_at', { ascending: false }),
   ])
-  
+
   const images: BuckImage[] = (imagesResult.data as BuckImage[]) ?? []
   const predictions: Prediction[] = (predictionsResult.data as Prediction[]) ?? []
-  
-  return (bucks as Buck[]).map(buck => ({
+
+  const data = (bucks as Buck[]).map(buck => ({
     ...buck,
     buck_images: images.filter(img => img.buck_id === buck.id),
     predictions: predictions.filter(p => p.buck_id === buck.id).slice(0, 1),
   }))
+
+  return { data, count: count ?? 0 }
 }
 
 // ============================================================================

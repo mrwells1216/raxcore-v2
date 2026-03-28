@@ -280,25 +280,29 @@ export async function createAdminTask({
 
 /**
  * List admin tasks with optional status/priority filter.
+ * Returns data + total count for pagination.
  */
 export async function listAdminTasks({
   status,
   priority,
   type,
-  limit = 50,
+  limit = 20,
+  offset = 0,
 }: {
   status?: AdminTaskStatus
   priority?: AdminTaskPriority
   type?: AdminTaskType
   limit?: number
+  offset?: number
 } = {}): Promise<AdminTask[]> {
   const supabase = await createClient()
 
   let query = supabase
     .from('admin_tasks')
-    .select('*')
+    .select('*', { count: 'exact' })
+    .order('priority', { ascending: false })
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .range(offset, offset + limit - 1)
 
   if (status) query = query.eq('status', status)
   if (priority) query = query.eq('priority', priority)

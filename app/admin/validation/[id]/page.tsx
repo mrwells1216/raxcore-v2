@@ -4,23 +4,42 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Target, TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react'
-import { getValidationSummary } from '@/lib/validation/service'
+import { getValidationSummary, getValidationResults } from '@/lib/validation/service'
 import { ValidationBreakdownChart } from '@/components/admin/validation-breakdown-chart'
 import { ValidationResultsTable } from '@/components/admin/validation-results-table'
 
-export default async function ValidationDetailPage({ 
-  params 
-}: { 
-  params: Promise<{ id: string }> 
+const RESULTS_PAGE_SIZE = 25
+
+export default async function ValidationDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const { id } = await params
-  const summary = await getValidationSummary(id)
+  const sp = await searchParams
+  const resultsPage = Math.max(1, Number(sp.resultsPage) || 1)
+  const resultsOffset = (resultsPage - 1) * RESULTS_PAGE_SIZE
+
+  // Fetch summary (metrics + breakdowns + worst/best) and paginated full results in parallel
+  const [summary, resultsResponse] = await Promise.all([
+    getValidationSummary(id),
+    getValidationResults(id, {
+      limit: RESULTS_PAGE_SIZE,
+      offset: resultsOffset,
+      orderBy: 'abs_error_gross',
+      ascending: false,
+    }),
+  ])
 
   if (!summary) {
     notFound()
   }
 
-  const { run, results, by_state, by_rack_type, by_score_bucket, worst_predictions, best_predictions } = summary
+  const { run, by_state, by_rack_type, by_score_bucket, worst_predictions, best_predictions } = summary
+  const { data: pagedResults, count: resultsTotal } = resultsResponse
+  const resultsTotalPages = Math.ceil(resultsTotal / RESULTS_PAGE_SIZE)
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -69,7 +88,7 @@ export default async function ValidationDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {run.mean_absolute_error_gross?.toFixed(1) || '-'}"
+                  {run.mean_absolute_error_gross?.toFixed(1) || '-'}&quot;
                 </p>
                 <p className="text-sm text-muted-foreground">Mean Absolute Error</p>
               </div>
@@ -85,7 +104,7 @@ export default async function ValidationDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {run.median_absolute_error_gross?.toFixed(1) || '-'}"
+                  {run.median_absolute_error_gross?.toFixed(1) || '-'}&quot;
                 </p>
                 <p className="text-sm text-muted-foreground">Median Error</p>
               </div>
@@ -117,7 +136,7 @@ export default async function ValidationDetailPage({
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {run.rmse_gross?.toFixed(1) || '-'}"
+                  {run.rmse_gross?.toFixed(1) || '-'}&quot;
                 </p>
                 <p className="text-sm text-muted-foreground">RMSE</p>
               </div>
@@ -131,13 +150,11 @@ export default async function ValidationDetailPage({
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Error by Score Range</CardTitle>
-            <CardDescription>
-              How accuracy varies across different buck sizes
-            </CardDescription>
+            <CardDescription>How accuracy varies across different buck sizes</CardDescription>
           </CardHeader>
           <CardContent>
-            <ValidationBreakdownChart 
-              data={by_score_bucket} 
+            <ValidationBreakdownChart
+              data={by_score_bucket}
               valueKey="mae_gross"
               labelKey="category"
             />
@@ -147,13 +164,11 @@ export default async function ValidationDetailPage({
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Error by State</CardTitle>
-            <CardDescription>
-              Regional accuracy variations
-            </CardDescription>
+            <CardDescription>Regional accuracy variations</CardDescription>
           </CardHeader>
           <CardContent>
-            <ValidationBreakdownChart 
-              data={by_state.slice(0, 8)} 
+            <ValidationBreakdownChart
+              data={by_state.slice(0, 8)}
               valueKey="mae_gross"
               labelKey="category"
             />
@@ -166,9 +181,7 @@ export default async function ValidationDetailPage({
         <Card>
           <CardHeader>
             <CardTitle className="text-lg text-red-600">Worst Predictions</CardTitle>
-            <CardDescription>
-              Examples with the highest absolute error
-            </CardDescription>
+            <CardDescription>Examples with the highest absolute error</CardDescription>
           </CardHeader>
           <CardContent>
             <ValidationResultsTable results={worst_predictions} showError />
@@ -178,9 +191,7 @@ export default async function ValidationDetailPage({
         <Card>
           <CardHeader>
             <CardTitle className="text-lg text-primary">Best Predictions</CardTitle>
-            <CardDescription>
-              Examples with the lowest absolute error
-            </CardDescription>
+            <CardDescription>Examples with the lowest absolute error</CardDescription>
           </CardHeader>
           <CardContent>
             <ValidationResultsTable results={best_predictions} showError />
@@ -188,16 +199,42 @@ export default async function ValidationDetailPage({
         </Card>
       </div>
 
-      {/* All Results */}
+      {/* All Results — paginated via searchParams */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">All Results ({results.length})</CardTitle>
+          <CardTitle className="text-lg">
+            All Results ({resultsTotal})
+          </CardTitle>
           <CardDescription>
-            Complete list of validation results
+            Sorted by absolute error, highest first
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <ValidationResultsTable results={results} showError paginated />
+        <CardContent className="space-y-4">
+          <ValidationResultsTable results={pagedResults} showError />
+
+          {resultsTotalPages > 1 && (
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <p className="text-sm text-muted-foreground">
+                {(resultsPage - 1) * RESULTS_PAGE_SIZE + 1}–
+                {Math.min(resultsPage * RESULTS_PAGE_SIZE, resultsTotal)} of {resultsTotal}
+              </p>
+              <div className="flex gap-2">
+                {resultsPage > 1 && (
+                  <Button variant="outline" size="sm" asChild className="min-h-[36px]">
+                    <Link href={`?resultsPage=${resultsPage - 1}`}>Previous</Link>
+                  </Button>
+                )}
+                <span className="flex items-center px-2 text-sm text-muted-foreground">
+                  {resultsPage} / {resultsTotalPages}
+                </span>
+                {resultsPage < resultsTotalPages && (
+                  <Button variant="outline" size="sm" asChild className="min-h-[36px]">
+                    <Link href={`?resultsPage=${resultsPage + 1}`}>Next</Link>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

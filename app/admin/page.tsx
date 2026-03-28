@@ -10,7 +10,7 @@ export default async function AdminDashboard() {
     getAdminStats(),
     listBucks({ limit: 5 }),
     getActiveModelVersion(),
-    listAdminTasks({ status: 'open', limit: 20 }),
+    listAdminTasks({ status: 'open', limit: 20, offset: 0 }),
   ])
 
   return (
