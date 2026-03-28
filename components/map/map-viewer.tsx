@@ -476,7 +476,7 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
 
       {/* Legend — horizontal strip pinned to the bottom of the map card */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-50 flex items-center gap-x-4 gap-y-0 flex-wrap px-4 py-2.5 pointer-events-none"
+        className="absolute bottom-0 left-0 right-0 z-50 flex items-center justify-evenly py-2.5 pointer-events-none"
         style={{
           background: 'linear-gradient(145deg, rgba(18,14,11,0.96), rgba(28,22,17,0.94))',
           borderTop: '1px solid rgba(107,93,82,0.25)',
