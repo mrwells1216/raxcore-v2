@@ -2576,3 +2576,349 @@ export interface InfluenceComputationResult {
   influence_factors: InfluenceFactors
   eligibility_reason: string | null
 }
+
+// ========================================
+// USAGE TRACKING + COST CONTROLS (Phase 30)
+// ========================================
+
+export type UsageRecordStatus = 'pending' | 'processing' | 'success' | 'error' | 'rate_limited'
+
+export interface UsageRecord {
+  id: string
+  request_id: string
+  session_id: string | null
+  buck_id: string | null
+  prediction_id: string | null
+  endpoint: string
+  method: string
+  client_ip: string | null
+  client_fingerprint: string | null
+  user_agent: string | null
+  images_submitted: number
+  images_processed: number
+  vision_calls: number
+  retry_count: number
+  used_fallback: boolean
+  request_start_at: string
+  request_end_at: string | null
+  processing_time_ms: number | null
+  vision_time_ms: number | null
+  status: UsageRecordStatus
+  error_type: string | null
+  error_message: string | null
+  estimated_cost_mc: number
+  model_version_id: string | null
+  vision_model: string | null
+  created_at: string
+}
+
+export interface UsageRecordInput {
+  request_id: string
+  session_id?: string
+  buck_id?: string
+  endpoint: string
+  method?: string
+  client_ip?: string
+  client_fingerprint?: string
+  user_agent?: string
+  images_submitted?: number
+}
+
+export interface UsageRecordUpdate {
+  prediction_id?: string
+  images_processed?: number
+  vision_calls?: number
+  retry_count?: number
+  used_fallback?: boolean
+  request_end_at?: string
+  processing_time_ms?: number
+  vision_time_ms?: number
+  status?: UsageRecordStatus
+  error_type?: string
+  error_message?: string
+  estimated_cost_mc?: number
+  model_version_id?: string
+  vision_model?: string
+}
+
+// Rate limit configuration
+export interface RateLimitConfig {
+  id: string
+  config_name: string
+  is_active: boolean
+  requests_per_minute: number
+  images_per_minute: number
+  requests_per_hour: number
+  images_per_hour: number
+  requests_per_day: number
+  images_per_day: number
+  monthly_request_soft_limit: number | null
+  monthly_image_soft_limit: number | null
+  monthly_cost_soft_limit_cents: number | null
+  max_images_per_request: number
+  max_retries_per_request: number
+  request_timeout_ms: number
+  burst_window_seconds: number
+  max_burst_requests: number
+  duplicate_check_window_seconds: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RateLimitState {
+  id: string
+  client_key: string
+  window_type: 'minute' | 'hour' | 'day' | 'month' | 'burst'
+  window_start: string
+  window_end: string
+  request_count: number
+  image_count: number
+  estimated_cost_mc: number
+  last_request_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RateLimitCheckResult {
+  allowed: boolean
+  reason: string | null
+  limit_type: string | null
+  current_count: number | null
+  max_count: number | null
+  retry_after_seconds: number | null
+  warnings: string[]
+}
+
+// Cost tracking
+export interface CostEstimate {
+  id: string
+  provider: string
+  model: string
+  cost_per_image_mc: number
+  cost_per_request_mc: number
+  cost_per_1k_tokens_input_mc: number
+  cost_per_1k_tokens_output_mc: number
+  effective_from: string
+  effective_to: string | null
+  is_active: boolean
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CostCalculation {
+  images: number
+  vision_calls: number
+  cost_per_image_mc: number
+  cost_per_request_mc: number
+  total_image_cost_mc: number
+  total_request_cost_mc: number
+  total_cost_mc: number
+  total_cost_cents: number
+  total_cost_dollars: number
+}
+
+// Production configuration
+export interface ProductionConfig {
+  id: string
+  config_name: string
+  is_active: boolean
+  max_images_per_request: number
+  min_images_per_request: number
+  max_retries: number
+  retry_delay_base_ms: number
+  retry_delay_max_ms: number
+  total_timeout_ms: number
+  single_call_timeout_ms: number
+  max_learning_correction_inches: number
+  max_measurement_correction_percent: number
+  min_confidence_percent: number
+  max_confidence_percent: number
+  min_error_band_inches: number
+  max_error_band_inches: number
+  fallback_enabled: boolean
+  fallback_confidence_penalty: number
+  fallback_error_band_widening: number
+  vision_scoring_enabled: boolean
+  learning_correction_enabled: boolean
+  two_pass_scoring_enabled: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+// Default production config values
+export const DEFAULT_PRODUCTION_CONFIG: Omit<ProductionConfig, 'id' | 'created_at' | 'updated_at'> = {
+  config_name: 'default',
+  is_active: true,
+  max_images_per_request: 6,
+  min_images_per_request: 1,
+  max_retries: 2,
+  retry_delay_base_ms: 1000,
+  retry_delay_max_ms: 5000,
+  total_timeout_ms: 60000,
+  single_call_timeout_ms: 30000,
+  max_learning_correction_inches: 8.0,
+  max_measurement_correction_percent: 0.15,
+  min_confidence_percent: 15,
+  max_confidence_percent: 95,
+  min_error_band_inches: 3.0,
+  max_error_band_inches: 25.0,
+  fallback_enabled: true,
+  fallback_confidence_penalty: 15.0,
+  fallback_error_band_widening: 1.3,
+  vision_scoring_enabled: true,
+  learning_correction_enabled: true,
+  two_pass_scoring_enabled: true,
+  created_by: null,
+}
+
+// Release readiness types
+export type ReleaseReadinessCategory = 'accuracy' | 'runtime' | 'calibration' | 'data_quality' | 'cost'
+export type ReleaseReadinessSeverity = 'info' | 'warning' | 'blocker'
+export type ReleaseReadinessStatus = 'ready' | 'warnings' | 'issues' | 'blocked'
+
+export interface ReleaseReadinessCheck {
+  id: string
+  model_version_id: string | null
+  calibration_profile_id: string | null
+  benchmark_run_id: string | null
+  check_name: string
+  check_category: ReleaseReadinessCategory
+  check_passed: boolean
+  check_value: number | null
+  check_threshold: number | null
+  check_details: Record<string, unknown> | null
+  severity: ReleaseReadinessSeverity
+  checked_at: string
+  checked_by: string | null
+  created_at: string
+}
+
+export interface ReleaseReadinessCheckInput {
+  model_version_id?: string
+  calibration_profile_id?: string
+  benchmark_run_id?: string
+  check_name: string
+  check_category: ReleaseReadinessCategory
+  check_passed: boolean
+  check_value?: number
+  check_threshold?: number
+  check_details?: Record<string, unknown>
+  severity?: ReleaseReadinessSeverity
+  checked_by?: string
+}
+
+export interface ReleaseReadinessSummaryView {
+  model_version_id: string | null
+  model_name: string | null
+  calibration_profile_id: string | null
+  calibration_name: string | null
+  benchmark_run_id: string | null
+  total_checks: number
+  passed_checks: number
+  failed_checks: number
+  blocker_count: number
+  warning_count: number
+  accuracy_failures: number
+  runtime_failures: number
+  calibration_failures: number
+  data_quality_failures: number
+  cost_failures: number
+  status: ReleaseReadinessStatus
+  last_checked_at: string
+}
+
+export interface ReleaseReadinessReport {
+  model_version_id: string | null
+  model_name: string | null
+  calibration_profile_id: string | null
+  calibration_name: string | null
+  status: ReleaseReadinessStatus
+  summary: {
+    total_checks: number
+    passed_checks: number
+    failed_checks: number
+    blocker_count: number
+    warning_count: number
+  }
+  checks_by_category: Record<ReleaseReadinessCategory, ReleaseReadinessCheck[]>
+  blockers: ReleaseReadinessCheck[]
+  warnings: ReleaseReadinessCheck[]
+  recommendations: string[]
+  is_safe_to_promote: boolean
+  last_checked_at: string | null
+}
+
+// Usage summary types
+export interface DailyUsageSummary {
+  date: string
+  total_requests: number
+  total_images_submitted: number
+  total_images_processed: number
+  total_vision_calls: number
+  total_retries: number
+  fallback_count: number
+  success_count: number
+  error_count: number
+  timeout_count: number
+  rate_limit_count: number
+  avg_processing_ms: number | null
+  p95_processing_ms: number | null
+  total_cost_mc: number
+  unique_clients: number
+}
+
+export interface HourlyUsageSummary {
+  hour: string
+  request_count: number
+  image_count: number
+  vision_calls: number
+  fallback_count: number
+  cost_mc: number
+  avg_processing_ms: number | null
+  unique_clients: number
+}
+
+export interface MonthlyUsageSummary {
+  month: string
+  total_requests: number
+  total_images: number
+  total_vision_calls: number
+  total_cost_mc: number
+  total_cost_cents: number
+  total_cost_dollars: number
+  unique_clients: number
+}
+
+export interface UsageReportSummary {
+  period: 'day' | 'week' | 'month'
+  start_date: string
+  end_date: string
+  totals: {
+    requests: number
+    images_submitted: number
+    images_processed: number
+    vision_calls: number
+    retries: number
+    fallbacks: number
+    errors: number
+    cost_mc: number
+    cost_dollars: number
+  }
+  rates: {
+    success_rate: number
+    fallback_rate: number
+    timeout_rate: number
+    retry_rate: number
+    avg_images_per_request: number
+  }
+  timing: {
+    avg_processing_ms: number | null
+    p95_processing_ms: number | null
+    avg_vision_ms: number | null
+  }
+  unique_clients: number
+  top_error_types: { type: string; count: number }[]
+}

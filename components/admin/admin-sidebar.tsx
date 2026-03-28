@@ -18,6 +18,7 @@ import {
   Package,
   HeartPulse,
   Scale,
+  Activity,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,7 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { name: 'Operations', href: '/admin/operations', icon: Activity },
   { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
   { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
   { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },

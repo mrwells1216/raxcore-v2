@@ -10,8 +10,37 @@ import {
   getActiveModelVersion,
   getBuckImages
 } from '@/lib/storage/service'
+import {
+  createUsageRecord,
+  completeUsageRecord,
+  validateScoringRequest,
+  recordUsage,
+  getActiveCostEstimate,
+  calculateCost,
+  getActiveProductionConfig,
+} from '@/lib/usage/service'
+
+// Generate a unique request ID
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+}
+
+// Extract client identifier from request
+function getClientKey(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for')
+  const ip = forwarded ? forwarded.split(',')[0].trim() : 'unknown'
+  return `ip:${ip}`
+}
 
 export async function POST(request: Request) {
+  const requestId = generateRequestId()
+  const clientKey = getClientKey(request)
+  const requestStartTime = Date.now()
+  
+  // Track initial usage
+  let usageRecordCreated = false
+  let imageCount = 0
+  
   try {
     const formData = await request.formData()
     const state = formData.get('state') as string
@@ -66,6 +95,41 @@ export async function POST(request: Request) {
 
     if (images.length === 0) {
       return NextResponse.json({ error: 'At least one image is required' }, { status: 400 })
+    }
+    
+    imageCount = images.length
+
+    // Phase 30: Validate request and check rate limits
+    const productionConfig = await getActiveProductionConfig()
+    const validationResult = await validateScoringRequest(imageCount, clientKey)
+    
+    if (!validationResult.valid) {
+      return NextResponse.json({ 
+        error: 'Request validation failed',
+        userMessage: validationResult.errors[0] || 'Invalid request.',
+        errors: validationResult.errors,
+        errorType: 'validation',
+      }, { status: 400 })
+    }
+
+    // Create usage tracking record
+    await createUsageRecord({
+      request_id: requestId,
+      endpoint: '/api/score',
+      method: 'POST',
+      client_ip: clientKey.replace('ip:', ''),
+      images_submitted: imageCount,
+      user_agent: request.headers.get('user-agent') || undefined,
+    })
+    usageRecordCreated = true
+
+    // Check if vision scoring is enabled
+    if (!productionConfig.vision_scoring_enabled) {
+      return NextResponse.json({
+        error: 'Scoring temporarily unavailable',
+        userMessage: 'The scoring service is temporarily unavailable. Please try again later.',
+        errorType: 'service_disabled',
+      }, { status: 503 })
     }
 
     // Generate session ID
@@ -180,6 +244,28 @@ export async function POST(request: Request) {
     // Get stored images
     const buckImages = await getBuckImages(buck.id)
 
+    // Phase 30: Complete usage tracking with success
+    const processingTimeMs = Date.now() - requestStartTime
+    const costEstimate = await getActiveCostEstimate()
+    const cost = costEstimate ? calculateCost(imageCount, 1, costEstimate) : { total_cost_mc: 0 }
+    
+    if (usageRecordCreated) {
+      await completeUsageRecord(requestId, true, {
+        predictionId: prediction.id,
+        imagesProcessed: imageCount,
+        visionCalls: 1,
+        retryCount: scoringResult.runtimeMetadata?.totalAttempts ? scoringResult.runtimeMetadata.totalAttempts - 1 : 0,
+        usedFallback: scoringResult.scoringMethod === 'vision_with_fallback' || scoringResult.scoringMethod === 'heuristic',
+        processingTimeMs,
+        visionTimeMs: scoringResult.processingTimeMs,
+        modelVersionId: model?.id,
+        visionModel: scoringResult.visionModelUsed || undefined,
+      })
+      
+      // Record usage for rate limiting
+      await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
+    }
+
     // Return result
     return NextResponse.json({
       sessionId: buck.session_id,
@@ -227,14 +313,35 @@ export async function POST(request: Request) {
     const isRateLimit = errorMessage.toLowerCase().includes('rate') || errorMessage.includes('429')
     const isNetwork = errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')
     
+    // Determine error type for tracking
+    const errorType = isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isNetwork ? 'network' : 'unknown'
+    
     // Log detailed error for debugging
     console.error('Scoring API error:', {
+      requestId,
       error: errorMessage,
-      isTimeout,
-      isRateLimit,
-      isNetwork,
+      errorType,
       stack: error instanceof Error ? error.stack : undefined,
     })
+
+    // Phase 30: Track failed request
+    const processingTimeMs = Date.now() - requestStartTime
+    if (usageRecordCreated) {
+      await completeUsageRecord(requestId, false, {
+        imagesProcessed: imageCount,
+        visionCalls: 0,
+        processingTimeMs,
+        errorType,
+        errorMessage: errorMessage.slice(0, 500), // Truncate long error messages
+      })
+      
+      // Still record usage for rate limiting (prevents retry abuse)
+      try {
+        await recordUsage(clientKey, 1, imageCount, 0)
+      } catch (usageError) {
+        console.error('Failed to record usage:', usageError)
+      }
+    }
 
     // Determine user-safe error message
     let userMessage = 'An unexpected error occurred during scoring. Please try again.'
@@ -254,8 +361,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ 
       error: 'Scoring failed', 
       userMessage,
+      requestId,
       details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
-      errorType: isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isNetwork ? 'network' : 'unknown',
+      errorType,
     }, { status: statusCode })
   }
 }
