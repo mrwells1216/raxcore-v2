@@ -753,6 +753,79 @@ export interface PredictionWithIntakeQuality extends Prediction {
 }
 
 // ========================================
+// SEGMENT-AWARE CONFIDENCE INTERVALS (Phase 47)
+// ========================================
+
+export type MeasurementFamily = 'spread' | 'beam' | 'tine' | 'mass' | 'deduction'
+
+export interface FamilyUncertaintySummary {
+  family: MeasurementFamily
+  confidenceScore: number
+  expectedErrorBand: number
+  tier: 'high' | 'medium' | 'low' | 'very_low'
+}
+
+export interface ConfidenceIntervalSummary {
+  // Overall score bands
+  grossErrorBandLow: number
+  grossErrorBandHigh: number
+  netErrorBandLow: number
+  netErrorBandHigh: number
+  
+  // Calibrated confidence
+  calibratedConfidenceTier: ConfidenceTier
+  calibratedConfidencePercent: number
+  
+  // Family-level
+  familyUncertainty: FamilyUncertaintySummary[]
+  weakestFamily: MeasurementFamily | null
+  strongestFamily: MeasurementFamily | null
+  
+  // Explanation
+  confidenceExplanationSummary: string
+  detailedExplanation: string[]
+  
+  // Profile info
+  intervalProfileType: 'segment_specific' | 'parent_fallback' | 'global_default'
+  intervalProfileSegment: string | null
+  intervalProfileSamples: number
+}
+
+export type PhotoRecommendationType =
+  | 'frontal_straight'
+  | 'left_side'
+  | 'right_side'
+  | 'left_45'
+  | 'right_45'
+  | 'better_lighting'
+  | 'uncropped_rack'
+  | 'closer_face_reference'
+  | 'none_needed'
+
+export type PhotoRequestDecision =
+  | 'proceed_current_only'
+  | 'proceed_but_recommend'
+  | 'strongly_recommend_before_finalize'
+
+export interface NextPhotoGuidanceSummary {
+  recommendationType: PhotoRecommendationType
+  recommendedAngle: AngleType | null
+  decision: PhotoRequestDecision
+  userMessage: string
+  userReason: string
+  expectedConfidenceImprovement: number
+  estimatedBenefit: 'high' | 'medium' | 'low' | 'minimal'
+  shouldAsk: boolean
+  targetFamily: MeasurementFamily | null
+}
+
+// Extended scoring result with Phase 47 data
+export interface ScoringResultWithIntervals extends ScoringResult {
+  confidenceInterval?: ConfidenceIntervalSummary | null
+  photoGuidance?: NextPhotoGuidanceSummary | null
+}
+
+// ========================================
 // PLACEMENT PREVIEW TYPES (Phase 18)
 // ========================================
 
