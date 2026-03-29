@@ -122,6 +122,8 @@ export interface ScoringOutput {
   } | null
   // Phase 42: Geometry consistency and reference ranking
   phase42Metadata?: Phase42Metadata | null
+  // Phase 49.5: Cross-view conflict analysis metadata
+  phase495Metadata?: import('@/lib/types').Phase495Metadata | null
 }
 
 // Learning summary exposed to UI

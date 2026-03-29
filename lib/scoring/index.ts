@@ -17,3 +17,5 @@ export * from './reference-ranking'
 // Phase 47: Segment-aware confidence intervals and photo guidance
 export * from './segment-confidence-interval'
 export * from './next-photo-guidance'
+// Phase 49.5: Cross-view conflict engine and trust-weighted fusion
+export * from './cross-view-conflict'

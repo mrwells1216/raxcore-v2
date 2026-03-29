@@ -3160,6 +3160,74 @@ export interface Phase42Metadata {
 }
 
 // ========================================
+// PHASE 49.5: CROSS-VIEW CONFLICT ENGINE
+// ========================================
+
+export type CrossViewDisagreementType =
+  | 'scale_reference_conflict'
+  | 'perspective_distortion'
+  | 'occlusion_missing_structure'
+  | 'asymmetry_vs_perspective'
+  | 'landmark_instability'
+  | 'multi_view_inconsistency'
+  | 'low_quality_input'
+
+export type CrossViewFusionStrategy = 'weighted_average' | 'dominant_view' | 'highest_trust' | 'flagged_for_review'
+export type DisagreementLevel = 'low' | 'moderate' | 'high' | 'critical'
+
+export interface ViewTrustData {
+  imageIndex: number
+  angleType: string
+  overallTrust: number
+  isOutlier: boolean
+  perFamilyTrust: Record<MeasurementFamily, number>
+}
+
+export interface PerFamilyResidualData {
+  family: MeasurementFamily
+  maxDeviation: number
+  meanDeviation: number
+  stdDev: number
+  disagreementScore: number
+  disagreementLevel: DisagreementLevel
+  dominantViewIndex: number | null
+}
+
+export interface DisagreementClassificationData {
+  family: MeasurementFamily
+  primaryType: CrossViewDisagreementType
+  reverseEngineeringRecommended: boolean
+  explanation: string
+}
+
+export interface CrossViewConflictData {
+  perFamilyResiduals: Record<string, PerFamilyResidualData>
+  viewTrustScores: Record<number, ViewTrustData>
+  disagreementClassifications: DisagreementClassificationData[]
+  fusionStrategies: Record<MeasurementFamily, CrossViewFusionStrategy>
+  rejectedViews: Array<{
+    imageIndex: number
+    angleType: string
+    reason: string
+  }>
+  conflictSummary: {
+    totalDisagreements: number
+    highDisagreementFamilies: MeasurementFamily[]
+    dominantViewUsed: boolean
+    reverseEngineeringRecommended: boolean
+    reverseEngineeringTriggerReasons: string[]
+    overallConfidence: number
+  }
+}
+
+export interface Phase495Metadata {
+  crossViewConflict: CrossViewConflictData | null
+  enhancedFusionUsed: boolean
+  phase495_version: string
+  processed_at: string
+}
+
+// ========================================
 // PHASE 43: RETRAINING READINESS & EXPORT PACKS
 // ========================================
 

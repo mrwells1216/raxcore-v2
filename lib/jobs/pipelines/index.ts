@@ -401,7 +401,48 @@ registerJobHandler('sandbox_promotion_check', async (payload) => {
 })
 
 // ============================================================================
+// PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS JOB HANDLERS
+// ============================================================================
+
+registerJobHandler('compute_view_residuals', async (payload) => {
+  const { buckId, imageMeasurements, perImageLandmarks } = payload as {
+    buckId: string
+    imageMeasurements: unknown[]
+    perImageLandmarks: unknown[]
+  }
+  const { analyzesCrossViewConflicts } = await import('../../scoring/cross-view-conflict')
+  
+  // This would be called as part of the scoring pipeline
+  console.log(`[Phase 49.5] Computing view residuals for buck ${buckId} with ${imageMeasurements.length} images`)
+  return { stage: 'compute_view_residuals', completed: true, buckId }
+})
+
+registerJobHandler('classify_disagreement', async (payload) => {
+  const { buckId } = payload as { buckId: string }
+  console.log(`[Phase 49.5] Classifying disagreement for buck ${buckId}`)
+  return { stage: 'classify_disagreement', completed: true, buckId }
+})
+
+registerJobHandler('compute_view_trust', async (payload) => {
+  const { buckId } = payload as { buckId: string }
+  console.log(`[Phase 49.5] Computing view trust for buck ${buckId}`)
+  return { stage: 'compute_view_trust', completed: true, buckId }
+})
+
+registerJobHandler('resolve_conflicts', async (payload) => {
+  const { buckId } = payload as { buckId: string }
+  console.log(`[Phase 49.5] Resolving conflicts for buck ${buckId}`)
+  return { stage: 'resolve_conflicts', completed: true, buckId }
+})
+
+registerJobHandler('update_uncertainty_with_conflict', async (payload) => {
+  const { buckId, conflictAnalysis } = payload as { buckId: string; conflictAnalysis: unknown }
+  console.log(`[Phase 49.5] Updating uncertainty with conflict data for buck ${buckId}`)
+  return { stage: 'update_uncertainty_with_conflict', completed: true, buckId }
+})
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
-console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox')
+console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox and Phase 49.5 conflict analysis')

@@ -119,6 +119,16 @@ export interface ConfidenceIntervalInput {
 
   // Optional: raw confidence from vision
   rawVisionConfidence?: number
+
+  // Phase 49.5: Cross-view conflict analysis
+  conflictAnalysis?: {
+    disagreementScore: number
+    numberOfAgreeingViews: number
+    trustConcentration: number // Are high-trust views aligned or split?
+    hasOutliers: boolean
+    highDisagreementFamilies: MeasurementFamily[]
+    reverseEngineeringRecommended: boolean
+  } | null
 }
 
 // ============================================================================
@@ -643,6 +653,43 @@ function computeErrorBands(
     baseError *= 1.4
   } else if (sampleDepth === 'deep') {
     baseError *= 0.85
+  }
+
+  // Phase 49.5: Adjust for cross-view conflict analysis
+  if (input.conflictAnalysis) {
+    const conflict = input.conflictAnalysis
+
+    // High disagreement widens interval
+    if (conflict.disagreementScore > 0.3) {
+      baseError *= 1.25
+    } else if (conflict.disagreementScore > 0.15) {
+      baseError *= 1.1
+    }
+
+    // High agreement from multiple views tightens interval
+    if (conflict.numberOfAgreeingViews >= 3 && conflict.disagreementScore < 0.1) {
+      baseError *= 0.85
+    }
+
+    // Outliers indicate uncertainty
+    if (conflict.hasOutliers) {
+      baseError *= 1.1
+    }
+
+    // Low trust concentration (split views) widens interval
+    if (conflict.trustConcentration < 0.5) {
+      baseError *= 1.15
+    }
+
+    // High-disagreement families add uncertainty
+    if (conflict.highDisagreementFamilies.length >= 2) {
+      baseError *= 1.2
+    }
+
+    // Reverse engineering flag indicates significant uncertainty
+    if (conflict.reverseEngineeringRecommended) {
+      baseError *= 1.15
+    }
   }
 
   // Compute asymmetric bands (slightly wider on high end for safety)
