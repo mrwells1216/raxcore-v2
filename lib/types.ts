@@ -2922,3 +2922,75 @@ export interface UsageReportSummary {
   unique_clients: number
   top_error_types: { type: string; count: number }[]
 }
+
+// ========================================
+// PHASE 41: SEGMENTED CALIBRATION TYPES
+// ========================================
+
+export type CalibrationMeasurementType = 'spread' | 'beam' | 'tine' | 'mass' | 'deduction'
+export type SegmentType = 'global' | 'source_type' | 'image_quality' | 'region' | 'state' | 'compound'
+
+export interface CalibrationSegment {
+  id: string
+  name: string
+  description: string | null
+  parent_id: string | null
+  level: number
+  segment_type: string
+  conditions: Record<string, unknown>
+  sample_size: number
+  stability_score: number
+  activation_weight: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CalibrationValue {
+  id: string
+  segment_id: string
+  measurement_type: CalibrationMeasurementType
+  multiplier: number
+  bias: number
+  confidence_adjustment: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SegmentMetric {
+  id: string
+  segment_id: string
+  evaluated_at: string
+  sample_count: number
+  avg_gross_error: number | null
+  avg_abs_gross_error: number | null
+  avg_net_error: number | null
+  avg_abs_net_error: number | null
+  confidence_calib_error: number | null
+  regression_flagged: boolean
+  notes: string | null
+  created_at: string
+}
+
+export interface PredictionSegmentLog {
+  id: string
+  prediction_id: string | null
+  buck_id: string | null
+  trace_id: string | null
+  segment_ids: string[]
+  blend_weights: number[]
+  calibration_deltas: {
+    per_field: Record<string, number>
+    gross_confidence_adj: number
+    segment_trace: Array<{
+      id: string
+      name: string
+      level: number
+      weight: number
+      gated: boolean
+      gate_reason: string | null
+      direct_match: boolean
+    }>
+  }
+  created_at: string
+}
