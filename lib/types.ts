@@ -3085,3 +3085,214 @@ export interface Phase42Metadata {
   phase42_version: string
   processed_at: string
 }
+
+// ========================================
+// PHASE 43: RETRAINING READINESS & EXPORT PACKS
+// ========================================
+
+export type VerificationSource = 'official_scorer' | 'user_reported' | 'taxidermist' | 'contest' | 'estimated'
+export type VerificationConfidence = 'high' | 'medium' | 'low'
+export type ReadinessTier = 'ready' | 'nearly_ready' | 'needs_work' | 'insufficient'
+export type GapSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical'
+export type CandidateModelStatus = 'pending' | 'evaluated' | 'promoted' | 'rejected' | 'archived'
+export type SplitAssignment = 'train' | 'validation' | 'test'
+
+export interface TrainingExample {
+  id: string
+  buck_id: string | null
+  prediction_id: string | null
+  // Ground truth
+  ground_truth_gross: number
+  ground_truth_net: number | null
+  ground_truth_spread: number | null
+  ground_truth_beam_left: number | null
+  ground_truth_beam_right: number | null
+  ground_truth_mass: number | null
+  ground_truth_tine_lengths: Record<string, number> | null
+  ground_truth_deductions: number | null
+  // Predictions
+  predicted_gross: number | null
+  predicted_net: number | null
+  predicted_spread: number | null
+  predicted_beam_left: number | null
+  predicted_beam_right: number | null
+  predicted_mass: number | null
+  predicted_confidence: number | null
+  // Context
+  state: string | null
+  rack_type: 'typical' | 'non-typical' | 'unknown' | null
+  source_type: string | null
+  capture_device: string | null
+  image_count: number
+  angle_types: string[]
+  ears_fully_visible: boolean | null
+  main_frame_points: number | null
+  // Quality
+  verification_source: VerificationSource | null
+  verification_confidence: VerificationConfidence | null
+  health_score: number | null
+  health_tier: string | null
+  // Images
+  image_urls: string[]
+  // Timestamps
+  verified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SplitConfig {
+  train_ratio: number
+  validation_ratio: number
+  test_ratio: number
+  split_seed: number
+  stratify_by: string[]
+  prevent_near_duplicate_leakage: boolean
+}
+
+export interface ExportPackFilters {
+  states?: string[]
+  rack_types?: ('typical' | 'non-typical')[]
+  source_types?: string[]
+  score_range?: { min: number; max: number }
+  health_tiers?: string[]
+  verification_sources?: VerificationSource[]
+  min_image_count?: number
+  require_images?: boolean
+  exclude_ids?: string[]
+}
+
+export interface ExportPack {
+  id: string
+  name: string
+  description: string | null
+  filters: ExportPackFilters
+  split_config: SplitConfig
+  export_formats: string[]
+  include_image_urls: boolean
+  include_segment_context: boolean
+  include_health_metadata: boolean
+  targets_data_gap: string | null
+  gap_priority: number
+  is_archived: boolean
+  example_count: number
+  last_computed_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ExportPackExample {
+  id: string
+  export_pack_id: string
+  training_example_id: string
+  split_assignment: SplitAssignment
+  ground_truth_gross: number | null
+  ground_truth_net: number | null
+  health_score: number | null
+  health_tier: string | null
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  segment_ids: string[]
+  added_at: string
+}
+
+export interface ExportRun {
+  id: string
+  export_pack_id: string
+  format: 'json' | 'csv' | 'both'
+  example_count: number
+  train_count: number
+  validation_count: number
+  test_count: number
+  export_file_path: string | null
+  export_file_size_bytes: number | null
+  export_config: Record<string, unknown> | null
+  run_notes: string | null
+  exported_by: string | null
+  exported_at: string
+}
+
+export interface CandidateModel {
+  id: string
+  name: string
+  version: string
+  description: string | null
+  export_pack_id: string | null
+  training_approach: string | null
+  training_notes: string | null
+  status: CandidateModelStatus
+  metrics_summary: Record<string, number> | null
+  comparison_to_production: {
+    production_mae: number
+    candidate_mae: number
+    delta: number
+    is_improvement: boolean
+  } | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OfflineEvaluation {
+  id: string
+  candidate_model_id: string
+  export_pack_id: string
+  evaluation_split: 'validation' | 'test' | 'full'
+  example_count: number
+  // Metrics
+  mae_gross: number | null
+  mae_net: number | null
+  rmse_gross: number | null
+  rmse_net: number | null
+  mean_error_gross: number | null
+  mean_error_net: number | null
+  correlation_gross: number | null
+  correlation_net: number | null
+  // Error bands
+  within_5_inches_pct: number | null
+  within_10_inches_pct: number | null
+  within_15_inches_pct: number | null
+  // Breakdowns
+  metrics_by_state: Record<string, { mae: number; count: number }> | null
+  metrics_by_rack_type: Record<string, { mae: number; count: number }> | null
+  metrics_by_source_type: Record<string, { mae: number; count: number }> | null
+  metrics_by_score_band: Record<string, { mae: number; count: number }> | null
+  // Comparison
+  production_mae_gross: number | null
+  delta_mae_gross: number | null
+  is_improvement: boolean | null
+  // Meta
+  notes: string | null
+  evaluated_by: string | null
+  evaluated_at: string
+}
+
+export interface DataGap {
+  category: 'state' | 'rack_type' | 'source_type' | 'score_band'
+  value: string
+  current_count: number
+  target_count: number
+  severity: GapSeverity
+  priority: number
+  recommendation: string
+}
+
+export interface RetrainingReadiness {
+  id: string
+  computed_at: string
+  total_examples: number
+  high_quality_examples: number
+  examples_with_images: number
+  coverage_by_state: Record<string, number>
+  typical_count: number
+  non_typical_count: number
+  coverage_by_source: Record<string, number>
+  coverage_by_score_band: Record<string, number>
+  data_gaps: DataGap[]
+  gap_severity: GapSeverity
+  recommendations: string[]
+  readiness_score: number
+  readiness_tier: ReadinessTier
+  notes: string | null
+}

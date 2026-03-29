@@ -22,6 +22,7 @@ import {
   CreditCard,
   Radio,
   Layers,
+  Cpu,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,7 @@ const navigation = [
   { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },
   { name: 'Influence', href: '/admin/influence', icon: Scale },
   { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },
+  { name: 'Retraining', href: '/admin/retraining', icon: Cpu },
   { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },
