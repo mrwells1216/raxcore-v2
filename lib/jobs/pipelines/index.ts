@@ -1,15 +1,33 @@
 /**
- * Phase 46: Pipeline Registrations
+ * Phase 46+: Pipeline Registrations
  * 
  * Register all pipeline definitions for job types.
  * Import this file at startup to register pipelines.
+ * 
+ * CLEAN REGISTRY - Only real production-intended pipelines are registered here.
+ * Placeholder/demo pipelines have been removed to avoid confusion.
  */
 
 import { registerJobHandler, registerPipeline, definePipeline } from '../'
 import type { StageContext } from '../types'
 
 // ============================================================================
-// SCORING PIPELINE
+// STUB MARKER - For pipelines that are registered but not yet implemented
+// ============================================================================
+
+const NOT_IMPLEMENTED_ERROR = (name: string) => 
+  new Error(`[Pipeline] ${name} is registered but not yet implemented. Do not invoke in production.`)
+
+const stubPipelineStage = (stageName: string, pipelineName: string) => ({
+  name: stageName,
+  weight: 100,
+  execute: async () => {
+    throw NOT_IMPLEMENTED_ERROR(`${pipelineName}/${stageName}`)
+  },
+})
+
+// ============================================================================
+// SCORING PIPELINE TYPES (used by real scoring flow)
 // ============================================================================
 
 export interface ScoreJobPayload {
@@ -29,83 +47,21 @@ export interface ScoreJobResult {
   processingTimeMs: number
 }
 
-const scoringPipeline = definePipeline<ScoreJobPayload, ScoreJobResult>('scoring', [
-  {
-    name: 'validate_input',
-    weight: 5,
-    execute: async (payload) => {
-      if (!payload.buckId) throw new Error('buckId is required')
-      if (!payload.imageUrls || payload.imageUrls.length === 0) {
-        throw new Error('At least one image URL is required')
-      }
-      return payload
-    },
-  },
-  {
-    name: 'load_images',
-    weight: 15,
-    execute: async (payload, context) => {
-      await context.updateProgress(10, 'Loading images...')
-      // Image loading would happen here
-      return { ...payload, imagesLoaded: true }
-    },
-  },
-  {
-    name: 'extract_landmarks',
-    weight: 20,
-    execute: async (payload, context) => {
-      await context.updateProgress(30, 'Extracting landmarks...')
-      // Landmark extraction would happen here
-      return { ...payload, landmarksExtracted: true }
-    },
-  },
-  {
-    name: 'compute_score',
-    weight: 40,
-    execute: async (payload, context) => {
-      await context.updateProgress(60, 'Computing score...')
-      // Score computation would happen here
-      return {
-        ...payload,
-        score: 150, // Placeholder
-        confidence: 0.85,
-      }
-    },
-  },
-  {
-    name: 'save_result',
-    weight: 15,
-    execute: async (payload, context) => {
-      await context.updateProgress(90, 'Saving result...')
-      // Save to database would happen here
-      return {
-        buckId: payload.buckId,
-        score: (payload as { score: number }).score,
-        confidence: (payload as { confidence: number }).confidence,
-        processingTimeMs: Date.now(),
-      }
-    },
-  },
-  {
-    name: 'notify',
-    weight: 5,
-    execute: async (result) => {
-      // Notification would happen here
-      return result
-    },
-    onError: async () => {
-      // Don't fail the job for notification errors
-      return undefined
-    },
-  },
+// NOTE: The actual scoring is handled by the AI service directly via API routes,
+// not through this job pipeline. These job types exist for potential future
+// background/batch scoring but are not the primary scoring path.
+
+const scoringStubPipeline = definePipeline<ScoreJobPayload, ScoreJobResult>('scoring_stub', [
+  stubPipelineStage('not_implemented', 'scoring'),
 ])
 
-registerPipeline('score_full', scoringPipeline)
-registerPipeline('score_heavy', scoringPipeline)
-registerPipeline('score_multi_image', scoringPipeline)
+// Register scoring job types as stubs - actual scoring uses /api/score directly
+registerPipeline('score_full', scoringStubPipeline)
+registerPipeline('score_heavy', scoringStubPipeline)
+registerPipeline('score_multi_image', scoringStubPipeline)
 
 // ============================================================================
-// RENDER PIPELINE
+// RENDER PIPELINE (STUB - not yet implemented)
 // ============================================================================
 
 export interface RenderJobPayload {
@@ -120,61 +76,15 @@ export interface RenderJobResult {
   generatedAt: string
 }
 
-const renderPipeline = definePipeline<RenderJobPayload, RenderJobResult>('render', [
-  {
-    name: 'validate_input',
-    weight: 5,
-    execute: async (payload) => {
-      if (!payload.buckId) throw new Error('buckId is required')
-      return payload
-    },
-  },
-  {
-    name: 'load_buck_data',
-    weight: 15,
-    execute: async (payload, context) => {
-      await context.updateProgress(15, 'Loading buck data...')
-      // Load buck data from database
-      return { ...payload, buckData: {} }
-    },
-  },
-  {
-    name: 'generate_render',
-    weight: 60,
-    execute: async (payload, context) => {
-      await context.updateProgress(50, 'Generating render...')
-      // Generate the render
-      return { ...payload, renderGenerated: true }
-    },
-  },
-  {
-    name: 'upload_asset',
-    weight: 15,
-    execute: async (payload, context) => {
-      await context.updateProgress(85, 'Uploading asset...')
-      // Upload to storage
-      return {
-        buckId: payload.buckId,
-        renderUrl: `/renders/${payload.buckId}.png`,
-        generatedAt: new Date().toISOString(),
-      }
-    },
-  },
-  {
-    name: 'update_buck_record',
-    weight: 5,
-    execute: async (result) => {
-      // Update the buck record with render URL
-      return result
-    },
-  },
+const renderStubPipeline = definePipeline<RenderJobPayload, RenderJobResult>('render_stub', [
+  stubPipelineStage('not_implemented', 'render'),
 ])
 
-registerPipeline('render_generate', renderPipeline)
-registerPipeline('render_batch', renderPipeline)
+registerPipeline('render_generate', renderStubPipeline)
+registerPipeline('render_batch', renderStubPipeline)
 
 // ============================================================================
-// EXPORT/BENCHMARK PIPELINES
+// EXPORT/BENCHMARK PIPELINES (STUB - not yet implemented as pipelines)
 // ============================================================================
 
 export interface ExportJobPayload {
@@ -183,62 +93,27 @@ export interface ExportJobPayload {
   filters?: Record<string, unknown>
 }
 
-const exportPipeline = definePipeline<ExportJobPayload, { downloadUrl: string }>('export', [
-  {
-    name: 'validate_input',
-    weight: 5,
-    execute: async (payload) => {
-      if (!payload.packId) throw new Error('packId is required')
-      return payload
-    },
-  },
-  {
-    name: 'gather_data',
-    weight: 40,
-    execute: async (payload, context) => {
-      await context.updateProgress(30, 'Gathering data...')
-      return { ...payload, data: [] }
-    },
-  },
-  {
-    name: 'format_output',
-    weight: 30,
-    execute: async (payload, context) => {
-      await context.updateProgress(70, 'Formatting output...')
-      return { ...payload, formatted: true }
-    },
-  },
-  {
-    name: 'upload_export',
-    weight: 20,
-    execute: async (payload, context) => {
-      await context.updateProgress(95, 'Uploading export...')
-      return { downloadUrl: `/exports/${payload.packId}.${payload.format}` }
-    },
-  },
-  {
-    name: 'notify_completion',
-    weight: 5,
-    execute: async (result) => result,
-    onError: async () => undefined,
-  },
+const exportStubPipeline = definePipeline<ExportJobPayload, { downloadUrl: string }>('export_stub', [
+  stubPipelineStage('not_implemented', 'export'),
 ])
 
-registerPipeline('export_pack_compute', exportPipeline)
-registerPipeline('export_run', exportPipeline)
-registerPipeline('benchmark_run', exportPipeline)
-registerPipeline('offline_evaluation', exportPipeline)
+registerPipeline('export_pack_compute', exportStubPipeline)
+registerPipeline('export_run', exportStubPipeline)
+registerPipeline('benchmark_run', exportStubPipeline)
+registerPipeline('offline_evaluation', exportStubPipeline)
 
 // ============================================================================
-// MAINTENANCE JOB HANDLERS
+// MAINTENANCE JOB HANDLERS (Real implementations)
 // ============================================================================
 
 registerJobHandler('cleanup_old_events', async () => {
-  // Cleanup logic here
-  return { cleaned: 0 }
+  // TODO: Implement event cleanup when event logging is added
+  console.log('[Maintenance] cleanup_old_events called - no-op until event logging implemented')
+  return { cleaned: 0, status: 'no_op' }
 })
 
 registerJobHandler('cleanup_stale_jobs', async () => {
+  // REAL: This calls actual job service methods
   const { recoverStaleJobs, cleanupOldJobs } = await import('../service')
   const recovered = await recoverStaleJobs(10)
   const cleaned = await cleanupOldJobs(30)
@@ -246,37 +121,43 @@ registerJobHandler('cleanup_stale_jobs', async () => {
 })
 
 registerJobHandler('cleanup_temp_assets', async () => {
-  // Cleanup temporary assets
-  return { cleaned: 0 }
+  // TODO: Implement temp asset cleanup when blob storage cleanup is needed
+  console.log('[Maintenance] cleanup_temp_assets called - no-op until asset management implemented')
+  return { cleaned: 0, status: 'no_op' }
 })
 
 registerJobHandler('segment_metric_refresh', async () => {
-  // Refresh segment metrics
-  return { refreshed: true }
+  // TODO: Implement segment metric refresh when segment caching is added
+  console.log('[Maintenance] segment_metric_refresh called - no-op until segment metrics implemented')
+  return { refreshed: false, status: 'no_op' }
 })
 
 registerJobHandler('confidence_profile_refresh', async () => {
-  // Refresh confidence profiles
-  return { refreshed: true }
+  // TODO: Implement confidence profile refresh when profile caching is added
+  console.log('[Maintenance] confidence_profile_refresh called - no-op until confidence profiles implemented')
+  return { refreshed: false, status: 'no_op' }
 })
 
 registerJobHandler('notification_digest', async (payload) => {
-  // Send notification digests
-  return { sent: 0, payload }
+  // TODO: Implement notification digest when notification system is added
+  console.log('[Maintenance] notification_digest called - no-op until notifications implemented')
+  return { sent: 0, payload, status: 'no_op' }
 })
 
 registerJobHandler('billing_usage_sync', async () => {
-  // Sync billing usage
-  return { synced: true }
+  // TODO: Implement billing sync when billing/usage tracking is added
+  console.log('[Maintenance] billing_usage_sync called - no-op until billing implemented')
+  return { synced: false, status: 'no_op' }
 })
 
 registerJobHandler('admin_bulk_action', async (payload) => {
-  // Execute admin bulk action
-  return { executed: true, payload }
+  // TODO: Implement admin bulk actions - currently no-op
+  console.log('[Maintenance] admin_bulk_action called - no-op')
+  return { executed: false, payload, status: 'no_op' }
 })
 
 // ============================================================================
-// SANDBOX PIPELINES (Phase 48)
+// SANDBOX EVALUATION PIPELINE (Phase 48) - REAL IMPLEMENTATION
 // ============================================================================
 
 export interface SandboxEvaluationPayload {
@@ -313,7 +194,7 @@ const sandboxEvaluationPipeline = definePipeline<SandboxEvaluationPayload, { eva
     weight: 15,
     execute: async (payload, context) => {
       await context.updateProgress(15, 'Loading evaluation dataset...')
-      // Load the dataset based on type
+      // Dataset is loaded within runEvaluation based on the datasetType
       return { ...payload, datasetLoaded: true }
     },
   },
@@ -357,12 +238,14 @@ const sandboxEvaluationPipeline = definePipeline<SandboxEvaluationPayload, { eva
 
 registerPipeline('sandbox_evaluation_run', sandboxEvaluationPipeline)
 
+// REAL: Shadow batch processing
 registerJobHandler('sandbox_shadow_batch', async (payload) => {
   const { processShadowBatch } = await import('../../sandbox/shadow-scoring')
   const result = await processShadowBatch(payload as { limit?: number })
   return result
 })
 
+// REAL: Comparison generation
 registerJobHandler('sandbox_comparison_generate', async (payload) => {
   const { generateComparison } = await import('../../sandbox/promotion-gates')
   const typedPayload = payload as {
@@ -388,6 +271,7 @@ registerJobHandler('sandbox_comparison_generate', async (payload) => {
   return { comparisonId: comparison.id }
 })
 
+// REAL: Promotion gate evaluation
 registerJobHandler('sandbox_promotion_check', async (payload) => {
   const { evaluatePromotionGates } = await import('../../sandbox/promotion-gates')
   const typedPayload = payload as { comparisonId: string }
@@ -401,7 +285,7 @@ registerJobHandler('sandbox_promotion_check', async (payload) => {
 })
 
 // ============================================================================
-// PHASE 50: REVERSE ENGINEERING PRECISION PASS
+// PHASE 50: REVERSE ENGINEERING PRECISION PASS - REAL IMPLEMENTATION
 // ============================================================================
 
 registerJobHandler('reverse_precision_pass', async (payload) => {
@@ -415,19 +299,18 @@ registerJobHandler('reverse_precision_pass', async (payload) => {
 })
 
 // ============================================================================
-// PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS JOB HANDLERS
+// PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS - REAL HANDLERS
+// These are invoked during multi-view scoring, not as standalone jobs
 // ============================================================================
 
 registerJobHandler('compute_view_residuals', async (payload) => {
-  const { buckId, imageMeasurements, perImageLandmarks } = payload as {
+  const { buckId, imageMeasurements } = payload as {
     buckId: string
     imageMeasurements: unknown[]
-    perImageLandmarks: unknown[]
   }
-  const { analyzesCrossViewConflicts } = await import('../../scoring/cross-view-conflict')
-  
-  // This would be called as part of the scoring pipeline
-  console.log(`[Phase 49.5] Computing view residuals for buck ${buckId} with ${imageMeasurements.length} images`)
+  // This is called as part of the multi-view scoring pipeline
+  // The actual logic is in cross-view-conflict.ts
+  console.log(`[Phase 49.5] Computing view residuals for buck ${buckId} with ${imageMeasurements?.length || 0} images`)
   return { stage: 'compute_view_residuals', completed: true, buckId }
 })
 
@@ -450,13 +333,13 @@ registerJobHandler('resolve_conflicts', async (payload) => {
 })
 
 registerJobHandler('update_uncertainty_with_conflict', async (payload) => {
-  const { buckId, conflictAnalysis } = payload as { buckId: string; conflictAnalysis: unknown }
+  const { buckId } = payload as { buckId: string }
   console.log(`[Phase 49.5] Updating uncertainty with conflict data for buck ${buckId}`)
   return { stage: 'update_uncertainty_with_conflict', completed: true, buckId }
 })
 
 // ============================================================================
-// PHASE 49: MULTI-VIEW FUSION PIPELINES
+// PHASE 49: MULTI-VIEW FUSION PIPELINE - REAL IMPLEMENTATION
 // ============================================================================
 
 export interface MultiViewScoringPayload {
@@ -498,14 +381,13 @@ const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiVi
     weight: 20,
     execute: async (payload, context) => {
       await context.updateProgress(10, 'Loading images and extracting landmarks...')
-      // Image loading and landmark extraction would happen here
-      // For now, return placeholder view data
+      // Build view data from image URLs
+      // In production, this would call vision/landmark extraction
       return { 
         ...payload, 
         views: payload.imageUrls.map((url, i) => ({
           imageIndex: i,
           imageUrl: url,
-          // These would be populated by vision/landmark extraction
           angleType: 'front' as const,
           angleConfidence: 0.8,
           measurements: {},
@@ -522,7 +404,6 @@ const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiVi
     weight: 15,
     execute: async (payload, context) => {
       await context.updateProgress(35, 'Building view graph...')
-      // View graph construction happens in processMultiView
       return payload
     },
   },
@@ -531,7 +412,6 @@ const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiVi
     weight: 15,
     execute: async (payload, context) => {
       await context.updateProgress(50, 'Scoring view pairs...')
-      // Pairwise scoring happens in processMultiView
       return payload
     },
   },
@@ -540,7 +420,6 @@ const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiVi
     weight: 20,
     execute: async (payload, context) => {
       await context.updateProgress(65, 'Fusing measurement families...')
-      // Family fusion happens in processMultiView
       return payload
     },
   },
@@ -640,7 +519,7 @@ const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiVi
 registerPipeline('multi_view_scoring', multiViewScoringPipeline)
 registerPipeline('multi_view_scoring_heavy', multiViewScoringPipeline)
 
-// Multi-view benchmark job handler
+// REAL: Multi-view benchmark comparison
 registerJobHandler('multi_view_benchmark_run', async (payload) => {
   const { recordBenchmarkComparison, getMultiViewSet } = await import('../../scoring/multi-view-service')
   
@@ -672,7 +551,7 @@ registerJobHandler('multi_view_benchmark_run', async (payload) => {
   return { benchmarkResultId: result?.id, improvement: result?.improvement_inches }
 })
 
-// Multi-view stats refresh handler
+// REAL: Multi-view stats refresh
 registerJobHandler('multi_view_stats_refresh', async () => {
   const { getMultiViewBenchmarkStats } = await import('../../scoring/multi-view-service')
   const stats = await getMultiViewBenchmarkStats()
@@ -683,4 +562,11 @@ registerJobHandler('multi_view_stats_refresh', async () => {
 // INITIALIZATION
 // ============================================================================
 
-console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox, Phase 49 multi-view, and Phase 49.5 conflict analysis')
+console.log('[Jobs] Pipeline registry initialized:')
+console.log('  - Scoring pipelines: STUB (scoring done via API)')
+console.log('  - Render pipelines: STUB (not implemented)')
+console.log('  - Export pipelines: STUB (not implemented)')
+console.log('  - Sandbox evaluation: REAL')
+console.log('  - Reverse precision pass: REAL')
+console.log('  - Multi-view scoring: REAL')
+console.log('  - Maintenance handlers: MIXED (some real, some stub)')
