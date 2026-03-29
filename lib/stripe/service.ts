@@ -1,8 +1,11 @@
 'use server'
 
-import { stripe } from './client'
+import { stripe, isStripeConfigured } from './client'
 import { createClient } from '@/lib/supabase/server'
 import type { Subscription, Plan } from '@/lib/types'
+
+// Re-export for use in server components
+export { isStripeConfigured }
 
 // ============================================================================
 // PLAN PRODUCTS
@@ -56,6 +59,10 @@ export const PLAN_PRODUCTS: PlanProduct[] = [
 // ============================================================================
 
 export async function getOrCreateStripeCustomer(userId: string, email: string): Promise<string> {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured. Please add STRIPE_SECRET_KEY to your environment variables.')
+  }
+  
   const supabase = await createClient()
   
   // Check if user already has a Stripe customer ID
@@ -94,6 +101,10 @@ export interface CreateCheckoutSessionParams {
 }
 
 export async function createCheckoutSession(params: CreateCheckoutSessionParams): Promise<string> {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured. Please add STRIPE_SECRET_KEY to your environment variables.')
+  }
+  
   const { userId, email, planId, billingInterval, successUrl, cancelUrl } = params
   
   // Find the plan
@@ -172,6 +183,10 @@ export async function getUserSubscription(userId: string): Promise<Subscription 
 }
 
 export async function cancelSubscription(userId: string): Promise<{ success: boolean; error?: string }> {
+  if (!isStripeConfigured()) {
+    return { success: false, error: 'Stripe is not configured' }
+  }
+  
   const supabase = await createClient()
   
   // Get the subscription
@@ -209,6 +224,10 @@ export async function cancelSubscription(userId: string): Promise<{ success: boo
 }
 
 export async function reactivateSubscription(userId: string): Promise<{ success: boolean; error?: string }> {
+  if (!isStripeConfigured()) {
+    return { success: false, error: 'Stripe is not configured' }
+  }
+  
   const supabase = await createClient()
   
   // Get the subscription
@@ -246,6 +265,10 @@ export async function reactivateSubscription(userId: string): Promise<{ success:
 }
 
 export async function createBillingPortalSession(userId: string, returnUrl: string): Promise<string> {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured. Please add STRIPE_SECRET_KEY to your environment variables.')
+  }
+  
   const supabase = await createClient()
   
   // Get customer ID
