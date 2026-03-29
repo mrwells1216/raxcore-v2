@@ -3438,6 +3438,346 @@ export interface PaymentHistory {
 }
 
 // ========================================
+// PHASE 48: SCORING VARIANTS SANDBOX + SHADOW SCORING
+// ========================================
+
+export type ScoringVariantType = 'model' | 'pipeline' | 'calibration' | 'hybrid'
+export type ScoringVariantStatus = 'draft' | 'testing' | 'approved' | 'rejected' | 'archived'
+export type EvaluationRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type PromotionGateStatus = 'eligible' | 'needs_review' | 'rejected'
+export type PromotionSignal = 'strongly_recommend' | 'recommend' | 'neutral' | 'caution' | 'do_not_promote'
+export type PromotionAction = 'promoted' | 'rejected' | 'rollback' | 'archived'
+export type GateCriteriaType = 'hard_fail' | 'soft_warning' | 'informational'
+export type ComparisonOperator = '<=' | '>=' | '<' | '>' | '=' | '!='
+
+export interface ScoringVariant {
+  id: string
+  name: string
+  description: string | null
+  version_tag: string
+  variant_type: ScoringVariantType
+  is_production: boolean
+  is_candidate: boolean
+  is_archived: boolean
+  model_version_id: string | null
+  calibration_profile_id: string | null
+  pipeline_config: Record<string, unknown>
+  metadata: Record<string, unknown>
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ScoringVariantWithStats extends ScoringVariant {
+  model_version_name: string | null
+  calibration_profile_name: string | null
+  prediction_count: number
+  shadow_prediction_count: number
+  evaluation_run_count: number
+  completed_evaluation_count: number
+}
+
+export interface ScoringVariantInput {
+  name: string
+  description?: string
+  version_tag: string
+  variant_type: ScoringVariantType
+  model_version_id?: string
+  calibration_profile_id?: string
+  pipeline_config?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  notes?: string
+  is_candidate?: boolean
+}
+
+export interface ShadowPrediction {
+  id: string
+  production_prediction_id: string
+  production_variant_id: string | null
+  shadow_variant_id: string
+  predicted_gross: number | null
+  predicted_net: number | null
+  confidence_percent: number | null
+  error_band_low: number | null
+  error_band_high: number | null
+  measurements: Measurements | null
+  processing_time_ms: number | null
+  gross_diff: number | null
+  net_diff: number | null
+  confidence_diff: number | null
+  spread_diff: number | null
+  beam_diff: number | null
+  tine_diff: number | null
+  mass_diff: number | null
+  confidence_interval_summary: Record<string, unknown> | null
+  geometry_consistency_score: number | null
+  geometry_consistency_diff: number | null
+  created_at: string
+}
+
+export interface ShadowScoringConfig {
+  id: string
+  candidate_variant_id: string
+  sampling_rate: number
+  target_states: string[] | null
+  target_rack_types: string[] | null
+  target_source_types: string[] | null
+  is_enabled: boolean
+  max_per_hour: number | null
+  max_per_day: number | null
+  shadow_count_today: number
+  shadow_count_hour: number
+  last_reset_hour: string | null
+  last_reset_day: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EvaluationRun {
+  id: string
+  variant_id: string
+  dataset_type: 'export_pack' | 'benchmark_pack' | 'custom'
+  export_pack_id: string | null
+  benchmark_pack_id: string | null
+  config: Record<string, unknown>
+  status: EvaluationRunStatus
+  total_examples: number
+  processed_examples: number
+  metrics: EvaluationMetrics | null
+  family_metrics: FamilyEvaluationMetrics | null
+  segment_metrics: SegmentEvaluationMetrics | null
+  confidence_calibration: ConfidenceCalibrationMetrics | null
+  interval_coverage: IntervalCoverageMetrics | null
+  geometry_consistency_metrics: GeometryConsistencyEvalMetrics | null
+  failure_clusters: FailureCluster[] | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  job_id: string | null
+}
+
+export interface EvaluationMetrics {
+  mae_gross: number
+  mae_net: number | null
+  median_error_gross: number
+  median_error_net: number | null
+  rmse_gross: number
+  rmse_net: number | null
+  p95_error: number
+  max_error: number
+  within_5_inches_count: number
+  within_5_inches_percent: number
+  within_10_inches_count: number
+  within_10_inches_percent: number
+  overestimation_count: number
+  underestimation_count: number
+  sample_count: number
+}
+
+export interface FamilyEvaluationMetrics {
+  spread: { mae: number; median: number; p95: number; count: number }
+  beam: { mae: number; median: number; p95: number; count: number }
+  tine: { mae: number; median: number; p95: number; count: number }
+  mass: { mae: number; median: number; p95: number; count: number }
+}
+
+export interface SegmentEvaluationMetrics {
+  by_state: Record<string, { mae: number; median: number; count: number }>
+  by_rack_type: Record<string, { mae: number; median: number; count: number }>
+  by_source_type: Record<string, { mae: number; median: number; count: number }>
+  by_score_band: Record<string, { mae: number; median: number; count: number }>
+}
+
+export interface IntervalCoverageMetrics {
+  coverage_percent: number
+  avg_interval_width: number
+  tight_coverage_percent: number // within 50% of predicted width
+  wide_coverage_percent: number // within 150% of predicted width
+}
+
+export interface GeometryConsistencyEvalMetrics {
+  avg_consistency_score: number
+  median_consistency_score: number
+  consistency_error_correlation: number // correlation between consistency and error
+  low_consistency_mae: number // MAE for low consistency scores
+  high_consistency_mae: number // MAE for high consistency scores
+}
+
+export interface FailureCluster {
+  cluster_name: string
+  cluster_type: 'segment' | 'characteristic' | 'error_pattern'
+  description: string
+  example_count: number
+  avg_error: number
+  example_ids: string[]
+  common_traits: Record<string, string | number>
+}
+
+export interface EvaluationResult {
+  id: string
+  evaluation_run_id: string
+  training_example_id: string | null
+  buck_id: string | null
+  ground_truth_gross: number | null
+  ground_truth_net: number | null
+  predicted_gross: number | null
+  predicted_net: number | null
+  confidence_percent: number | null
+  error_gross: number | null
+  error_net: number | null
+  abs_error_gross: number | null
+  abs_error_net: number | null
+  spread_error: number | null
+  beam_error: number | null
+  tine_error: number | null
+  mass_error: number | null
+  within_interval: boolean | null
+  interval_width: number | null
+  geometry_consistency_score: number | null
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  segment_id: string | null
+  processing_time_ms: number | null
+  result_snapshot: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface VariantComparison {
+  id: string
+  production_variant_id: string
+  candidate_variant_id: string
+  production_evaluation_run_id: string | null
+  candidate_evaluation_run_id: string | null
+  dataset_type: string
+  export_pack_id: string | null
+  benchmark_pack_id: string | null
+  sample_count: number
+  production_mae_gross: number | null
+  candidate_mae_gross: number | null
+  mae_improvement: number | null
+  mae_improvement_percent: number | null
+  production_median_error: number | null
+  candidate_median_error: number | null
+  production_p95_error: number | null
+  candidate_p95_error: number | null
+  p95_improvement: number | null
+  production_max_error: number | null
+  candidate_max_error: number | null
+  production_calibration_score: number | null
+  candidate_calibration_score: number | null
+  calibration_improvement: number | null
+  production_interval_coverage: number | null
+  candidate_interval_coverage: number | null
+  interval_coverage_change: number | null
+  production_geometry_correlation: number | null
+  candidate_geometry_correlation: number | null
+  examples_improved: number
+  examples_regressed: number
+  examples_unchanged: number
+  improvement_rate: number | null
+  segment_comparisons: Record<string, SegmentComparisonDetail> | null
+  family_comparisons: Record<string, FamilyComparisonDetail> | null
+  regression_clusters: FailureCluster[] | null
+  improvement_clusters: FailureCluster[] | null
+  confidence_in_improvement: number | null
+  improvement_confidence_tier: 'very_high' | 'high' | 'medium' | 'low' | 'very_low' | null
+  promotion_signal: PromotionSignal | null
+  promotion_signal_reasons: string[] | null
+  summary_text: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface SegmentComparisonDetail {
+  segment_value: string
+  production_mae: number
+  candidate_mae: number
+  improvement: number
+  improvement_percent: number
+  sample_count: number
+  is_regression: boolean
+}
+
+export interface FamilyComparisonDetail {
+  family: string
+  production_mae: number
+  candidate_mae: number
+  improvement: number
+  improvement_percent: number
+  is_regression: boolean
+}
+
+export interface PromotionGateCriteria {
+  id: string
+  name: string
+  description: string | null
+  criteria_type: GateCriteriaType
+  metric_name: string
+  comparison_operator: ComparisonOperator
+  threshold_value: number
+  threshold_unit: string | null
+  applies_to_segments: string[] | null
+  applies_to_families: string[] | null
+  is_enabled: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PromotionGateResult {
+  criteria_id: string
+  criteria_name: string
+  criteria_type: GateCriteriaType
+  passed: boolean
+  metric_value: number
+  threshold_value: number
+  threshold_unit: string | null
+  message: string
+}
+
+export interface PromotionGateEvaluation {
+  id: string
+  variant_comparison_id: string
+  candidate_variant_id: string
+  overall_status: PromotionGateStatus
+  gate_results: PromotionGateResult[]
+  hard_fail_count: number
+  soft_warning_count: number
+  status_reason: string | null
+  detailed_summary: Record<string, unknown> | null
+  evaluated_at: string
+  evaluated_by: string | null
+}
+
+export interface VariantPromotionHistory {
+  id: string
+  variant_id: string
+  action: PromotionAction
+  gate_evaluation_id: string | null
+  previous_production_variant_id: string | null
+  decision_reason: string | null
+  decision_notes: string | null
+  metrics_snapshot: Record<string, unknown> | null
+  decided_by: string | null
+  decided_at: string
+}
+
+export interface VariantComparisonWithDetails extends VariantComparison {
+  production_variant_name: string
+  production_version_tag: string
+  candidate_variant_name: string
+  candidate_version_tag: string
+  gate_status: PromotionGateStatus | null
+  hard_fail_count: number | null
+  soft_warning_count: number | null
+}
+
+// ========================================
 // PHASE 45: GEOMETRY-FIRST LANDMARK ENGINE
 // ========================================
 
