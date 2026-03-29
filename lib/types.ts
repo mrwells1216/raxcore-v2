@@ -3689,8 +3689,44 @@ export interface VariantComparison {
   promotion_signal: PromotionSignal | null
   promotion_signal_reasons: string[] | null
   summary_text: string | null
+  // PATCH A+B+C: Extended comparison data
+  protected_segment_results?: ProtectedSegmentResult[] | null
+  protected_segment_hard_fails?: number | null
+  high_confidence_regressions?: number | null
+  high_confidence_total?: number | null
+  high_confidence_regression_rate?: number | null
+  family_level_counts?: {
+    spread: { improved: number; regressed: number }
+    beam: { improved: number; regressed: number }
+    tine: { improved: number; regressed: number }
+    mass: { improved: number; regressed: number }
+  } | null
+  net_error_counts?: {
+    improved: number
+    regressed: number
+    unchanged: number
+    total: number
+  } | null
+  confidence_counts?: {
+    improved: number
+    regressed: number
+  } | null
   created_by: string | null
   created_at: string
+}
+
+// PATCH A: Protected segment result type
+export interface ProtectedSegmentResult {
+  segmentKey: string
+  segmentName: string
+  sampleCount: number
+  improvedCount: number
+  regressedCount: number
+  unchangedCount: number
+  avgRegressionAmount: number
+  maxRegressionAmount: number
+  isHardFail: boolean
+  failReason: string | null
 }
 
 export interface SegmentComparisonDetail {

@@ -22,6 +22,94 @@ import type {
 import { getEvaluationRun } from './evaluation-runner'
 
 // ============================================================================
+// PROTECTED SEGMENTS (PATCH A)
+// ============================================================================
+
+/**
+ * Protected segment definitions - these are sensitive scenarios where
+ * regression is particularly harmful and requires hard fail gates
+ */
+export const PROTECTED_SEGMENTS = {
+  low_light_trail_cam: {
+    name: 'Low Light / Trail Cam',
+    description: 'Poor lighting conditions from trail cameras',
+    regressionThreshold: 0.5, // inches - stricter threshold
+    minSampleCount: 5,
+    filter: (r: ExampleComparisonData) => 
+      r.sourceType === 'trail_cam' || r.sourceType === 'trail_camera' ||
+      r.characteristics?.lighting_quality === 'low' ||
+      r.characteristics?.lighting_quality === 'poor',
+  },
+  weak_reference: {
+    name: 'Weak Reference',
+    description: 'Examples with low reference quality or missing ear reference',
+    regressionThreshold: 0.75,
+    minSampleCount: 3,
+    filter: (r: ExampleComparisonData) =>
+      r.characteristics?.reference_quality === 'weak' ||
+      r.characteristics?.reference_quality === 'poor' ||
+      r.characteristics?.ear_reference === false ||
+      r.earsVisible === false,
+  },
+  high_asymmetry: {
+    name: 'High Asymmetry',
+    description: 'Racks with significant asymmetry that are harder to score',
+    regressionThreshold: 0.75,
+    minSampleCount: 3,
+    filter: (r: ExampleComparisonData) =>
+      r.characteristics?.asymmetry_score !== undefined && 
+      r.characteristics.asymmetry_score > 0.3,
+  },
+  single_image: {
+    name: 'Single Image',
+    description: 'Predictions made from only one image',
+    regressionThreshold: 1.0, // More lenient since single images are inherently harder
+    minSampleCount: 5,
+    filter: (r: ExampleComparisonData) =>
+      r.imageCount === 1,
+  },
+} as const
+
+export type ProtectedSegmentKey = keyof typeof PROTECTED_SEGMENTS
+
+export interface ProtectedSegmentResult {
+  segmentKey: ProtectedSegmentKey
+  segmentName: string
+  sampleCount: number
+  improvedCount: number
+  regressedCount: number
+  unchangedCount: number
+  avgRegressionAmount: number
+  maxRegressionAmount: number
+  isHardFail: boolean
+  failReason: string | null
+}
+
+export interface ExampleComparisonData {
+  buckId: string
+  prodAbsErrorGross: number
+  candAbsErrorGross: number
+  prodAbsErrorNet: number | null
+  candAbsErrorNet: number | null
+  prodConfidence: number | null
+  candConfidence: number | null
+  prodSpreadError: number | null
+  candSpreadError: number | null
+  prodBeamError: number | null
+  candBeamError: number | null
+  prodTineError: number | null
+  candTineError: number | null
+  prodMassError: number | null
+  candMassError: number | null
+  state: string | null
+  rackType: string | null
+  sourceType: string | null
+  imageCount: number
+  earsVisible: boolean | null
+  characteristics: Record<string, unknown> | null
+}
+
+// ============================================================================
 // PROMOTION GATE CRITERIA
 // ============================================================================
 
@@ -234,78 +322,322 @@ export async function generateComparison(
 }
 
 /**
+ * PATCH B: Richer example-level comparison data structure
+ */
+export interface RichExampleLevelCounts {
+  // Core counts
+  improved: number
+  regressed: number
+  unchanged: number
+  total: number
+  
+  // Net error counts (if available)
+  netImproved: number
+  netRegressed: number
+  netUnchanged: number
+  netTotal: number
+  
+  // Family-level counts
+  spreadImproved: number
+  spreadRegressed: number
+  beamImproved: number
+  beamRegressed: number
+  tineImproved: number
+  tineRegressed: number
+  massImproved: number
+  massRegressed: number
+  
+  // Confidence changes
+  confidenceImproved: number
+  confidenceRegressed: number
+  
+  // High-confidence regressions (PATCH C)
+  highConfidenceRegressions: number
+  highConfidenceTotal: number
+  
+  // Protected segment results (PATCH A)
+  protectedSegmentResults: ProtectedSegmentResult[]
+  
+  // Raw comparison data for further analysis
+  exampleData: ExampleComparisonData[]
+}
+
+/**
  * Compute example-level win/loss/unchanged counts from real evaluation results
- * Compares per-example absolute errors between production and candidate runs
+ * PATCH B: Extended to include gross/net/family/confidence deltas
  */
 async function computeExampleLevelCounts(
   prodRunId: string,
   candRunId: string
-): Promise<{ improved: number; regressed: number; unchanged: number; total: number }> {
+): Promise<RichExampleLevelCounts> {
   const { createClient } = await import('@/lib/supabase/server')
   const supabase = await createClient()
 
-  // Get production results indexed by buck_id
+  // Get production results with full data
   const { data: prodResults } = await supabase
     .from('evaluation_results')
-    .select('buck_id, abs_error_gross')
+    .select(`
+      buck_id,
+      abs_error_gross,
+      abs_error_net,
+      confidence_percent,
+      spread_error,
+      beam_error,
+      tine_error,
+      mass_error,
+      state,
+      rack_type,
+      source_type,
+      result_snapshot
+    `)
     .eq('evaluation_run_id', prodRunId)
     .not('abs_error_gross', 'is', null)
 
-  // Get candidate results indexed by buck_id
+  // Get candidate results with full data
   const { data: candResults } = await supabase
     .from('evaluation_results')
-    .select('buck_id, abs_error_gross')
+    .select(`
+      buck_id,
+      abs_error_gross,
+      abs_error_net,
+      confidence_percent,
+      spread_error,
+      beam_error,
+      tine_error,
+      mass_error,
+      state,
+      rack_type,
+      source_type,
+      result_snapshot
+    `)
     .eq('evaluation_run_id', candRunId)
     .not('abs_error_gross', 'is', null)
 
+  const result: RichExampleLevelCounts = {
+    improved: 0, regressed: 0, unchanged: 0, total: 0,
+    netImproved: 0, netRegressed: 0, netUnchanged: 0, netTotal: 0,
+    spreadImproved: 0, spreadRegressed: 0,
+    beamImproved: 0, beamRegressed: 0,
+    tineImproved: 0, tineRegressed: 0,
+    massImproved: 0, massRegressed: 0,
+    confidenceImproved: 0, confidenceRegressed: 0,
+    highConfidenceRegressions: 0, highConfidenceTotal: 0,
+    protectedSegmentResults: [],
+    exampleData: [],
+  }
+
   if (!prodResults || !candResults) {
-    return { improved: 0, regressed: 0, unchanged: 0, total: 0 }
+    return result
   }
 
   // Build lookup maps
-  const prodMap = new Map<string, number>()
+  type ResultRow = typeof prodResults[number]
+  const prodMap = new Map<string, ResultRow>()
   for (const r of prodResults) {
-    if (r.buck_id && r.abs_error_gross !== null) {
-      prodMap.set(r.buck_id, r.abs_error_gross)
-    }
+    if (r.buck_id) prodMap.set(r.buck_id, r)
   }
 
-  const candMap = new Map<string, number>()
+  const candMap = new Map<string, ResultRow>()
   for (const r of candResults) {
-    if (r.buck_id && r.abs_error_gross !== null) {
-      candMap.set(r.buck_id, r.abs_error_gross)
-    }
+    if (r.buck_id) candMap.set(r.buck_id, r)
   }
-
-  // Compare examples that exist in both runs
-  let improved = 0
-  let regressed = 0
-  let unchanged = 0
 
   // Threshold for "unchanged" (within 0.5 inches is considered unchanged)
   const UNCHANGED_THRESHOLD = 0.5
+  const FAMILY_THRESHOLD = 0.3
+  const CONFIDENCE_THRESHOLD = 3 // 3% confidence change
+  const HIGH_CONFIDENCE_THRESHOLD = 75 // Production confidence >= 75% is "high confidence"
 
-  for (const [buckId, prodError] of prodMap) {
-    const candError = candMap.get(buckId)
-    if (candError === undefined) continue
+  // Compare examples that exist in both runs
+  for (const [buckId, prod] of prodMap) {
+    const cand = candMap.get(buckId)
+    if (!cand) continue
 
+    const prodError = prod.abs_error_gross || 0
+    const candError = cand.abs_error_gross || 0
     const errorDiff = prodError - candError // Positive means candidate is better
 
+    // Build example comparison data
+    const exampleData: ExampleComparisonData = {
+      buckId,
+      prodAbsErrorGross: prodError,
+      candAbsErrorGross: candError,
+      prodAbsErrorNet: prod.abs_error_net,
+      candAbsErrorNet: cand.abs_error_net,
+      prodConfidence: prod.confidence_percent,
+      candConfidence: cand.confidence_percent,
+      prodSpreadError: prod.spread_error,
+      candSpreadError: cand.spread_error,
+      prodBeamError: prod.beam_error,
+      candBeamError: cand.beam_error,
+      prodTineError: prod.tine_error,
+      candTineError: cand.tine_error,
+      prodMassError: prod.mass_error,
+      candMassError: cand.mass_error,
+      state: prod.state,
+      rackType: prod.rack_type,
+      sourceType: prod.source_type,
+      imageCount: (prod.result_snapshot as Record<string, unknown>)?.image_count as number || 1,
+      earsVisible: (prod.result_snapshot as Record<string, unknown>)?.ears_visible as boolean ?? null,
+      characteristics: (prod.result_snapshot as Record<string, unknown>)?.characteristics as Record<string, unknown> || null,
+    }
+    result.exampleData.push(exampleData)
+
+    // Gross error comparison
     if (errorDiff > UNCHANGED_THRESHOLD) {
-      improved++ // Candidate has lower error
+      result.improved++
     } else if (errorDiff < -UNCHANGED_THRESHOLD) {
-      regressed++ // Candidate has higher error
+      result.regressed++
     } else {
-      unchanged++ // Within threshold
+      result.unchanged++
+    }
+    result.total++
+
+    // Net error comparison (PATCH B)
+    if (prod.abs_error_net !== null && cand.abs_error_net !== null) {
+      const netDiff = prod.abs_error_net - cand.abs_error_net
+      if (netDiff > UNCHANGED_THRESHOLD) result.netImproved++
+      else if (netDiff < -UNCHANGED_THRESHOLD) result.netRegressed++
+      else result.netUnchanged++
+      result.netTotal++
+    }
+
+    // Family-level comparisons (PATCH B)
+    if (prod.spread_error !== null && cand.spread_error !== null) {
+      const spreadDiff = Math.abs(prod.spread_error) - Math.abs(cand.spread_error)
+      if (spreadDiff > FAMILY_THRESHOLD) result.spreadImproved++
+      else if (spreadDiff < -FAMILY_THRESHOLD) result.spreadRegressed++
+    }
+    if (prod.beam_error !== null && cand.beam_error !== null) {
+      const beamDiff = Math.abs(prod.beam_error) - Math.abs(cand.beam_error)
+      if (beamDiff > FAMILY_THRESHOLD) result.beamImproved++
+      else if (beamDiff < -FAMILY_THRESHOLD) result.beamRegressed++
+    }
+    if (prod.tine_error !== null && cand.tine_error !== null) {
+      const tineDiff = Math.abs(prod.tine_error) - Math.abs(cand.tine_error)
+      if (tineDiff > FAMILY_THRESHOLD) result.tineImproved++
+      else if (tineDiff < -FAMILY_THRESHOLD) result.tineRegressed++
+    }
+    if (prod.mass_error !== null && cand.mass_error !== null) {
+      const massDiff = Math.abs(prod.mass_error) - Math.abs(cand.mass_error)
+      if (massDiff > FAMILY_THRESHOLD) result.massImproved++
+      else if (massDiff < -FAMILY_THRESHOLD) result.massRegressed++
+    }
+
+    // Confidence comparison (PATCH B)
+    if (prod.confidence_percent !== null && cand.confidence_percent !== null) {
+      const confDiff = cand.confidence_percent - prod.confidence_percent
+      if (confDiff > CONFIDENCE_THRESHOLD) result.confidenceImproved++
+      else if (confDiff < -CONFIDENCE_THRESHOLD) result.confidenceRegressed++
+    }
+
+    // PATCH C: High-confidence regression detection
+    // Track cases where production was high-confidence but candidate regresses
+    if (prod.confidence_percent !== null && prod.confidence_percent >= HIGH_CONFIDENCE_THRESHOLD) {
+      result.highConfidenceTotal++
+      // If candidate makes the prediction worse on a high-confidence example
+      if (errorDiff < -UNCHANGED_THRESHOLD) {
+        result.highConfidenceRegressions++
+      }
     }
   }
 
-  return {
-    improved,
-    regressed,
-    unchanged,
-    total: improved + regressed + unchanged,
+  // PATCH A: Evaluate protected segments
+  result.protectedSegmentResults = evaluateProtectedSegments(result.exampleData)
+
+  return result
+}
+
+/**
+ * PATCH A: Evaluate all protected segments and return results
+ */
+function evaluateProtectedSegments(
+  exampleData: ExampleComparisonData[]
+): ProtectedSegmentResult[] {
+  const results: ProtectedSegmentResult[] = []
+  const UNCHANGED_THRESHOLD = 0.5
+
+  for (const [segmentKey, segment] of Object.entries(PROTECTED_SEGMENTS) as [ProtectedSegmentKey, typeof PROTECTED_SEGMENTS[ProtectedSegmentKey]][]) {
+    // Filter examples that match this protected segment
+    const matchingExamples = exampleData.filter(segment.filter)
+    
+    if (matchingExamples.length < segment.minSampleCount) {
+      // Not enough samples to evaluate this segment
+      results.push({
+        segmentKey,
+        segmentName: segment.name,
+        sampleCount: matchingExamples.length,
+        improvedCount: 0,
+        regressedCount: 0,
+        unchangedCount: 0,
+        avgRegressionAmount: 0,
+        maxRegressionAmount: 0,
+        isHardFail: false,
+        failReason: matchingExamples.length === 0 
+          ? 'No examples in segment' 
+          : `Only ${matchingExamples.length} examples (min ${segment.minSampleCount} required)`,
+      })
+      continue
+    }
+
+    // Compute segment-level metrics
+    let improved = 0
+    let regressed = 0
+    let unchanged = 0
+    const regressionAmounts: number[] = []
+
+    for (const ex of matchingExamples) {
+      const errorDiff = ex.prodAbsErrorGross - ex.candAbsErrorGross
+
+      if (errorDiff > UNCHANGED_THRESHOLD) {
+        improved++
+      } else if (errorDiff < -UNCHANGED_THRESHOLD) {
+        regressed++
+        regressionAmounts.push(Math.abs(errorDiff))
+      } else {
+        unchanged++
+      }
+    }
+
+    const avgRegressionAmount = regressionAmounts.length > 0
+      ? regressionAmounts.reduce((a, b) => a + b, 0) / regressionAmounts.length
+      : 0
+    const maxRegressionAmount = regressionAmounts.length > 0
+      ? Math.max(...regressionAmounts)
+      : 0
+
+    // Determine if this is a hard fail
+    // Hard fail if: average regression exceeds threshold OR regression rate > 40%
+    const regressionRate = regressed / matchingExamples.length
+    const isHardFail = avgRegressionAmount > segment.regressionThreshold || regressionRate > 0.4
+
+    let failReason: string | null = null
+    if (isHardFail) {
+      const reasons: string[] = []
+      if (avgRegressionAmount > segment.regressionThreshold) {
+        reasons.push(`avg regression ${avgRegressionAmount.toFixed(2)}" exceeds threshold ${segment.regressionThreshold}"`)
+      }
+      if (regressionRate > 0.4) {
+        reasons.push(`regression rate ${(regressionRate * 100).toFixed(0)}% exceeds 40%`)
+      }
+      failReason = reasons.join('; ')
+    }
+
+    results.push({
+      segmentKey,
+      segmentName: segment.name,
+      sampleCount: matchingExamples.length,
+      improvedCount: improved,
+      regressedCount: regressed,
+      unchangedCount: unchanged,
+      avgRegressionAmount,
+      maxRegressionAmount,
+      isHardFail,
+      failReason,
+    })
   }
+
+  return results
 }
 
 /**
@@ -330,12 +662,20 @@ async function computeComparisonMetrics(
 
   const p95Improvement = prodMetrics.p95_error - candMetrics.p95_error
 
-  // PATCH C: Derive win/loss/unchanged from REAL per-example evaluation results
+  // PATCH B+C: Derive rich win/loss/unchanged from REAL per-example evaluation results
   const exampleCounts = await computeExampleLevelCounts(prodRun.id, candRun.id)
   const sampleCount = exampleCounts.total || Math.min(prodMetrics.sample_count, candMetrics.sample_count)
   const improvedCount = exampleCounts.improved
   const regressedCount = exampleCounts.regressed
   const unchangedCount = exampleCounts.unchanged
+
+  // PATCH A: Check for protected segment hard fails
+  const protectedSegmentHardFails = exampleCounts.protectedSegmentResults.filter(r => r.isHardFail)
+  
+  // PATCH C: Check for high-confidence regressions
+  const highConfRegressionRate = exampleCounts.highConfidenceTotal > 0
+    ? exampleCounts.highConfidenceRegressions / exampleCounts.highConfidenceTotal
+    : 0
 
   // Confidence calibration (from interval coverage if available)
   const prodCalibration = prodRun.interval_coverage?.coverage_percent || null
@@ -359,13 +699,16 @@ async function computeComparisonMetrics(
   // Family comparisons
   const familyComparisons = computeFamilyComparisons(prodRun, candRun)
 
-  // Determine promotion signal
+  // Determine promotion signal (now includes protected segments and high-confidence regression check)
   const { signal, reasons, confidence, confidenceTier } = determinePromotionSignal(
     maeImprovement,
     p95Improvement,
     calibrationImprovement,
     segmentComparisons,
-    familyComparisons
+    familyComparisons,
+    protectedSegmentHardFails,
+    highConfRegressionRate,
+    exampleCounts
   )
 
   // Generate summary
@@ -412,6 +755,29 @@ async function computeComparisonMetrics(
     promotion_signal: signal,
     promotion_signal_reasons: reasons,
     summary_text: summaryText,
+    // PATCH A+B+C: Extended comparison data
+    protected_segment_results: exampleCounts.protectedSegmentResults,
+    protected_segment_hard_fails: protectedSegmentHardFails.length,
+    high_confidence_regressions: exampleCounts.highConfidenceRegressions,
+    high_confidence_total: exampleCounts.highConfidenceTotal,
+    high_confidence_regression_rate: highConfRegressionRate,
+    // Family-level example counts
+    family_level_counts: {
+      spread: { improved: exampleCounts.spreadImproved, regressed: exampleCounts.spreadRegressed },
+      beam: { improved: exampleCounts.beamImproved, regressed: exampleCounts.beamRegressed },
+      tine: { improved: exampleCounts.tineImproved, regressed: exampleCounts.tineRegressed },
+      mass: { improved: exampleCounts.massImproved, regressed: exampleCounts.massRegressed },
+    },
+    net_error_counts: {
+      improved: exampleCounts.netImproved,
+      regressed: exampleCounts.netRegressed,
+      unchanged: exampleCounts.netUnchanged,
+      total: exampleCounts.netTotal,
+    },
+    confidence_counts: {
+      improved: exampleCounts.confidenceImproved,
+      regressed: exampleCounts.confidenceRegressed,
+    },
   }
 }
 
@@ -499,7 +865,10 @@ function determinePromotionSignal(
   p95Improvement: number,
   calibrationImprovement: number | null,
   segmentComparisons: Record<string, SegmentComparisonDetail> | null,
-  familyComparisons: Record<string, FamilyComparisonDetail> | null
+  familyComparisons: Record<string, FamilyComparisonDetail> | null,
+  protectedSegmentHardFails: ProtectedSegmentResult[],
+  highConfRegressionRate: number,
+  exampleCounts: RichExampleLevelCounts
 ): {
   signal: PromotionSignal
   reasons: string[]
@@ -508,8 +877,42 @@ function determinePromotionSignal(
 } {
   const reasons: string[] = []
   let score = 0 // -100 to +100
+  let forceDoNotPromote = false
 
+  // ============================================================================
+  // PATCH A: Protected segment hard fail check (highest priority)
+  // ============================================================================
+  if (protectedSegmentHardFails.length > 0) {
+    forceDoNotPromote = true
+    score -= 50
+    for (const fail of protectedSegmentHardFails) {
+      reasons.push(`PROTECTED SEGMENT HARD FAIL: ${fail.segmentName} - ${fail.failReason}`)
+    }
+  }
+
+  // ============================================================================
+  // PATCH C: High-confidence regression guard
+  // ============================================================================
+  const HIGH_CONF_REGRESSION_HARD_FAIL_THRESHOLD = 0.25 // 25% of high-conf cases regressing = hard fail
+  const HIGH_CONF_REGRESSION_WARNING_THRESHOLD = 0.15 // 15% = warning
+  
+  if (exampleCounts.highConfidenceTotal >= 5) { // Only evaluate if we have enough samples
+    if (highConfRegressionRate >= HIGH_CONF_REGRESSION_HARD_FAIL_THRESHOLD) {
+      forceDoNotPromote = true
+      score -= 40
+      reasons.push(`HIGH-CONFIDENCE REGRESSION: ${(highConfRegressionRate * 100).toFixed(0)}% of high-confidence cases regressed (${exampleCounts.highConfidenceRegressions}/${exampleCounts.highConfidenceTotal})`)
+    } else if (highConfRegressionRate >= HIGH_CONF_REGRESSION_WARNING_THRESHOLD) {
+      score -= 20
+      reasons.push(`High-confidence regression warning: ${(highConfRegressionRate * 100).toFixed(0)}% of high-confidence cases regressed`)
+    } else if (highConfRegressionRate < 0.05 && exampleCounts.highConfidenceRegressions === 0) {
+      score += 10
+      reasons.push('No regressions on high-confidence cases')
+    }
+  }
+
+  // ============================================================================
   // MAE improvement (+/- 30 points)
+  // ============================================================================
   if (maeImprovement > 1) {
     score += 30
     reasons.push(`MAE improved by ${maeImprovement.toFixed(2)}" - strong improvement`)
@@ -527,7 +930,9 @@ function determinePromotionSignal(
     reasons.push(`MAE regressed by ${Math.abs(maeImprovement).toFixed(2)}" - significant regression`)
   }
 
+  // ============================================================================
   // P95 improvement (+/- 20 points)
+  // ============================================================================
   if (p95Improvement > 2) {
     score += 20
     reasons.push('Tail errors (P95) significantly improved')
@@ -541,7 +946,9 @@ function determinePromotionSignal(
     reasons.push('Tail errors (P95) significantly worse')
   }
 
+  // ============================================================================
   // Calibration (+/- 15 points)
+  // ============================================================================
   if (calibrationImprovement !== null) {
     if (calibrationImprovement > 0.03) {
       score += 15
@@ -552,7 +959,9 @@ function determinePromotionSignal(
     }
   }
 
+  // ============================================================================
   // Segment regressions (+/- 20 points)
+  // ============================================================================
   if (segmentComparisons) {
     const regressions = Object.values(segmentComparisons).filter(s => s.is_regression)
     if (regressions.length === 0) {
@@ -567,7 +976,9 @@ function determinePromotionSignal(
     }
   }
 
+  // ============================================================================
   // Family regressions (+/- 15 points)
+  // ============================================================================
   if (familyComparisons) {
     const regressions = Object.values(familyComparisons).filter(f => f.is_regression)
     if (regressions.length === 0) {
@@ -578,11 +989,33 @@ function determinePromotionSignal(
     }
   }
 
-  // Determine signal
+  // ============================================================================
+  // PATCH B: Example-level family counts (bonus/penalty)
+  // ============================================================================
+  const familyRegressionTotal = exampleCounts.spreadRegressed + exampleCounts.beamRegressed + 
+    exampleCounts.tineRegressed + exampleCounts.massRegressed
+  const familyImprovementTotal = exampleCounts.spreadImproved + exampleCounts.beamImproved + 
+    exampleCounts.tineImproved + exampleCounts.massImproved
+  
+  if (familyRegressionTotal > familyImprovementTotal * 1.5 && familyRegressionTotal > 10) {
+    score -= 10
+    reasons.push(`Family-level regressions (${familyRegressionTotal}) outpace improvements (${familyImprovementTotal})`)
+  } else if (familyImprovementTotal > familyRegressionTotal * 1.5 && familyImprovementTotal > 10) {
+    score += 5
+    reasons.push(`Family-level improvements (${familyImprovementTotal}) outpace regressions (${familyRegressionTotal})`)
+  }
+
+  // ============================================================================
+  // Determine final signal
+  // ============================================================================
   let signal: PromotionSignal
   let confidenceTier: 'very_high' | 'high' | 'medium' | 'low' | 'very_low'
 
-  if (score >= 50) {
+  // PATCH A+C: Force do_not_promote if any hard fail triggered
+  if (forceDoNotPromote) {
+    signal = 'do_not_promote'
+    confidenceTier = 'very_low'
+  } else if (score >= 50) {
     signal = 'strongly_recommend'
     confidenceTier = 'very_high'
   } else if (score >= 25) {
@@ -681,13 +1114,69 @@ export async function evaluatePromotionGates(
     }
   }
 
+  // PATCH A: Add protected segment hard fails to gate results
+  const protectedSegmentResults = (comparison as Record<string, unknown>).protected_segment_results as ProtectedSegmentResult[] | undefined
+  const protectedSegmentHardFails = protectedSegmentResults?.filter(r => r.isHardFail) || []
+  
+  for (const segFail of protectedSegmentHardFails) {
+    gateResults.push({
+      criteria_id: `protected_${segFail.segmentKey}`,
+      criteria_name: `Protected Segment: ${segFail.segmentName}`,
+      criteria_type: 'hard_fail',
+      passed: false,
+      metric_value: segFail.avgRegressionAmount,
+      threshold_value: PROTECTED_SEGMENTS[segFail.segmentKey].regressionThreshold,
+      threshold_unit: 'inches',
+      message: `PROTECTED SEGMENT HARD FAIL: ${segFail.segmentName} - ${segFail.failReason}`,
+    })
+    hardFailCount++
+  }
+
+  // PATCH C: Add high-confidence regression check to gate results
+  const highConfRegressions = (comparison as Record<string, unknown>).high_confidence_regressions as number | undefined || 0
+  const highConfTotal = (comparison as Record<string, unknown>).high_confidence_total as number | undefined || 0
+  const highConfRate = highConfTotal > 0 ? highConfRegressions / highConfTotal : 0
+  
+  if (highConfTotal >= 5 && highConfRate >= 0.25) {
+    gateResults.push({
+      criteria_id: 'high_confidence_regression',
+      criteria_name: 'High-Confidence Regression Guard',
+      criteria_type: 'hard_fail',
+      passed: false,
+      metric_value: highConfRate,
+      threshold_value: 0.25,
+      threshold_unit: 'ratio',
+      message: `HIGH-CONFIDENCE REGRESSION: ${(highConfRate * 100).toFixed(0)}% of high-confidence cases regressed (${highConfRegressions}/${highConfTotal})`,
+    })
+    hardFailCount++
+  } else if (highConfTotal >= 5 && highConfRate >= 0.15) {
+    gateResults.push({
+      criteria_id: 'high_confidence_regression',
+      criteria_name: 'High-Confidence Regression Guard',
+      criteria_type: 'soft_warning',
+      passed: false,
+      metric_value: highConfRate,
+      threshold_value: 0.15,
+      threshold_unit: 'ratio',
+      message: `High-confidence regression warning: ${(highConfRate * 100).toFixed(0)}% of high-confidence cases regressed`,
+    })
+    softWarningCount++
+  }
+
   // Determine overall status
   let overallStatus: PromotionGateStatus
   let statusReason: string
 
   if (hardFailCount > 0) {
     overallStatus = 'rejected'
-    statusReason = `${hardFailCount} hard fail(s) detected`
+    const reasons: string[] = [`${hardFailCount} hard fail(s) detected`]
+    if (protectedSegmentHardFails.length > 0) {
+      reasons.push(`including ${protectedSegmentHardFails.length} protected segment failure(s)`)
+    }
+    if (highConfTotal >= 5 && highConfRate >= 0.25) {
+      reasons.push('including high-confidence regression hard fail')
+    }
+    statusReason = reasons.join('; ')
   } else if (softWarningCount > 0) {
     overallStatus = 'needs_review'
     statusReason = `${softWarningCount} warning(s) require review`
@@ -713,6 +1202,15 @@ export async function evaluatePromotionGates(
         promotion_signal: comparison.promotion_signal,
         mae_improvement: comparison.mae_improvement,
         p95_improvement: comparison.p95_improvement,
+        // PATCH A+B+C: Extended gate evaluation details
+        protected_segment_results: protectedSegmentResults || [],
+        protected_segment_hard_fail_count: protectedSegmentHardFails.length,
+        high_confidence_regressions: highConfRegressions,
+        high_confidence_total: highConfTotal,
+        high_confidence_regression_rate: highConfRate,
+        family_level_counts: (comparison as Record<string, unknown>).family_level_counts,
+        net_error_counts: (comparison as Record<string, unknown>).net_error_counts,
+        confidence_counts: (comparison as Record<string, unknown>).confidence_counts,
       },
       evaluated_by: evaluatedBy || null,
     })
