@@ -340,6 +340,80 @@ registerJobHandler('structural_trigger_check', async (payload) => {
 })
 
 // ============================================================================
+// PHASE 52: STRUCTURED SUPERVISION SYSTEM - REAL IMPLEMENTATION
+// ============================================================================
+
+// Hook called after every prediction - logs supervision event
+registerJobHandler('supervision_prediction_hook', async (payload) => {
+  const { predictionId, userId } = payload as { predictionId: string; userId?: string }
+  const { logPredictionEvent } = await import('../../supervision/service')
+  
+  console.log(`[Phase 52] Supervision hook for prediction ${predictionId}`)
+  await logPredictionEvent(predictionId, userId)
+  
+  return { stage: 'supervision_prediction_hook', completed: true, predictionId }
+})
+
+// Hook called after validation - logs delta and updates patterns
+registerJobHandler('supervision_validation_hook', async (payload) => {
+  const { validationId, buckId, userId } = payload as { 
+    validationId: string
+    buckId: string
+    userId?: string 
+  }
+  const { logValidationEvent } = await import('../../supervision/service')
+  
+  console.log(`[Phase 52] Supervision validation hook for ${validationId}`)
+  await logValidationEvent(validationId, buckId, userId)
+  
+  return { stage: 'supervision_validation_hook', completed: true, validationId }
+})
+
+// Batch analyze patterns for hard-case detection
+registerJobHandler('supervision_pattern_analysis', async (payload) => {
+  const { limit, lookbackDays } = payload as { limit?: number; lookbackDays?: number }
+  const { runPatternAnalysis } = await import('../../supervision/hard-case-patterns')
+  
+  console.log(`[Phase 52] Running pattern analysis (limit: ${limit || 100}, lookback: ${lookbackDays || 30} days)`)
+  const result = await runPatternAnalysis({ limit, lookbackDays })
+  
+  return { 
+    stage: 'supervision_pattern_analysis', 
+    completed: true,
+    patternsIdentified: result.patternsIdentified,
+    hardCasesFound: result.hardCasesFound,
+    actionsGenerated: result.actionsGenerated,
+  }
+})
+
+// Apply a learning action (with safety checks)
+registerJobHandler('supervision_action_apply', async (payload) => {
+  const { actionId, approvedBy } = payload as { actionId: string; approvedBy?: string }
+  const { applyLearningAction } = await import('../../supervision/learning-actions')
+  
+  console.log(`[Phase 52] Applying learning action ${actionId}`)
+  const result = await applyLearningAction(actionId, approvedBy)
+  
+  return { 
+    stage: 'supervision_action_apply', 
+    completed: true, 
+    actionId,
+    success: result.success,
+    impactSummary: result.impactSummary,
+  }
+})
+
+// Refresh dashboard metrics
+registerJobHandler('supervision_dashboard_refresh', async () => {
+  const { refreshDashboardMetrics } = await import('../../supervision/service')
+  
+  console.log(`[Phase 52] Refreshing supervision dashboard metrics`)
+  await refreshDashboardMetrics()
+  
+  return { stage: 'supervision_dashboard_refresh', completed: true }
+})
+
+// ============================================================================
 // PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS - REAL HANDLERS
 // These are invoked during multi-view scoring, not as standalone jobs
 // ============================================================================

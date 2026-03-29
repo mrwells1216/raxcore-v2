@@ -20,6 +20,15 @@ export type JobType =
   | 'multiview_batch'
   // Reverse engineering precision pass (Phase 50)
   | 'reverse_precision_pass'
+  // Structural hypothesis solving (Phase 51)
+  | 'structural_hypothesis_solve'
+  | 'structural_trigger_check'
+  // Structured supervision (Phase 52)
+  | 'supervision_prediction_hook'
+  | 'supervision_validation_hook'
+  | 'supervision_pattern_analysis'
+  | 'supervision_action_apply'
+  | 'supervision_dashboard_refresh'
   // Render
   | 'render_generate'
   | 'render_batch'

@@ -28,6 +28,7 @@ import {
   Combine,
   RotateCcw,
   Boxes,
+  Eye,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -55,6 +56,7 @@ const navigation = [
   { name: 'Multi-View', href: '/admin/multiview', icon: Combine },
   { name: 'Reverse Eng', href: '/admin/reverse', icon: RotateCcw },
   { name: 'Structural', href: '/admin/structural', icon: Boxes },
+  { name: 'Supervision', href: '/admin/supervision', icon: Eye },
   { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
