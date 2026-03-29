@@ -106,7 +106,7 @@ function PricingCard({ plan, isYearly, isCurrent, isSubscribed, isLoading, onSub
         <ul className="space-y-3">
           {plan.features.map((feature, index) => (
             <li key={index} className="flex items-center gap-2">
-              <Check className="h-4 w-4 text-primary flex-shrink-0" />
+              <Check className="h-4 w-4 text-white flex-shrink-0" />
               <span className="text-sm">{feature}</span>
             </li>
           ))}
