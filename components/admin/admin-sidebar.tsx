@@ -23,6 +23,7 @@ import {
   Radio,
   Layers,
   Cpu,
+  ListTodo,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -46,6 +47,7 @@ const navigation = [
   { name: 'Error Patterns', href: '/admin/error-patterns', icon: BarChart3 },
   { name: 'Teach AI', href: '/admin/teach', icon: Wand2 },
   { name: 'Export', href: '/admin/export', icon: FileDown },
+  { name: 'Jobs', href: '/admin/jobs', icon: ListTodo },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
