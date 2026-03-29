@@ -299,6 +299,47 @@ registerJobHandler('reverse_precision_pass', async (payload) => {
 })
 
 // ============================================================================
+// PHASE 51: STRUCTURAL HYPOTHESIS SOLVING - REAL IMPLEMENTATION
+// ============================================================================
+
+registerJobHandler('structural_hypothesis_solve', async (payload) => {
+  const { structuralRunId } = payload as { structuralRunId: string }
+  const { executeStructuralSolving } = await import('../../structural-hypothesis/service')
+  
+  console.log(`[Phase 51] Executing structural hypothesis solving for run ${structuralRunId}`)
+  const result = await executeStructuralSolving(structuralRunId)
+  
+  return { 
+    stage: 'structural_hypothesis_solve', 
+    completed: true, 
+    structuralRunId,
+    winningCandidateType: result.winningCandidate?.candidate_type,
+    primaryReason: result.primaryReason,
+    grossDelta: result.grossDelta,
+    netDelta: result.netDelta,
+    candidatesGenerated: result.candidatesGenerated,
+    candidatesEvaluated: result.candidatesEvaluated,
+    processingTimeMs: result.processingTimeMs,
+  }
+})
+
+// REAL: Check if structural solving should be triggered
+registerJobHandler('structural_trigger_check', async (payload) => {
+  const { predictionId } = payload as { predictionId: string }
+  const { checkStructuralSolvingTrigger } = await import('../../structural-hypothesis/service')
+  
+  console.log(`[Phase 51] Checking structural solving trigger for prediction ${predictionId}`)
+  const result = await checkStructuralSolvingTrigger(predictionId)
+  
+  return { 
+    stage: 'structural_trigger_check', 
+    predictionId,
+    shouldTrigger: result.shouldTrigger,
+    reasons: result.reasons,
+  }
+})
+
+// ============================================================================
 // PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS - REAL HANDLERS
 // These are invoked during multi-view scoring, not as standalone jobs
 // ============================================================================
