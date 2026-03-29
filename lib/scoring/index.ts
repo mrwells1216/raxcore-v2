@@ -19,3 +19,7 @@ export * from './segment-confidence-interval'
 export * from './next-photo-guidance'
 // Phase 49.5: Cross-view conflict engine and trust-weighted fusion
 export * from './cross-view-conflict'
+// Phase 49: Multi-view fusion engine and service
+export * from './multi-view-engine'
+export * from './multi-view-service'
+export * from './multi-view-uncertainty'

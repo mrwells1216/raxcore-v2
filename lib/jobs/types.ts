@@ -15,6 +15,9 @@ export type JobType =
   | 'score_full'
   | 'score_heavy'
   | 'score_multi_image'
+  // Multi-view fusion (Phase 49)
+  | 'multiview_fusion'
+  | 'multiview_batch'
   // Render
   | 'render_generate'
   | 'render_batch'

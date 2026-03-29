@@ -3942,3 +3942,90 @@ export interface Phase45AsymmetryAnalysis {
   asymmetry_confidence: number
   recommendation: string
 }
+
+// ========================================
+// MULTI-VIEW FUSION TYPES (Phase 49)
+// ========================================
+
+export type MultiViewMethod = 'graph_fusion' | 'weighted_average' | 'dominant_view' | 'single_view_fallback' | 'hybrid'
+export type MultiViewStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'fallback_used'
+export type ViewGraphQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'disconnected'
+export type FamilyFusionStrategy = 'weighted_fusion' | 'dominant_view' | 'single_view' | 'flagged'
+
+export interface MultiViewSetSummary {
+  id: string
+  predictionId: string | null
+  buckId: string
+  status: MultiViewStatus
+  method: MultiViewMethod
+  imageCount: number
+  graphConnectivity: number
+  graphQualityTier: ViewGraphQualityTier
+  strongestSubgraphSize: number
+  acceptedEdges: number
+  totalEdges: number
+  fallbackUsed: boolean
+  fallbackReason: string | null
+  solveQuality: number
+  processingTimeMs: number
+  createdAt: string
+}
+
+export interface MultiViewSolutionSummary {
+  fusedGrossScore: number | null
+  fusedNetScore: number | null
+  scoreConfidence: number
+  crossViewAgreement: number
+  uncertaintyReduction: number
+  primaryViews: number[]
+  secondaryViews: number[]
+  rejectedViews: { index: number; reason: string }[]
+  familyStrategies: Record<MeasurementFamily, FamilyFusionStrategy>
+  explanation: string[]
+}
+
+export interface MultiViewFamilyFusion {
+  family: MeasurementFamily
+  fusedValue: number
+  fusedConfidence: number
+  strategy: FamilyFusionStrategy
+  primaryViews: number[]
+  secondaryViews: number[]
+  disagreementLevel: 'low' | 'moderate' | 'high' | 'critical'
+  agreementScore: number
+  uncertaintyBand: number
+  explanation: string
+}
+
+export interface MultiViewEdgeSummary {
+  viewAIndex: number
+  viewBIndex: number
+  matchQuality: number
+  geometricConsistency: number
+  accepted: boolean
+  spreadAgreement: number
+  beamAgreement: number
+  tineAgreement: number
+  massAgreement: number
+}
+
+export interface MultiViewBenchmarkSummary {
+  totalComparisons: number
+  avgImprovementInches: number
+  medianImprovementInches: number
+  percentImproved: number
+  avgMultiViewError: number
+  avgSingleViewError: number
+  byImageCount: Record<number, { count: number; avgImprovement: number }>
+  byGraphQuality: Record<ViewGraphQualityTier, { count: number; avgImprovement: number }>
+}
+
+// Extended prediction with multi-view data
+export interface PredictionWithMultiView extends Prediction {
+  mv_set_id?: string | null
+  multi_view_fusion_used?: boolean
+  multi_view_confidence_boost?: number
+  multi_view_method?: MultiViewMethod
+  multiViewSummary?: MultiViewSetSummary | null
+  multiViewSolution?: MultiViewSolutionSummary | null
+}

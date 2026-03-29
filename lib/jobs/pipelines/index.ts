@@ -442,7 +442,231 @@ registerJobHandler('update_uncertainty_with_conflict', async (payload) => {
 })
 
 // ============================================================================
+// PHASE 49: MULTI-VIEW FUSION PIPELINES
+// ============================================================================
+
+export interface MultiViewScoringPayload {
+  buckId: string
+  predictionId?: string
+  userId?: string
+  imageUrls: string[]
+  baseMeasurements: Record<string, number | null>
+  earsFullyVisible?: boolean
+}
+
+export interface MultiViewScoringResult {
+  mvSetId: string
+  status: string
+  method: string
+  fusedGrossScore: number | null
+  fusedNetScore: number | null
+  scoreConfidence: number
+  imageCount: number
+  graphConnectivity: number
+  fallbackUsed: boolean
+  processingTimeMs: number
+}
+
+const multiViewScoringPipeline = definePipeline<MultiViewScoringPayload, MultiViewScoringResult>('multi_view_scoring', [
+  {
+    name: 'validate_input',
+    weight: 5,
+    execute: async (payload) => {
+      if (!payload.buckId) throw new Error('buckId is required')
+      if (!payload.imageUrls || payload.imageUrls.length < 2) {
+        throw new Error('At least 2 images required for multi-view scoring')
+      }
+      return payload
+    },
+  },
+  {
+    name: 'load_images_and_extract',
+    weight: 20,
+    execute: async (payload, context) => {
+      await context.updateProgress(10, 'Loading images and extracting landmarks...')
+      // Image loading and landmark extraction would happen here
+      // For now, return placeholder view data
+      return { 
+        ...payload, 
+        views: payload.imageUrls.map((url, i) => ({
+          imageIndex: i,
+          imageUrl: url,
+          // These would be populated by vision/landmark extraction
+          angleType: 'front' as const,
+          angleConfidence: 0.8,
+          measurements: {},
+          measurementConfidence: 0.75,
+          landmarks: { ears_visible: true, eyes_visible: true, antlers_visible: true },
+          landmarkConfidence: 0.8,
+          referenceQuality: 0.7,
+        })),
+      }
+    },
+  },
+  {
+    name: 'build_view_graph',
+    weight: 15,
+    execute: async (payload, context) => {
+      await context.updateProgress(35, 'Building view graph...')
+      // View graph construction happens in processMultiView
+      return payload
+    },
+  },
+  {
+    name: 'score_pairs',
+    weight: 15,
+    execute: async (payload, context) => {
+      await context.updateProgress(50, 'Scoring view pairs...')
+      // Pairwise scoring happens in processMultiView
+      return payload
+    },
+  },
+  {
+    name: 'fuse_families',
+    weight: 20,
+    execute: async (payload, context) => {
+      await context.updateProgress(65, 'Fusing measurement families...')
+      // Family fusion happens in processMultiView
+      return payload
+    },
+  },
+  {
+    name: 'solve_multiview_geometry',
+    weight: 10,
+    execute: async (payload, context) => {
+      await context.updateProgress(80, 'Solving multi-view geometry...')
+      
+      const { createAndProcessMultiView } = await import('../../scoring/multi-view-service')
+      
+      const typedPayload = payload as MultiViewScoringPayload & {
+        views: {
+          imageIndex: number
+          angleType: 'front' | 'left' | 'right' | 'back' | 'other'
+          angleConfidence: number
+          measurements: Record<string, number | null>
+          measurementConfidence: number
+          landmarks: { ears_visible: boolean; eyes_visible: boolean; antlers_visible: boolean }
+          landmarkConfidence: number
+          referenceQuality: number
+        }[]
+      }
+      
+      const { result } = await createAndProcessMultiView({
+        buckId: typedPayload.buckId,
+        predictionId: typedPayload.predictionId,
+        userId: typedPayload.userId,
+        views: typedPayload.views,
+        baseMeasurements: typedPayload.baseMeasurements as Record<string, number | null> & { inside_spread: number | null },
+        earsFullyVisible: typedPayload.earsFullyVisible,
+      })
+      
+      return { ...payload, multiViewResult: result }
+    },
+  },
+  {
+    name: 'fallback_decision',
+    weight: 5,
+    execute: async (payload, context) => {
+      await context.updateProgress(90, 'Checking fallback conditions...')
+      const typedPayload = payload as { multiViewResult?: { solution?: { fallbackUsed?: boolean } } }
+      if (typedPayload.multiViewResult?.solution?.fallbackUsed) {
+        await context.updateProgress(92, 'Using fallback single-view scoring...')
+      }
+      return payload
+    },
+  },
+  {
+    name: 'save_result',
+    weight: 8,
+    execute: async (payload, context) => {
+      await context.updateProgress(95, 'Saving multi-view result...')
+      
+      const typedPayload = payload as MultiViewScoringPayload & {
+        multiViewResult: {
+          mvSetId: string
+          status: string
+          solution: {
+            method: string
+            fusedGrossScore: number | null
+            fusedNetScore: number | null
+            scoreConfidence: number
+            fallbackUsed: boolean
+          }
+          imageCount: number
+          viewGraph: { graphConnectivityScore: number }
+          processingTimeMs: number
+        }
+      }
+      
+      const result = typedPayload.multiViewResult
+      return {
+        mvSetId: result.mvSetId,
+        status: result.status,
+        method: result.solution.method,
+        fusedGrossScore: result.solution.fusedGrossScore,
+        fusedNetScore: result.solution.fusedNetScore,
+        scoreConfidence: result.solution.scoreConfidence,
+        imageCount: result.imageCount,
+        graphConnectivity: result.viewGraph.graphConnectivityScore,
+        fallbackUsed: result.solution.fallbackUsed,
+        processingTimeMs: result.processingTimeMs,
+      }
+    },
+  },
+  {
+    name: 'notify',
+    weight: 2,
+    execute: async (result) => {
+      return result
+    },
+    onError: async () => undefined,
+  },
+])
+
+registerPipeline('multi_view_scoring', multiViewScoringPipeline)
+registerPipeline('multi_view_scoring_heavy', multiViewScoringPipeline)
+
+// Multi-view benchmark job handler
+registerJobHandler('multi_view_benchmark_run', async (payload) => {
+  const { recordBenchmarkComparison, getMultiViewSet } = await import('../../scoring/multi-view-service')
+  
+  const typedPayload = payload as {
+    mvSetId: string
+    groundTruthGross: number
+    groundTruthNet?: number
+    singleImagePrediction: number
+    singleImageConfidence: number
+    benchmarkRunId?: string
+  }
+  
+  const mvSetDetails = await getMultiViewSet(typedPayload.mvSetId)
+  if (!mvSetDetails || !mvSetDetails.solution) {
+    return { error: 'Multi-view set or solution not found' }
+  }
+  
+  const result = await recordBenchmarkComparison({
+    mvSetId: typedPayload.mvSetId,
+    benchmarkRunId: typedPayload.benchmarkRunId,
+    groundTruthGross: typedPayload.groundTruthGross,
+    groundTruthNet: typedPayload.groundTruthNet,
+    singleImagePrediction: typedPayload.singleImagePrediction,
+    singleImageConfidence: typedPayload.singleImageConfidence,
+    multiViewPrediction: mvSetDetails.solution.fused_gross_score || 0,
+    multiViewConfidence: mvSetDetails.solution.score_confidence || 0,
+  })
+  
+  return { benchmarkResultId: result?.id, improvement: result?.improvement_inches }
+})
+
+// Multi-view stats refresh handler
+registerJobHandler('multi_view_stats_refresh', async () => {
+  const { getMultiViewBenchmarkStats } = await import('../../scoring/multi-view-service')
+  const stats = await getMultiViewBenchmarkStats()
+  return stats
+})
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
-console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox and Phase 49.5 conflict analysis')
+console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox, Phase 49 multi-view, and Phase 49.5 conflict analysis')
