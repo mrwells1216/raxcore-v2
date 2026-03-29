@@ -24,6 +24,7 @@ import {
   Layers,
   Cpu,
   ListTodo,
+  TestTubes,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -48,6 +49,7 @@ const navigation = [
   { name: 'Teach AI', href: '/admin/teach', icon: Wand2 },
   { name: 'Export', href: '/admin/export', icon: FileDown },
   { name: 'Jobs', href: '/admin/jobs', icon: ListTodo },
+  { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 

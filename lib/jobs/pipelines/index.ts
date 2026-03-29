@@ -276,7 +276,132 @@ registerJobHandler('admin_bulk_action', async (payload) => {
 })
 
 // ============================================================================
+// SANDBOX PIPELINES (Phase 48)
+// ============================================================================
+
+export interface SandboxEvaluationPayload {
+  variantId: string
+  datasetType: 'export_pack' | 'benchmark_pack' | 'custom'
+  exportPackId?: string
+  benchmarkPackId?: string
+  config?: Record<string, unknown>
+}
+
+const sandboxEvaluationPipeline = definePipeline<SandboxEvaluationPayload, { evaluationRunId: string }>('sandbox_evaluation', [
+  {
+    name: 'validate_input',
+    weight: 5,
+    execute: async (payload) => {
+      if (!payload.variantId) throw new Error('variantId is required')
+      if (!payload.datasetType) throw new Error('datasetType is required')
+      return payload
+    },
+  },
+  {
+    name: 'load_variant',
+    weight: 5,
+    execute: async (payload, context) => {
+      await context.updateProgress(5, 'Loading variant configuration...')
+      const { getVariant } = await import('../../sandbox/variant-registry')
+      const variant = await getVariant(payload.variantId)
+      if (!variant) throw new Error(`Variant ${payload.variantId} not found`)
+      return { ...payload, variant }
+    },
+  },
+  {
+    name: 'load_dataset',
+    weight: 15,
+    execute: async (payload, context) => {
+      await context.updateProgress(15, 'Loading evaluation dataset...')
+      // Load the dataset based on type
+      return { ...payload, datasetLoaded: true }
+    },
+  },
+  {
+    name: 'run_evaluation',
+    weight: 60,
+    execute: async (payload, context) => {
+      await context.updateProgress(30, 'Running evaluation...')
+      const { runEvaluation, createEvaluationRun } = await import('../../sandbox/evaluation-runner')
+      const run = await createEvaluationRun({
+        variantId: payload.variantId,
+        datasetType: payload.datasetType,
+        exportPackId: payload.exportPackId,
+        benchmarkPackId: payload.benchmarkPackId,
+        config: payload.config,
+      })
+      await runEvaluation(run.id, (progress) => {
+        context.updateProgress(30 + Math.floor(progress * 0.55), `Processing examples (${Math.floor(progress * 100)}%)...`)
+      })
+      return { ...payload, evaluationRunId: run.id }
+    },
+  },
+  {
+    name: 'compute_metrics',
+    weight: 10,
+    execute: async (payload, context) => {
+      await context.updateProgress(90, 'Computing aggregate metrics...')
+      // Metrics computation is part of runEvaluation
+      return payload
+    },
+  },
+  {
+    name: 'finalize',
+    weight: 5,
+    execute: async (payload, context) => {
+      await context.updateProgress(98, 'Finalizing evaluation...')
+      return { evaluationRunId: (payload as { evaluationRunId: string }).evaluationRunId }
+    },
+  },
+])
+
+registerPipeline('sandbox_evaluation_run', sandboxEvaluationPipeline)
+
+registerJobHandler('sandbox_shadow_batch', async (payload) => {
+  const { processShadowBatch } = await import('../../sandbox/shadow-scoring')
+  const result = await processShadowBatch(payload as { limit?: number })
+  return result
+})
+
+registerJobHandler('sandbox_comparison_generate', async (payload) => {
+  const { generateComparison } = await import('../../sandbox/promotion-gates')
+  const typedPayload = payload as {
+    productionVariantId: string
+    candidateVariantId: string
+    productionEvaluationRunId?: string
+    candidateEvaluationRunId?: string
+    datasetType?: string
+    exportPackId?: string
+    benchmarkPackId?: string
+  }
+  const comparison = await generateComparison(
+    typedPayload.productionVariantId,
+    typedPayload.candidateVariantId,
+    typedPayload.productionEvaluationRunId,
+    typedPayload.candidateEvaluationRunId,
+    {
+      datasetType: typedPayload.datasetType || 'benchmark_pack',
+      exportPackId: typedPayload.exportPackId,
+      benchmarkPackId: typedPayload.benchmarkPackId,
+    }
+  )
+  return { comparisonId: comparison.id }
+})
+
+registerJobHandler('sandbox_promotion_check', async (payload) => {
+  const { evaluatePromotionGates } = await import('../../sandbox/promotion-gates')
+  const typedPayload = payload as { comparisonId: string }
+  const evaluation = await evaluatePromotionGates(typedPayload.comparisonId)
+  return { 
+    evaluationId: evaluation.id,
+    status: evaluation.overall_status,
+    hardFailCount: evaluation.hard_fail_count,
+    softWarningCount: evaluation.soft_warning_count,
+  }
+})
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
-console.log('[Jobs] Registered pipelines and handlers for all job types')
+console.log('[Jobs] Registered pipelines and handlers for all job types including Phase 48 sandbox')

@@ -23,6 +23,11 @@ export type JobType =
   | 'export_run'
   | 'benchmark_run'
   | 'offline_evaluation'
+  // Sandbox (Phase 48)
+  | 'sandbox_evaluation_run'
+  | 'sandbox_shadow_batch'
+  | 'sandbox_comparison_generate'
+  | 'sandbox_promotion_check'
   // Maintenance
   | 'cleanup_old_events'
   | 'cleanup_stale_jobs'
