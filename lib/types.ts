@@ -3363,3 +3363,65 @@ export interface PaymentHistory {
   metadata: Record<string, unknown>
   created_at: string
 }
+
+// ========================================
+// PHASE 45: GEOMETRY-FIRST LANDMARK ENGINE
+// ========================================
+
+export type LandmarkQualityTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
+export type GeometryTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
+export type AsymmetryCause = 'real_asymmetry' | 'perspective_induced' | 'missing_visibility' | 'mixed' | 'unknown'
+
+export interface Phase45Metadata {
+  // Landmark coverage
+  landmark_coverage: number
+  fusion_quality: string
+  
+  // Reference quality
+  reference_quality: number
+  primary_reference_source: string
+  
+  // Geometry analysis
+  geometry_consistency: number
+  geometry_tier: GeometryTier45
+  confidence_adjustment: number
+  
+  // Flags
+  critical_flags_count: number
+  warning_flags_count: number
+  
+  // Asymmetry
+  asymmetry_likely_real: boolean
+  asymmetry_cause: AsymmetryCause
+  asymmetry_percent: number
+  
+  // Trust scores
+  spread_trust: number
+  beam_trust: number
+  tine_trust: number
+  mass_trust: number
+  
+  // Processing
+  pipeline_version: string
+  processed_at: string
+}
+
+export interface Phase45Flag {
+  id: string
+  category: 'spread_reference' | 'beam_proportion' | 'tine_progression' | 'mass_progression' | 'asymmetry' | 'anatomical_bounds' | 'reference_conflict'
+  severity: 'info' | 'warning' | 'critical'
+  field: string | null
+  message: string
+}
+
+export interface Phase45AsymmetryAnalysis {
+  is_likely_real: boolean
+  apparent_cause: AsymmetryCause
+  left_side_visibility: number
+  right_side_visibility: number
+  overall_asymmetry_percent: number
+  beam_asymmetry_percent: number
+  tine_asymmetry_percent: number
+  asymmetry_confidence: number
+  recommendation: string
+}

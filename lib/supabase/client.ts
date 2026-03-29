@@ -29,14 +29,7 @@ export function createClient() {
 
   // Use singleton pattern to reuse the same client
   if (!client) {
-    client = createBrowserClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        // Disable lock to prevent issues with React Strict Mode double-mounting
-        lock: { acquireLockOnlyOnce: true },
-        // Reduce lock timeout to recover faster in development
-        lockAcquireTimeout: 2000,
-      },
-    })
+    client = createBrowserClient(supabaseUrl, supabaseAnonKey)
   }
   
   return client
