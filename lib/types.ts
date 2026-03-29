@@ -2994,3 +2994,94 @@ export interface PredictionSegmentLog {
   }
   created_at: string
 }
+
+// ========================================
+// PHASE 42: LANDMARK STRENGTHENING & GEOMETRY CONSISTENCY
+// ========================================
+
+export type LandmarkQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
+export type ReferenceSourceType = 'strong_ear' | 'partial_ear' | 'strong_eye' | 'combined_ear_eye' | 'weak_fallback' | 'none'
+export type GeometryConsistencyTier = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
+export type AsymmetryCause = 'real_asymmetry' | 'poor_angle' | 'weak_reference' | 'unknown'
+
+export interface EnhancedLandmarkData {
+  // Quality scores per landmark type
+  ear_base_quality: LandmarkQualityTier
+  ear_tip_quality: LandmarkQualityTier
+  eye_quality: LandmarkQualityTier
+  skull_symmetry_quality: LandmarkQualityTier
+  beam_tip_visibility: LandmarkQualityTier
+  brow_tine_visibility: LandmarkQualityTier
+  inside_spread_visibility: LandmarkQualityTier
+  
+  // Confidence scores (0-1)
+  ear_base_confidence: number
+  ear_tip_confidence: number
+  eye_confidence: number
+  beam_tip_confidence: number
+  
+  // Overall landmark quality
+  overall_quality: LandmarkQualityTier
+  overall_confidence: number
+  
+  // Source image indices
+  best_frontal_image: number | null
+  best_side_images: number[]
+}
+
+export interface ReferenceRankingData {
+  primary_source: ReferenceSourceType
+  primary_confidence: number
+  fallback_source: ReferenceSourceType | null
+  fallback_confidence: number | null
+  overall_reliability: number
+  is_sufficient: boolean
+  
+  // Per-measurement family reference assignment
+  spread_reference: ReferenceSourceType
+  beam_reference: ReferenceSourceType
+  tine_reference: ReferenceSourceType
+  mass_reference: ReferenceSourceType
+  
+  // Warnings
+  warnings: string[]
+}
+
+export interface GeometryConsistencyData {
+  consistency_score: number
+  tier: GeometryConsistencyTier
+  confidence_adjustment: number
+  
+  // Flag counts by severity
+  critical_flags: number
+  warning_flags: number
+  info_flags: number
+  
+  // Per-measurement trust penalties
+  measurement_trust_penalties: Record<string, number>
+  
+  // Asymmetry analysis
+  asymmetry_likely_real: boolean
+  asymmetry_cause: AsymmetryCause
+  asymmetry_divergence: number
+  
+  // Summary
+  summary: string
+  flags: Array<{
+    id: string
+    category: string
+    severity: 'info' | 'warning' | 'critical'
+    field: string | null
+    message: string
+  }>
+}
+
+export interface Phase42Metadata {
+  enhanced_landmarks: EnhancedLandmarkData | null
+  reference_ranking: ReferenceRankingData | null
+  geometry_consistency: GeometryConsistencyData | null
+  
+  // Processing info
+  phase42_version: string
+  processed_at: string
+}

@@ -35,7 +35,11 @@ import { calibrateConfidence, getCalibrationMetadata, type CalibratedConfidenceR
 import { calculateTrustScore, getTrustScoreMetadata, type TrustScoreResult } from './trust-score'
 import { resolveSegments, applySegmentedCalibration, logPredictionSegments, type SegmentedCalibration } from './segment-engine'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
-import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary, ConfidenceTrustMetadata, ConfidenceTier, TrustTier } from '@/lib/types'
+import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrectionSummary, ConfidenceTrustMetadata, ConfidenceTier, TrustTier, Phase42Metadata } from '@/lib/types'
+// Phase 42: Geometry consistency and reference ranking
+import { checkGeometryConsistency, geometryResultToMetadata, type GeometryConsistencyResult } from './geometry-consistency'
+import { rankReferenceSources, referenceRankingToMetadata, type ReferenceRanking } from './reference-ranking'
+import { computeEnhancedLandmarks, type EnhancedLandmarkData } from './landmarks'
 
 export interface ImageAnalysisInput {
   imageUrl: string
@@ -116,6 +120,8 @@ export interface ScoringOutput {
     confidenceAdjustment: number
     grossDelta: number
   } | null
+  // Phase 42: Geometry consistency and reference ranking
+  phase42Metadata?: Phase42Metadata | null
 }
 
 // Learning summary exposed to UI
@@ -763,11 +769,57 @@ async function buildVisionScoringOutput(
   )
   const consistentMeasurements = consistencyResult.adjustedMeasurements
 
+  // STAGE 3.5: Phase 42 - Enhanced Landmarks, Reference Ranking, and Geometry Consistency
+  const angles = input.images.map(img => img.angleType)
+  
+  // Phase 42a: Compute enhanced landmark data with quality tracking
+  const enhancedLandmarkData = computeEnhancedLandmarks({
+    images: input.images.map((img, i) => ({
+      imageUrl: img.imageUrl,
+      angleType: img.angleType,
+      width: img.width,
+      height: img.height,
+      index: i,
+    })),
+    earsFullyVisible: input.earsFullyVisible,
+    mainFramePoints: input.mainFramePoints,
+    visionLandmarks: {
+      ears_visible: rawLandmarks.ears_visible,
+      eyes_visible: rawLandmarks.eyes_visible,
+      antlers_visible: rawLandmarks.antlers_visible,
+      ear_base_to_tip_estimated: visionOutput.landmarks.ear_base_to_tip_estimated,
+    },
+  })
+  
+  // Phase 42b: Rank reference sources for scaling
+  const referenceRanking = rankReferenceSources({
+    landmarks: rawLandmarks,
+    angleTypes: angles,
+    earsFullyVisible: input.earsFullyVisible,
+    visionReportedEarLength: visionOutput.landmarks.ear_base_to_tip_estimated,
+  })
+  
+  // Phase 42c: Check geometry consistency
+  const geometryResult = checkGeometryConsistency({
+    measurements: consistentMeasurements,
+    landmarks: rawLandmarks,
+    angleTypes: angles,
+    earsFullyVisible: input.earsFullyVisible,
+    visionEarLength: visionOutput.landmarks.ear_base_to_tip_estimated,
+  })
+  
+  // Phase 42d: Apply geometry refinements if needed (only for critical issues with weak reference)
+  const geometryRefinedMeasurements = geometryResult.refinedMeasurements
+
   // STAGE 4: Confidence recalibration based on all factors
+  // Phase 42: Include geometry consistency adjustment in confidence
+  const geometryConfidenceAdjustment = geometryResult.confidenceAdjustment
+  const adjustedBaseConfidence = Math.max(15, Math.min(95, baseVisionConfidence + geometryConfidenceAdjustment))
+  
   const calibratedConfidence = recalibrateConfidence(
-    baseVisionConfidence,
+    adjustedBaseConfidence,
     rawLandmarks,
-    input.images.map(img => img.angleType),
+    angles,
     normalizationResult,
     consistencyResult
   )
@@ -776,6 +828,7 @@ async function buildVisionScoringOutput(
   const calibrationProfile = explicitCalibrationProfile ?? await getActiveCalibrationProfile()
 
   // STAGE 5: Phase 21 Measurement-Level Correction - correct individual measurements first
+  // Phase 42: Use geometry-refined measurements as input (includes any critical-issue refinements)
   const measurementCorrectionResult = await computeMeasurementLevelCorrection(
     {
       state: input.state,
@@ -787,11 +840,11 @@ async function buildVisionScoringOutput(
       earsFullyVisible: input.earsFullyVisible,
       harvestMethod: undefined,
       angleDiversity,
-      baseVisionConfidence,
+      baseVisionConfidence: adjustedBaseConfidence,
       normalizedConfidence: calibratedConfidence.finalConfidence,
       calibrationProfile,
     },
-    consistentMeasurements
+    geometryRefinedMeasurements
   )
 
   // Use measurement-corrected measurements as the base for further processing
@@ -1042,6 +1095,17 @@ async function buildVisionScoringOutput(
     explanations.push(`Landmark consistency: ${consistencyResult.landmarkQuality}.`)
   }
   
+  // Phase 42: Add geometry consistency and reference ranking info
+  if (geometryResult.flags.length > 0) {
+    explanations.push(`Geometry check: ${geometryResult.tier} (${geometryResult.flags.length} flags).`)
+    if (geometryResult.confidenceAdjustment !== 0) {
+      explanations.push(`Geometry confidence adjustment: ${geometryResult.confidenceAdjustment > 0 ? '+' : ''}${geometryResult.confidenceAdjustment}%.`)
+    }
+  }
+  if (!referenceRanking.isSufficient) {
+    explanations.push(`Reference quality: limited (${referenceRanking.primary.source.replace(/_/g, ' ')}).`)
+  }
+  
   // Add calibration explanation
   explanations.push(...calibratedConfidence.explanation)
   
@@ -1137,6 +1201,45 @@ async function buildVisionScoringOutput(
       totalSampleCount: segmentedCal.totalSampleCount,
       confidenceAdjustment: segmentedCal.confidenceAdjustment,
       grossDelta: segmentCorrectionResult.grossDelta,
+    },
+    // Phase 42: Geometry consistency and reference ranking
+    phase42Metadata: {
+      enhanced_landmarks: enhancedLandmarkData,
+      reference_ranking: {
+        primary_source: referenceRanking.primary.source,
+        primary_confidence: referenceRanking.primary.confidence,
+        fallback_source: referenceRanking.fallback?.source || null,
+        fallback_confidence: referenceRanking.fallback?.confidence || null,
+        overall_reliability: referenceRanking.overallReliability,
+        is_sufficient: referenceRanking.isSufficient,
+        spread_reference: referenceRanking.familyReferences.spread.source,
+        beam_reference: referenceRanking.familyReferences.beam.source,
+        tine_reference: referenceRanking.familyReferences.tine.source,
+        mass_reference: referenceRanking.familyReferences.mass.source,
+        warnings: referenceRanking.warnings,
+      },
+      geometry_consistency: {
+        consistency_score: geometryResult.consistencyScore,
+        tier: geometryResult.tier,
+        confidence_adjustment: geometryResult.confidenceAdjustment,
+        critical_flags: geometryResult.flags.filter(f => f.severity === 'critical').length,
+        warning_flags: geometryResult.flags.filter(f => f.severity === 'warning').length,
+        info_flags: geometryResult.flags.filter(f => f.severity === 'info').length,
+        measurement_trust_penalties: geometryResult.measurementTrustPenalties,
+        asymmetry_likely_real: geometryResult.asymmetryAnalysis.isLikelyReal,
+        asymmetry_cause: geometryResult.asymmetryAnalysis.apparentCause,
+        asymmetry_divergence: geometryResult.asymmetryAnalysis.leftRightDivergence,
+        summary: geometryResult.summary,
+        flags: geometryResult.flags.map(f => ({
+          id: f.id,
+          category: f.category,
+          severity: f.severity,
+          field: f.field,
+          message: f.message,
+        })),
+      },
+      phase42_version: '1.0.0',
+      processed_at: new Date().toISOString(),
     },
   }
 

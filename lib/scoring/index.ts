@@ -11,3 +11,6 @@ export * from './error-tracking'
 export * from './learning-correction'
 // Phase 28: Weighted learning correction
 export * from './weighted-learning-correction'
+// Phase 42: Geometry consistency and reference ranking
+export * from './geometry-consistency'
+export * from './reference-ranking'
