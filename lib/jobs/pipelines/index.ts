@@ -401,6 +401,20 @@ registerJobHandler('sandbox_promotion_check', async (payload) => {
 })
 
 // ============================================================================
+// PHASE 50: REVERSE ENGINEERING PRECISION PASS
+// ============================================================================
+
+registerJobHandler('reverse_precision_pass', async (payload) => {
+  const { reverseRunId } = payload as { reverseRunId: string }
+  const { executePrecisionPass } = await import('../../reverse-engineering/service')
+  
+  console.log(`[Phase 50] Executing precision pass for run ${reverseRunId}`)
+  await executePrecisionPass(reverseRunId)
+  
+  return { stage: 'reverse_precision_pass', completed: true, reverseRunId }
+})
+
+// ============================================================================
 // PHASE 49.5: CROSS-VIEW CONFLICT ANALYSIS JOB HANDLERS
 // ============================================================================
 

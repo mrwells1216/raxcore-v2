@@ -17,6 +17,7 @@ import { GroundTruthForm } from './ground-truth-form'
 import { ConfidenceIndicator, ConfidenceExplanation, ConfidenceBadge } from './confidence-indicator'
 import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-display'
 import { BuckLocationLink } from '@/components/map/buck-location-link'
+import { PrecisionPassCard } from './precision-pass-card'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -221,6 +222,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           </Card>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Precision Pass - Phase 50 */}
+      <PrecisionPassCard predictionId={prediction.id} />
 
       {/* Location Linking */}
       <Card>

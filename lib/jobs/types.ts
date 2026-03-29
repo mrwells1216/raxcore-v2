@@ -18,6 +18,8 @@ export type JobType =
   // Multi-view fusion (Phase 49)
   | 'multiview_fusion'
   | 'multiview_batch'
+  // Reverse engineering precision pass (Phase 50)
+  | 'reverse_precision_pass'
   // Render
   | 'render_generate'
   | 'render_batch'
