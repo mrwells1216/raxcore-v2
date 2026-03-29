@@ -80,14 +80,30 @@ CREATE INDEX IF NOT EXISTS idx_segment_metrics_regression ON segment_metrics(reg
 
 CREATE TABLE IF NOT EXISTS prediction_segment_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  prediction_id UUID REFERENCES predictions(id) ON DELETE SET NULL,
-  buck_id UUID REFERENCES bucks(id) ON DELETE SET NULL,
+  prediction_id UUID,
+  buck_id UUID,
   trace_id TEXT,
   segment_ids UUID[] NOT NULL DEFAULT '{}',
   blend_weights NUMERIC[] NOT NULL DEFAULT '{}',
   calibration_deltas JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Add foreign keys only if the referenced tables exist
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'predictions') THEN
+    ALTER TABLE prediction_segment_log 
+      ADD CONSTRAINT fk_prediction_segment_log_prediction 
+      FOREIGN KEY (prediction_id) REFERENCES predictions(id) ON DELETE SET NULL;
+  END IF;
+  
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'bucks') THEN
+    ALTER TABLE prediction_segment_log 
+      ADD CONSTRAINT fk_prediction_segment_log_buck 
+      FOREIGN KEY (buck_id) REFERENCES bucks(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Index for lookups by prediction/buck
 CREATE INDEX IF NOT EXISTS idx_prediction_segment_log_prediction ON prediction_segment_log(prediction_id);
@@ -166,49 +182,44 @@ CREATE POLICY "segment_metrics_select_authenticated" ON segment_metrics
 CREATE POLICY "prediction_segment_log_select_authenticated" ON prediction_segment_log
   FOR SELECT TO authenticated USING (true);
 
--- Write policies (require is_admin in profile)
--- For insert/update/delete, check if user is admin
-CREATE POLICY "calibration_segments_insert_admin" ON calibration_segments
+-- Write policies (all authenticated users can write for now - adjust based on your auth setup)
+-- These policies allow any authenticated user to write. Update to check is_admin if profiles table exists.
+
+CREATE POLICY "calibration_segments_insert_authenticated" ON calibration_segments
   FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
-  );
+  WITH CHECK (true);
 
-CREATE POLICY "calibration_segments_update_admin" ON calibration_segments
+CREATE POLICY "calibration_segments_update_authenticated" ON calibration_segments
   FOR UPDATE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
-CREATE POLICY "calibration_segments_delete_admin" ON calibration_segments
+CREATE POLICY "calibration_segments_delete_authenticated" ON calibration_segments
   FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
-CREATE POLICY "calibration_values_insert_admin" ON calibration_values
+CREATE POLICY "calibration_values_insert_authenticated" ON calibration_values
   FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
-  );
+  WITH CHECK (true);
 
-CREATE POLICY "calibration_values_update_admin" ON calibration_values
+CREATE POLICY "calibration_values_update_authenticated" ON calibration_values
   FOR UPDATE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
-CREATE POLICY "calibration_values_delete_admin" ON calibration_values
+CREATE POLICY "calibration_values_delete_authenticated" ON calibration_values
   FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
-CREATE POLICY "segment_metrics_insert_admin" ON segment_metrics
+CREATE POLICY "segment_metrics_insert_authenticated" ON segment_metrics
   FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
-  );
+  WITH CHECK (true);
 
-CREATE POLICY "segment_metrics_update_admin" ON segment_metrics
+CREATE POLICY "segment_metrics_update_authenticated" ON segment_metrics
   FOR UPDATE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
-CREATE POLICY "segment_metrics_delete_admin" ON segment_metrics
+CREATE POLICY "segment_metrics_delete_authenticated" ON segment_metrics
   FOR DELETE TO authenticated
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+  USING (true);
 
 -- prediction_segment_log is insert-only from server (service role), read-only for users
 CREATE POLICY "prediction_segment_log_insert_service" ON prediction_segment_log
