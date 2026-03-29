@@ -37,6 +37,8 @@ export {
   getShadowPredictionsForProduction,
   getShadowPredictionsForVariant,
   getShadowStats,
+  processShadowBatch, // Job pipeline entry point
+  executeShadowScoring,
 } from './shadow-scoring'
 
 // Evaluation Runner
@@ -49,6 +51,7 @@ export {
   executeEvaluationRun,
   getEvaluationResults,
   getWorstPredictions,
+  runEvaluation, // Job pipeline entry point with progress callback
 } from './evaluation-runner'
 export type { CreateEvaluationRunParams } from './evaluation-runner'
 
@@ -57,6 +60,7 @@ export {
   getPromotionGateCriteria,
   upsertGateCriteria,
   createVariantComparison,
+  generateComparison, // Job pipeline entry point
   evaluatePromotionGates,
   getVariantComparison,
   listVariantComparisons,

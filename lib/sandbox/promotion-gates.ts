@@ -141,8 +141,8 @@ export async function createVariantComparison(
     throw new Error('Both evaluation runs must be completed')
   }
 
-  // Compute comparison metrics
-  const comparison = computeComparisonMetrics(prodRun, candRun)
+  // Compute comparison metrics (now async to query real results)
+  const comparison = await computeComparisonMetrics(prodRun, candRun)
 
   // Store comparison
   const { data, error } = await supabase
@@ -166,12 +166,155 @@ export async function createVariantComparison(
 }
 
 /**
- * Compute comparison metrics between two evaluation runs
+ * Generate a comparison between two variants (for job pipeline integration)
+ * Optionally runs evaluations if not already done
  */
-function computeComparisonMetrics(
+export async function generateComparison(
+  productionVariantId: string,
+  candidateVariantId: string,
+  productionEvaluationRunId?: string,
+  candidateEvaluationRunId?: string,
+  options?: {
+    datasetType?: string
+    exportPackId?: string
+    benchmarkPackId?: string
+    createdBy?: string
+  }
+): Promise<VariantComparison> {
+  const supabase = await createClient()
+
+  // If evaluation run IDs are provided, use them directly
+  if (productionEvaluationRunId && candidateEvaluationRunId) {
+    return createVariantComparison({
+      productionVariantId,
+      candidateVariantId,
+      productionEvaluationRunId,
+      candidateEvaluationRunId,
+      datasetType: options?.datasetType || 'benchmark_pack',
+      exportPackId: options?.exportPackId,
+      benchmarkPackId: options?.benchmarkPackId,
+      createdBy: options?.createdBy,
+    })
+  }
+
+  // Otherwise, find the most recent completed evaluation runs for each variant
+  const { data: prodRuns } = await supabase
+    .from('evaluation_runs')
+    .select('id')
+    .eq('variant_id', productionVariantId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+
+  const { data: candRuns } = await supabase
+    .from('evaluation_runs')
+    .select('id')
+    .eq('variant_id', candidateVariantId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+
+  if (!prodRuns || prodRuns.length === 0) {
+    throw new Error(`No completed evaluation runs found for production variant ${productionVariantId}`)
+  }
+  if (!candRuns || candRuns.length === 0) {
+    throw new Error(`No completed evaluation runs found for candidate variant ${candidateVariantId}`)
+  }
+
+  return createVariantComparison({
+    productionVariantId,
+    candidateVariantId,
+    productionEvaluationRunId: prodRuns[0].id,
+    candidateEvaluationRunId: candRuns[0].id,
+    datasetType: options?.datasetType || 'benchmark_pack',
+    exportPackId: options?.exportPackId,
+    benchmarkPackId: options?.benchmarkPackId,
+    createdBy: options?.createdBy,
+  })
+}
+
+/**
+ * Compute example-level win/loss/unchanged counts from real evaluation results
+ * Compares per-example absolute errors between production and candidate runs
+ */
+async function computeExampleLevelCounts(
+  prodRunId: string,
+  candRunId: string
+): Promise<{ improved: number; regressed: number; unchanged: number; total: number }> {
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+
+  // Get production results indexed by buck_id
+  const { data: prodResults } = await supabase
+    .from('evaluation_results')
+    .select('buck_id, abs_error_gross')
+    .eq('evaluation_run_id', prodRunId)
+    .not('abs_error_gross', 'is', null)
+
+  // Get candidate results indexed by buck_id
+  const { data: candResults } = await supabase
+    .from('evaluation_results')
+    .select('buck_id, abs_error_gross')
+    .eq('evaluation_run_id', candRunId)
+    .not('abs_error_gross', 'is', null)
+
+  if (!prodResults || !candResults) {
+    return { improved: 0, regressed: 0, unchanged: 0, total: 0 }
+  }
+
+  // Build lookup maps
+  const prodMap = new Map<string, number>()
+  for (const r of prodResults) {
+    if (r.buck_id && r.abs_error_gross !== null) {
+      prodMap.set(r.buck_id, r.abs_error_gross)
+    }
+  }
+
+  const candMap = new Map<string, number>()
+  for (const r of candResults) {
+    if (r.buck_id && r.abs_error_gross !== null) {
+      candMap.set(r.buck_id, r.abs_error_gross)
+    }
+  }
+
+  // Compare examples that exist in both runs
+  let improved = 0
+  let regressed = 0
+  let unchanged = 0
+
+  // Threshold for "unchanged" (within 0.5 inches is considered unchanged)
+  const UNCHANGED_THRESHOLD = 0.5
+
+  for (const [buckId, prodError] of prodMap) {
+    const candError = candMap.get(buckId)
+    if (candError === undefined) continue
+
+    const errorDiff = prodError - candError // Positive means candidate is better
+
+    if (errorDiff > UNCHANGED_THRESHOLD) {
+      improved++ // Candidate has lower error
+    } else if (errorDiff < -UNCHANGED_THRESHOLD) {
+      regressed++ // Candidate has higher error
+    } else {
+      unchanged++ // Within threshold
+    }
+  }
+
+  return {
+    improved,
+    regressed,
+    unchanged,
+    total: improved + regressed + unchanged,
+  }
+}
+
+/**
+ * Compute comparison metrics between two evaluation runs using REAL example-level data
+ */
+async function computeComparisonMetrics(
   prodRun: EvaluationRun,
   candRun: EvaluationRun
-): Partial<VariantComparison> {
+): Promise<Partial<VariantComparison>> {
   const prodMetrics = prodRun.metrics
   const candMetrics = candRun.metrics
 
@@ -187,12 +330,12 @@ function computeComparisonMetrics(
 
   const p95Improvement = prodMetrics.p95_error - candMetrics.p95_error
 
-  // Win/loss analysis
-  // (In real implementation, would compare per-example results)
-  const sampleCount = Math.min(prodMetrics.sample_count, candMetrics.sample_count)
-  const improvedCount = Math.round(sampleCount * 0.4) // Simulated
-  const regressedCount = Math.round(sampleCount * 0.3)
-  const unchangedCount = sampleCount - improvedCount - regressedCount
+  // PATCH C: Derive win/loss/unchanged from REAL per-example evaluation results
+  const exampleCounts = await computeExampleLevelCounts(prodRun.id, candRun.id)
+  const sampleCount = exampleCounts.total || Math.min(prodMetrics.sample_count, candMetrics.sample_count)
+  const improvedCount = exampleCounts.improved
+  const regressedCount = exampleCounts.regressed
+  const unchangedCount = exampleCounts.unchanged
 
   // Confidence calibration (from interval coverage if available)
   const prodCalibration = prodRun.interval_coverage?.coverage_percent || null

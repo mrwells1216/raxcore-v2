@@ -239,73 +239,143 @@ interface ShadowScoringResult {
 }
 
 /**
- * Execute shadow scoring for a single variant
- * This is where you would plug in the actual scoring logic
+ * Execute shadow scoring for a single variant using the REAL scoring pipeline
+ * Runs the full scoring logic with variant-specific calibration profile
  */
 export async function executeShadowScoring(
   variant: ScoringVariant,
   context: ShadowScoringContext
 ): Promise<ShadowScoringResult> {
   const startTime = Date.now()
-
-  // For now, we simulate scoring with the variant's configuration
-  // In production, this would call the actual scoring pipeline with variant-specific config
-  
-  // Placeholder: In real implementation, this would:
-  // 1. Get the model version from variant.model_version_id
-  // 2. Get the calibration profile from variant.calibration_profile_id
-  // 3. Apply any pipeline_config settings
-  // 4. Run the full scoring pipeline
-  
-  // For demonstration, we'll compute a simulated result
   const prod = context.productionPrediction
-  
-  // Simulate slight variations based on variant config
-  const variation = (Math.random() - 0.5) * 4 // +/- 2 inches variation
-  const confVariation = (Math.random() - 0.5) * 10 // +/- 5% confidence variation
-  
-  const shadowGross = prod.predicted_gross !== null ? prod.predicted_gross + variation : null
-  const shadowNet = prod.predicted_net !== null ? prod.predicted_net + variation * 0.8 : null
-  const shadowConf = prod.confidence_percent !== null 
-    ? Math.max(0, Math.min(100, prod.confidence_percent + confVariation))
-    : null
+
+  // Import the real scoring pipeline
+  const { scoreBuck } = await import('@/lib/scoring/ai-service')
+
+  // Load the variant's calibration profile if specified
+  let calibrationProfile = null
+  if (variant.calibration_profile_id) {
+    const supabase = await createClient()
+    const { data } = await supabase
+      .from('calibration_profiles')
+      .select('*')
+      .eq('id', variant.calibration_profile_id)
+      .single()
+    calibrationProfile = data
+  }
+
+  // Build scoring input from buck data
+  const scoringInput = {
+    images: context.images.map(img => ({
+      imageUrl: img.image_url,
+      angleType: img.angle_type as 'front' | 'left' | 'right' | 'back',
+      width: img.width || 1024,
+      height: img.height || 768,
+    })),
+    state: context.buck.state,
+    rackType: context.buck.rack_type as 'typical' | 'non-typical',
+    earsFullyVisible: context.buck.ears_fully_visible ?? undefined,
+    sourceType: context.buck.source_type ?? undefined,
+    captureDevice: context.buck.capture_device ?? undefined,
+    mainFramePoints: context.buck.main_frame_points ?? undefined,
+    // Pass variant's calibration profile to override the default
+    calibrationProfile: calibrationProfile,
+    // Use a trace ID for logging
+    traceId: `shadow-${variant.id}-${context.buck.id}`,
+  }
+
+  // Run the real scoring pipeline with variant config
+  const shadowResult = await scoreBuck(scoringInput)
 
   const processingTimeMs = Date.now() - startTime
 
-  // Calculate diffs
-  const grossDiff = shadowGross !== null && prod.predicted_gross !== null
-    ? shadowGross - prod.predicted_gross
+  // Calculate diffs vs production
+  const grossDiff = shadowResult.predictedGross !== null && prod.predicted_gross !== null
+    ? shadowResult.predictedGross - prod.predicted_gross
     : null
-  const netDiff = shadowNet !== null && prod.predicted_net !== null
-    ? shadowNet - prod.predicted_net
+  const netDiff = shadowResult.predictedNet !== null && prod.predicted_net !== null
+    ? shadowResult.predictedNet - prod.predicted_net
     : null
-  const confidenceDiff = shadowConf !== null && prod.confidence_percent !== null
-    ? shadowConf - prod.confidence_percent
+  const confidenceDiff = shadowResult.confidencePercent !== null && prod.confidence_percent !== null
+    ? shadowResult.confidencePercent - prod.confidence_percent
     : null
 
-  // Calculate measurement-level diffs if available
+  // Calculate measurement-level diffs from real measurements
   let spreadDiff: number | null = null
   let beamDiff: number | null = null
   let tineDiff: number | null = null
   let massDiff: number | null = null
+  let geometryConsistencyDiff: number | null = null
 
-  if (prod.measurements) {
-    // Simulated measurement variations
-    spreadDiff = (Math.random() - 0.5) * 2
-    beamDiff = (Math.random() - 0.5) * 3
-    tineDiff = (Math.random() - 0.5) * 1.5
-    massDiff = (Math.random() - 0.5) * 0.5
+  const prodMeasurements = prod.measurements as Measurements | null
+  const shadowMeasurements = shadowResult.measurements
+
+  if (prodMeasurements && shadowMeasurements) {
+    // Spread diff
+    if (prodMeasurements.inside_spread !== null && shadowMeasurements.inside_spread !== null) {
+      spreadDiff = shadowMeasurements.inside_spread - prodMeasurements.inside_spread
+    }
+
+    // Beam diff (average of left+right)
+    const prodBeamAvg = ((prodMeasurements.main_beam_left || 0) + (prodMeasurements.main_beam_right || 0)) / 2
+    const shadowBeamAvg = ((shadowMeasurements.main_beam_left || 0) + (shadowMeasurements.main_beam_right || 0)) / 2
+    if (prodBeamAvg > 0 && shadowBeamAvg > 0) {
+      beamDiff = shadowBeamAvg - prodBeamAvg
+    }
+
+    // Tine diff (sum of G points)
+    const prodTineSum = [
+      prodMeasurements.g1_left, prodMeasurements.g1_right,
+      prodMeasurements.g2_left, prodMeasurements.g2_right,
+      prodMeasurements.g3_left, prodMeasurements.g3_right,
+      prodMeasurements.g4_left, prodMeasurements.g4_right,
+    ].filter((v): v is number => v !== null).reduce((a, b) => a + b, 0)
+    const shadowTineSum = [
+      shadowMeasurements.g1_left, shadowMeasurements.g1_right,
+      shadowMeasurements.g2_left, shadowMeasurements.g2_right,
+      shadowMeasurements.g3_left, shadowMeasurements.g3_right,
+      shadowMeasurements.g4_left, shadowMeasurements.g4_right,
+    ].filter((v): v is number => v !== null).reduce((a, b) => a + b, 0)
+    tineDiff = shadowTineSum - prodTineSum
+
+    // Mass diff (sum of H circumferences)
+    const prodMassSum = [
+      prodMeasurements.h1_left, prodMeasurements.h1_right,
+      prodMeasurements.h2_left, prodMeasurements.h2_right,
+      prodMeasurements.h3_left, prodMeasurements.h3_right,
+      prodMeasurements.h4_left, prodMeasurements.h4_right,
+    ].filter((v): v is number => v !== null).reduce((a, b) => a + b, 0)
+    const shadowMassSum = [
+      shadowMeasurements.h1_left, shadowMeasurements.h1_right,
+      shadowMeasurements.h2_left, shadowMeasurements.h2_right,
+      shadowMeasurements.h3_left, shadowMeasurements.h3_right,
+      shadowMeasurements.h4_left, shadowMeasurements.h4_right,
+    ].filter((v): v is number => v !== null).reduce((a, b) => a + b, 0)
+    massDiff = shadowMassSum - prodMassSum
+  }
+
+  // Geometry consistency diff from Phase 42 metadata
+  if (shadowResult.phase42Metadata?.geometry_consistency?.consistency_score !== undefined) {
+    // Compare with production geometry score if available in prediction metadata
+    const prodGeometryScore = (prod.metadata as Record<string, unknown> | null)?.phase42Metadata
+      ? ((prod.metadata as Record<string, unknown>).phase42Metadata as Record<string, unknown>)?.geometry_consistency
+        ? (((prod.metadata as Record<string, unknown>).phase42Metadata as Record<string, unknown>).geometry_consistency as Record<string, number>)?.consistency_score
+        : null
+      : null
+    if (typeof prodGeometryScore === 'number') {
+      geometryConsistencyDiff = shadowResult.phase42Metadata.geometry_consistency.consistency_score - prodGeometryScore
+    }
   }
 
   return {
     variantId: variant.id,
     prediction: {
-      predictedGross: shadowGross,
-      predictedNet: shadowNet,
-      confidencePercent: shadowConf,
-      errorBandLow: prod.error_band_low,
-      errorBandHigh: prod.error_band_high,
-      measurements: prod.measurements, // Would be recalculated in real impl
+      predictedGross: shadowResult.predictedGross,
+      predictedNet: shadowResult.predictedNet,
+      confidencePercent: shadowResult.confidencePercent,
+      errorBandLow: shadowResult.errorBandLow,
+      errorBandHigh: shadowResult.errorBandHigh,
+      measurements: shadowMeasurements,
       processingTimeMs,
     },
     diffs: {
@@ -316,7 +386,7 @@ export async function executeShadowScoring(
       beamDiff,
       tineDiff,
       massDiff,
-      geometryConsistencyDiff: null, // Would be calculated from actual geometry analysis
+      geometryConsistencyDiff,
     },
   }
 }
@@ -521,12 +591,173 @@ export async function getShadowStats(variantId: string): Promise<{
 }
 
 // ============================================================================
+// BATCH SHADOW SCORING (for job pipeline)
+// ============================================================================
+
+interface ProcessShadowBatchOptions {
+  limit?: number
+}
+
+interface ProcessShadowBatchResult {
+  processed: number
+  skipped: number
+  errors: number
+  results: Array<{
+    predictionId: string
+    variantId: string
+    grossDiff: number | null
+    success: boolean
+    error?: string
+  }>
+}
+
+/**
+ * Process a batch of recent predictions for shadow scoring
+ * Called by the sandbox_shadow_batch job
+ */
+export async function processShadowBatch(
+  options: ProcessShadowBatchOptions = {}
+): Promise<ProcessShadowBatchResult> {
+  const limit = options.limit ?? 50
+  const supabase = await createClient()
+  
+  const result: ProcessShadowBatchResult = {
+    processed: 0,
+    skipped: 0,
+    errors: 0,
+    results: [],
+  }
+
+  // Get active shadow configs
+  const configs = await getActiveShadowConfigs()
+  if (configs.length === 0) {
+    return result
+  }
+
+  // Get recent predictions that haven't been shadow scored yet
+  // Look for predictions from the last hour that don't have shadow_predictions
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  
+  const { data: recentPredictions, error: predError } = await supabase
+    .from('predictions')
+    .select(`
+      id,
+      buck_id,
+      predicted_gross,
+      predicted_net,
+      confidence_percent,
+      error_band_low,
+      error_band_high,
+      measurements,
+      metadata,
+      bucks!inner (
+        id,
+        state,
+        rack_type,
+        source_type,
+        capture_device,
+        ears_fully_visible,
+        main_frame_points
+      )
+    `)
+    .gte('created_at', oneHourAgo)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (predError) {
+    console.error('Failed to get recent predictions:', predError)
+    return result
+  }
+
+  if (!recentPredictions || recentPredictions.length === 0) {
+    return result
+  }
+
+  // Get production variant
+  const productionVariant = await getProductionVariant()
+
+  // Process each prediction
+  for (const pred of recentPredictions) {
+    // Check if already shadow scored
+    const { count } = await supabase
+      .from('shadow_predictions')
+      .select('*', { count: 'exact', head: true })
+      .eq('production_prediction_id', pred.id)
+
+    if ((count || 0) > 0) {
+      result.skipped++
+      continue
+    }
+
+    const buck = pred.bucks as unknown as Buck
+    if (!buck) {
+      result.skipped++
+      continue
+    }
+
+    // Get buck images
+    const { data: images } = await supabase
+      .from('buck_images')
+      .select('*')
+      .eq('buck_id', buck.id)
+      .order('order_index', { ascending: true })
+
+    if (!images || images.length === 0) {
+      result.skipped++
+      continue
+    }
+
+    // Build context
+    const context: ShadowScoringContext = {
+      buck,
+      images: images as BuckImage[],
+      productionPrediction: pred as unknown as Prediction,
+      productionVariant,
+    }
+
+    // Determine which configs apply
+    const decision = await shouldRunShadowScoring(buck, pred.id)
+    if (!decision.shouldRunShadow) {
+      result.skipped++
+      continue
+    }
+
+    // Run shadow scoring
+    try {
+      const shadowResults = await runShadowScoring(context, decision.configsToRun)
+      
+      for (const shadowPred of shadowResults) {
+        result.results.push({
+          predictionId: pred.id,
+          variantId: shadowPred.shadow_variant_id,
+          grossDiff: shadowPred.gross_diff,
+          success: true,
+        })
+      }
+      
+      result.processed++
+    } catch (err) {
+      result.errors++
+      result.results.push({
+        predictionId: pred.id,
+        variantId: 'unknown',
+        grossDiff: null,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return result
+}
+
+// ============================================================================
 // MAIN ENTRY POINT
 // ============================================================================
 
 /**
- * Main shadow scoring entry point - call this after production scoring
- */
+* Main shadow scoring entry point - call this after production scoring
+*/
 export async function maybeShadowScore(
   buck: Buck,
   images: BuckImage[],

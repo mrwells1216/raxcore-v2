@@ -281,14 +281,7 @@ async function getDatasetExamples(
   return []
 }
 
-/**
- * Simulate scoring for an example with a variant
- * In production, this would call the actual scoring pipeline
- */
-async function scoreExample(
-  variant: ScoringVariant,
-  example: EvaluationExample
-): Promise<{
+interface ScoreExampleResult {
   predictedGross: number
   predictedNet: number | null
   confidencePercent: number
@@ -300,39 +293,146 @@ async function scoreExample(
   intervalWidth: number
   geometryConsistencyScore: number
   processingTimeMs: number
-}> {
+}
+
+/**
+ * Score an example using the REAL scoring pipeline with variant-specific config
+ */
+async function scoreExample(
+  variant: ScoringVariant,
+  example: EvaluationExample,
+  calibrationProfile: unknown | null
+): Promise<ScoreExampleResult> {
+  const supabase = await createClient()
   const startTime = Date.now()
 
-  // Simulate prediction with slight variation
-  // In real implementation, this would call actual scoring with variant config
-  const baseVariation = (Math.random() - 0.5) * 8 // +/- 4 inches
-  const predictedGross = example.groundTruthGross + baseVariation
-  const predictedNet = example.groundTruthNet !== null
-    ? example.groundTruthNet + baseVariation * 0.9
-    : null
+  // Import the real scoring pipeline
+  const { scoreBuck } = await import('@/lib/scoring/ai-service')
 
-  const confidencePercent = 60 + Math.random() * 35 // 60-95%
-  
-  // Simulate measurement-level errors
-  const spreadError = (Math.random() - 0.5) * 3
-  const beamError = (Math.random() - 0.5) * 4
-  const tineError = (Math.random() - 0.5) * 2
-  const massError = (Math.random() - 0.5) * 1
+  // Get buck data and images for this example
+  const { data: buck } = await supabase
+    .from('bucks')
+    .select('*')
+    .eq('id', example.buckId)
+    .single()
 
-  // Simulate interval coverage
-  const intervalWidth = 8 + Math.random() * 8 // 8-16 inch interval
-  const actualError = Math.abs(predictedGross - example.groundTruthGross)
+  if (!buck) {
+    throw new Error(`Buck ${example.buckId} not found`)
+  }
+
+  const { data: images } = await supabase
+    .from('buck_images')
+    .select('*')
+    .eq('buck_id', example.buckId)
+    .order('order_index', { ascending: true })
+
+  if (!images || images.length === 0) {
+    throw new Error(`No images found for buck ${example.buckId}`)
+  }
+
+  // Build scoring input
+  const scoringInput = {
+    images: images.map(img => ({
+      imageUrl: img.image_url,
+      angleType: (img.angle_type || 'front') as 'front' | 'left' | 'right' | 'back',
+      width: img.width || 1024,
+      height: img.height || 768,
+    })),
+    state: buck.state,
+    rackType: buck.rack_type as 'typical' | 'non-typical',
+    earsFullyVisible: buck.ears_fully_visible ?? undefined,
+    sourceType: buck.source_type ?? undefined,
+    captureDevice: buck.capture_device ?? undefined,
+    mainFramePoints: buck.main_frame_points ?? undefined,
+    // Pass variant's calibration profile
+    calibrationProfile: calibrationProfile,
+    traceId: `eval-${variant.id}-${example.buckId}`,
+  }
+
+  // Run the real scoring pipeline
+  const scoringResult = await scoreBuck(scoringInput)
+  const processingTimeMs = Date.now() - startTime
+
+  // Calculate measurement-level errors against ground truth
+  // We need the ground truth measurements - fetch from training_examples
+  const { data: trainingExample } = await supabase
+    .from('training_examples')
+    .select('ground_truth_measurements')
+    .eq('id', example.trainingExampleId)
+    .single()
+
+  const gtMeasurements = trainingExample?.ground_truth_measurements as Record<string, number | null> | null
+  const predMeasurements = scoringResult.measurements
+
+  let spreadError: number | null = null
+  let beamError: number | null = null
+  let tineError: number | null = null
+  let massError: number | null = null
+
+  if (gtMeasurements && predMeasurements) {
+    // Spread error
+    if (gtMeasurements.inside_spread !== null && predMeasurements.inside_spread !== null) {
+      spreadError = predMeasurements.inside_spread - (gtMeasurements.inside_spread as number)
+    }
+
+    // Beam error (average of left+right)
+    const gtBeamL = gtMeasurements.main_beam_left as number | null
+    const gtBeamR = gtMeasurements.main_beam_right as number | null
+    if (gtBeamL !== null && gtBeamR !== null && predMeasurements.main_beam_left !== null && predMeasurements.main_beam_right !== null) {
+      const gtBeamAvg = (gtBeamL + gtBeamR) / 2
+      const predBeamAvg = (predMeasurements.main_beam_left + predMeasurements.main_beam_right) / 2
+      beamError = predBeamAvg - gtBeamAvg
+    }
+
+    // Tine error (sum of G points)
+    const gtTineFields = ['g1_left', 'g1_right', 'g2_left', 'g2_right', 'g3_left', 'g3_right', 'g4_left', 'g4_right']
+    let gtTineSum = 0
+    let predTineSum = 0
+    let hasTineData = false
+    for (const f of gtTineFields) {
+      const gtVal = gtMeasurements[f] as number | null
+      const predVal = predMeasurements[f as keyof typeof predMeasurements] as number | null
+      if (gtVal !== null && predVal !== null) {
+        gtTineSum += gtVal
+        predTineSum += predVal
+        hasTineData = true
+      }
+    }
+    if (hasTineData) {
+      tineError = predTineSum - gtTineSum
+    }
+
+    // Mass error (sum of H circumferences)
+    const gtMassFields = ['h1_left', 'h1_right', 'h2_left', 'h2_right', 'h3_left', 'h3_right', 'h4_left', 'h4_right']
+    let gtMassSum = 0
+    let predMassSum = 0
+    let hasMassData = false
+    for (const f of gtMassFields) {
+      const gtVal = gtMeasurements[f] as number | null
+      const predVal = predMeasurements[f as keyof typeof predMeasurements] as number | null
+      if (gtVal !== null && predVal !== null) {
+        gtMassSum += gtVal
+        predMassSum += predVal
+        hasMassData = true
+      }
+    }
+    if (hasMassData) {
+      massError = predMassSum - gtMassSum
+    }
+  }
+
+  // Calculate interval coverage
+  const intervalWidth = scoringResult.errorBandHigh - scoringResult.errorBandLow
+  const actualError = Math.abs(scoringResult.predictedGross - example.groundTruthGross)
   const withinInterval = actualError <= intervalWidth / 2
 
-  // Simulate geometry consistency
-  const geometryConsistencyScore = 0.5 + Math.random() * 0.5 // 0.5-1.0
-
-  const processingTimeMs = Date.now() - startTime + Math.random() * 100 // Add simulated processing time
+  // Get geometry consistency score from Phase 42 metadata
+  const geometryConsistencyScore = scoringResult.phase42Metadata?.geometry_consistency?.consistency_score ?? 0.7
 
   return {
-    predictedGross,
-    predictedNet,
-    confidencePercent,
+    predictedGross: scoringResult.predictedGross,
+    predictedNet: scoringResult.predictedNet,
+    confidencePercent: scoringResult.confidencePercent,
     spreadError,
     beamError,
     tineError,
@@ -345,7 +445,7 @@ async function scoreExample(
 }
 
 /**
- * Execute a full evaluation run
+ * Execute a full evaluation run using the REAL scoring pipeline
  */
 export async function executeEvaluationRun(runId: string): Promise<EvaluationRun> {
   const supabase = await createClient()
@@ -357,6 +457,17 @@ export async function executeEvaluationRun(runId: string): Promise<EvaluationRun
   // Get the variant
   const variant = await getScoringVariant(run.variant_id)
   if (!variant) throw new Error('Variant not found')
+
+  // Load the variant's calibration profile if specified
+  let calibrationProfile = null
+  if (variant.calibration_profile_id) {
+    const { data } = await supabase
+      .from('calibration_profiles')
+      .select('*')
+      .eq('id', variant.calibration_profile_id)
+      .single()
+    calibrationProfile = data
+  }
 
   // Update status to running
   await updateEvaluationRunStatus(runId, 'running')
@@ -376,10 +487,10 @@ export async function executeEvaluationRun(runId: string): Promise<EvaluationRun
     const results: EvaluationResult[] = []
     let processedCount = 0
 
-    // Score each example
+    // Score each example using the real pipeline
     for (const example of examples) {
       try {
-        const scored = await scoreExample(variant, example)
+        const scored = await scoreExample(variant, example, calibrationProfile)
 
         const errorGross = scored.predictedGross - example.groundTruthGross
         const errorNet = scored.predictedNet !== null && example.groundTruthNet !== null
@@ -799,4 +910,49 @@ export async function getWorstPredictions(
     ascending: false,
   })
   return data
+}
+
+/**
+ * Run evaluation with progress callback (for job pipeline integration)
+ * This is a wrapper around executeEvaluationRun with progress reporting
+ */
+export async function runEvaluation(
+  runId: string,
+  onProgress?: (progress: number) => void
+): Promise<EvaluationRun> {
+  const supabase = await createClient()
+
+  // Get initial state
+  const run = await getEvaluationRun(runId)
+  if (!run) throw new Error('Evaluation run not found')
+
+  // Report initial progress
+  if (onProgress) onProgress(0)
+
+  // Set up progress polling if callback provided
+  let pollInterval: ReturnType<typeof setInterval> | null = null
+  if (onProgress) {
+    pollInterval = setInterval(async () => {
+      const currentRun = await getEvaluationRun(runId)
+      if (currentRun && currentRun.total_examples > 0) {
+        const progress = currentRun.processed_examples / currentRun.total_examples
+        onProgress(progress)
+      }
+    }, 1000) // Poll every second
+  }
+
+  try {
+    // Execute the evaluation
+    const result = await executeEvaluationRun(runId)
+
+    // Final progress
+    if (onProgress) onProgress(1)
+
+    return result
+  } finally {
+    // Clean up polling
+    if (pollInterval) {
+      clearInterval(pollInterval)
+    }
+  }
 }
