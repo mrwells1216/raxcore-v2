@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
-import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary } from '@/lib/types'
+import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 import { 
   createBuck, 
   addBuckImages, 
@@ -75,6 +75,26 @@ export async function POST(request: Request) {
     const harvestDate = formData.get('harvest_date') as string | null
     const intakeQualityRaw = formData.get('intake_quality') as string | null
     const userId = formData.get('user_id') as string | null
+    
+    // Phase 54: Abnormal/Irregular Points
+    const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
+    const nonTypicalTraitsPresent = formData.get('non_typical_traits_present') as YesNoUnsure | null
+    const estimatedIrregularCountRaw = formData.get('estimated_irregular_points_count') as string | null
+    const abnormalPointNotes = formData.get('abnormal_point_notes') as string | null
+    const abnormalTagsRaw = formData.get('abnormal_point_tags') as string | null
+    
+    // Parse abnormal point count
+    const estimatedIrregularPointsCount = estimatedIrregularCountRaw ? Number(estimatedIrregularCountRaw) : undefined
+    
+    // Parse abnormal point tags
+    let abnormalPointTags: AbnormalPointTag[] | undefined
+    if (abnormalTagsRaw) {
+      try {
+        abnormalPointTags = JSON.parse(abnormalTagsRaw)
+      } catch {
+        // Ignore parse errors
+      }
+    }
     
     // Parse intake quality summary if provided
     let intakeQuality: IntakeQualitySummary | null = null
@@ -216,7 +236,6 @@ export async function POST(request: Request) {
     const buckSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 
   // Create buck record in Supabase (pass all fields from wizard)
-  console.log('[v0] Calling createBuck with:', { state, rackType, userId, harvestMethod, sourceType, earsFullyVisible })
   const buck = await createBuck({
     state: state,
     rackType: rackType,
@@ -225,6 +244,12 @@ export async function POST(request: Request) {
     sourceType: sourceType || undefined,
     earsFullyVisible: earsFullyVisible,
     notes: notes || undefined,
+    // Phase 54: Abnormal/Irregular Points
+    irregularPointsPresent: irregularPointsPresent || undefined,
+    nonTypicalTraitsPresent: nonTypicalTraitsPresent || undefined,
+    estimatedIrregularPointsCount: estimatedIrregularPointsCount,
+    abnormalPointNotes: abnormalPointNotes || undefined,
+    abnormalPointTags: abnormalPointTags,
   })
 
     // Store image URLs (using data URLs or external URLs for now)

@@ -95,6 +95,24 @@ export const CAPTURE_DEVICES = [
 
 export const MAIN_FRAME_OPTIONS = [8, 9, 10, 11, 12, 13, 14]
 
+// Phase 54: Abnormal/Irregular Point Tags
+export const ABNORMAL_POINT_TAGS = [
+  { value: 'drop_tine', label: 'Drop Tine', description: 'A tine that grows downward from the main beam' },
+  { value: 'sticker_point', label: 'Sticker Point', description: 'A small abnormal point growing from another point or beam' },
+  { value: 'split_tine', label: 'Split Tine', description: 'A tine that splits into two or more points' },
+  { value: 'extra_abnormal_growth', label: 'Extra Abnormal Growth', description: 'Additional growth beyond normal tine structure' },
+  { value: 'palmation_like_growth', label: 'Palmation-like Growth', description: 'Flat, palm-like antler growth similar to moose' },
+  { value: 'kicker_point', label: 'Kicker Point', description: 'A point growing from the base/burr area' },
+  { value: 'inline_point', label: 'Inline Point', description: 'A point growing inline with the main beam' },
+  { value: 'unknown_abnormality', label: 'Other / Unknown', description: 'Other abnormal features not listed' },
+] as const
+
+export const YES_NO_UNSURE_OPTIONS = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+  { value: 'unsure', label: 'Unsure' },
+] as const
+
 export const ANGLE_TYPES = [
   { value: 'front', label: 'Front' },
   { value: 'left', label: 'Left Side' },

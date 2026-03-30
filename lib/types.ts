@@ -9,6 +9,27 @@ export type CaptureDevice = 'iphone' | 'android' | 'digital_camera' | 'photo_of_
 export type BuckStatus = 'pending' | 'processing' | 'completed' | 'failed'
 export type ScoreSource = 'official_scorer' | 'self_measured' | 'user_reported' | 'estimated'
 
+// Phase 54: Abnormal/Irregular Point Types
+export type AbnormalPointTag = 
+  | 'drop_tine'
+  | 'sticker_point'
+  | 'split_tine'
+  | 'extra_abnormal_growth'
+  | 'palmation_like_growth'
+  | 'kicker_point'
+  | 'inline_point'
+  | 'unknown_abnormality'
+
+export type YesNoUnsure = 'yes' | 'no' | 'unsure'
+
+export interface AbnormalPointsData {
+  irregular_points_present: YesNoUnsure
+  non_typical_traits_present: YesNoUnsure
+  estimated_irregular_points_count?: number
+  abnormal_point_notes?: string
+  abnormal_point_tags: AbnormalPointTag[]
+}
+
 export interface Buck {
   id: string
   user_id: string | null
@@ -22,6 +43,12 @@ export interface Buck {
   main_frame_points: number | null
   notes: string | null
   status: BuckStatus
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present: YesNoUnsure | null
+  non_typical_traits_present: YesNoUnsure | null
+  estimated_irregular_points_count: number | null
+  abnormal_point_notes: string | null
+  abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
 }
@@ -271,6 +298,12 @@ export interface ScoringFormData {
   harvest_year?: number
   main_frame_points?: number
   notes?: string
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present?: YesNoUnsure
+  non_typical_traits_present?: YesNoUnsure
+  estimated_irregular_points_count?: number
+  abnormal_point_notes?: string
+  abnormal_point_tags?: AbnormalPointTag[]
 }
 
 export interface GroundTruthFormData {
@@ -4385,6 +4418,15 @@ export interface TrainingPackManifestItem {
     pattern_name: string
     severity: number
   }>
+  
+  // Phase 54: Abnormal/Irregular Points
+  abnormal_points: {
+    irregular_points_present: YesNoUnsure | null
+    non_typical_traits_present: YesNoUnsure | null
+    estimated_irregular_points_count: number | null
+    abnormal_point_notes: string | null
+    abnormal_point_tags: AbnormalPointTag[]
+  } | null
 }
 
 /** Statistics for a training pack */

@@ -26,6 +26,7 @@ export type SupervisionType =
   | 'admin_confirmed_failure_cause'
   | 'admin_rejected_failure_cause'
   | 'hard_case_promoted_for_learning'
+  | 'abnormal_points_reported'  // Phase 54
 
 export type FailureCauseLabel =
   | 'scale_reference_failure'
@@ -43,6 +44,7 @@ export type FailureCauseLabel =
   | 'confidence_underestimate'
   | 'segment_calibration_miss'
   | 'structural_solver_overcorrection'
+  | 'abnormal_points_unscored'  // Phase 54: User reported abnormal points not in current scoring
 
 export type LabelStatus = 'pending' | 'confirmed' | 'rejected' | 'needs_review'
 

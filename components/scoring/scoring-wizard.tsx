@@ -137,6 +137,17 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       }
       if (data.notes) apiFormData.append('notes', data.notes)
       
+      // Phase 54: Abnormal/Irregular Points
+      if (data.irregular_points_present) apiFormData.append('irregular_points_present', data.irregular_points_present)
+      if (data.non_typical_traits_present) apiFormData.append('non_typical_traits_present', data.non_typical_traits_present)
+      if (data.estimated_irregular_points_count !== undefined) {
+        apiFormData.append('estimated_irregular_points_count', String(data.estimated_irregular_points_count))
+      }
+      if (data.abnormal_point_notes) apiFormData.append('abnormal_point_notes', data.abnormal_point_notes)
+      if (data.abnormal_point_tags?.length) {
+        apiFormData.append('abnormal_point_tags', JSON.stringify(data.abnormal_point_tags))
+      }
+      
       // Pass authenticated user ID for notifications
       if (userId) apiFormData.append('user_id', userId)
 

@@ -13,6 +13,8 @@ import type {
   TrainingPackExport,
   AuxiliaryLabel,
   TrainingSplitType,
+  YesNoUnsure,
+  AbnormalPointTag,
 } from '@/lib/types'
 import { getTrainingPackById, getTrainingPackItems } from './service'
 import { getLabelsForItem } from '@/lib/auxiliary-labels/service'
@@ -29,10 +31,22 @@ export async function buildManifestItem(
 ): Promise<TrainingPackManifestItem> {
   const supabase = await createClient()
   
-  // Get prediction details
+  // Get prediction details with full buck metadata including abnormal points
   const { data: prediction } = await supabase
     .from('predictions')
-    .select('*, bucks(state, rack_type, source_type)')
+    .select(`
+      *,
+      bucks(
+        state, 
+        rack_type, 
+        source_type,
+        irregular_points_present,
+        non_typical_traits_present,
+        estimated_irregular_points_count,
+        abnormal_point_notes,
+        abnormal_point_tags
+      )
+    `)
     .eq('id', item.prediction_id)
     .single()
   
@@ -153,6 +167,18 @@ export async function buildManifestItem(
     ? prediction.predicted_gross - groundTruth.gross_score
     : null
   
+  // Extract buck metadata including abnormal points
+  const buckData = prediction?.bucks as {
+    state?: string
+    rack_type?: string
+    source_type?: string
+    irregular_points_present?: YesNoUnsure | null
+    non_typical_traits_present?: YesNoUnsure | null
+    estimated_irregular_points_count?: number | null
+    abnormal_point_notes?: string | null
+    abnormal_point_tags?: AbnormalPointTag[] | null
+  } | null
+
   return {
     item_id: item.id,
     buck_id: item.buck_id,
@@ -181,6 +207,14 @@ export async function buildManifestItem(
       status: l.status,
     })),
     hard_case_patterns: hardCasePatterns,
+    // Phase 54: Abnormal/Irregular Points metadata
+    abnormal_points: buckData?.irregular_points_present || buckData?.non_typical_traits_present || buckData?.abnormal_point_tags?.length ? {
+      irregular_points_present: buckData.irregular_points_present || null,
+      non_typical_traits_present: buckData.non_typical_traits_present || null,
+      estimated_irregular_points_count: buckData.estimated_irregular_points_count || null,
+      abnormal_point_notes: buckData.abnormal_point_notes || null,
+      abnormal_point_tags: buckData.abnormal_point_tags || [],
+    } : null,
   }
 }
 

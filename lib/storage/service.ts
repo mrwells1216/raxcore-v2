@@ -3,7 +3,9 @@ import type {
   ScoringSubmission, 
   TrainingExample, 
   ScoringResult,
-  GroundTruthData 
+  GroundTruthData,
+  YesNoUnsure,
+  AbnormalPointTag
 } from '@/lib/types'
 
 // ============================================================================
@@ -20,6 +22,12 @@ export interface CreateBuckParams {
   sourceType?: 'live_deer' | 'mount' | 'trail_cam' | 'harvest_photo' | 'other' | null
   earsFullyVisible?: boolean
   notes?: string
+  // Phase 54: Abnormal/Irregular Points
+  irregularPointsPresent?: YesNoUnsure
+  nonTypicalTraitsPresent?: YesNoUnsure
+  estimatedIrregularPointsCount?: number
+  abnormalPointNotes?: string
+  abnormalPointTags?: AbnormalPointTag[]
 }
 
 export interface BuckRecord {
@@ -32,6 +40,12 @@ export interface BuckRecord {
   ears_fully_visible: boolean | null
   notes: string | null
   status: 'pending' | 'processing' | 'completed' | 'failed'
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present: YesNoUnsure | null
+  non_typical_traits_present: YesNoUnsure | null
+  estimated_irregular_points_count: number | null
+  abnormal_point_notes: string | null
+  abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
 }
@@ -61,6 +75,12 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
     ears_fully_visible: params.earsFullyVisible ?? null,
     notes: params.notes || null,
     status: 'pending' as const,
+    // Phase 54: Abnormal/Irregular Points
+    irregular_points_present: params.irregularPointsPresent || null,
+    non_typical_traits_present: params.nonTypicalTraitsPresent || null,
+    estimated_irregular_points_count: params.estimatedIrregularPointsCount ?? null,
+    abnormal_point_notes: params.abnormalPointNotes || null,
+    abnormal_point_tags: params.abnormalPointTags?.length ? params.abnormalPointTags : null,
   }
   
   // Debug: Log final payload

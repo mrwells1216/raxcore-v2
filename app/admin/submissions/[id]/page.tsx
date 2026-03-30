@@ -25,7 +25,8 @@ import { Progress } from '@/components/ui/progress'
 import { getBuckBundle } from '@/lib/storage/service'
 import { LearningExplainabilityPanel } from '@/components/admin/learning-explainability-panel'
 import { IntakeQualityDisplay, IntakeQualityBadge } from '@/components/scoring/intake-quality-display'
-import type { IntakeQualitySummary } from '@/lib/types'
+import { AbnormalPointsDisplay } from '@/components/scoring/abnormal-points-display'
+import type { IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 
 export default async function AdminSubmissionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -251,6 +252,20 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
               <div className="pt-2 border-t border-border">
                 <p className="text-muted-foreground text-xs mb-1">Notes</p>
                 <p className="text-sm">{buck.notes}</p>
+              </div>
+            )}
+
+            {/* Phase 54: Abnormal Points Display */}
+            {(buck.irregular_points_present || buck.non_typical_traits_present || buck.abnormal_point_tags?.length) && (
+              <div className="pt-2 border-t border-border">
+                <AbnormalPointsDisplay
+                  irregularPointsPresent={buck.irregular_points_present as YesNoUnsure}
+                  nonTypicalTraitsPresent={buck.non_typical_traits_present as YesNoUnsure}
+                  estimatedIrregularPointsCount={buck.estimated_irregular_points_count}
+                  abnormalPointNotes={buck.abnormal_point_notes}
+                  abnormalPointTags={buck.abnormal_point_tags as AbnormalPointTag[]}
+                  variant="inline"
+                />
               </div>
             )}
           </CardContent>

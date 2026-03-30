@@ -19,6 +19,7 @@ import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-displ
 import { BuckLocationLink } from '@/components/map/buck-location-link'
 import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
+import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -223,6 +224,16 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           </Card>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Phase 54: Abnormal/Irregular Points Display */}
+      <AbnormalPointsDisplay
+        irregularPointsPresent={formData.irregular_points_present}
+        nonTypicalTraitsPresent={formData.non_typical_traits_present}
+        estimatedIrregularPointsCount={formData.estimated_irregular_points_count}
+        abnormalPointNotes={formData.abnormal_point_notes}
+        abnormalPointTags={formData.abnormal_point_tags}
+        variant="card"
+      />
 
       {/* Precision Pass - Phase 50 */}
       <PrecisionPassCard predictionId={prediction.id} />
