@@ -48,7 +48,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          buck_id: result.buck.id,
+          buck_id: result.buck?.id ?? null,
           prediction_id: prediction.id,
           ...data,
         }),
@@ -180,7 +180,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-3">
             {result.buck?.id ? (
-              <Link href={`/render/${result.buck.id}`} className="block">
+              <Link href={`/render/${result.buck?.id}`} className="block">
                 <Button variant="outline" className="w-full min-h-[48px] gap-2">
                   <Box className="h-4 w-4" />
                   View 3D Model
@@ -261,8 +261,8 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         </CardHeader>
         <CardContent>
           <BuckLocationLink 
-            buckId={result.buck.id} 
-            currentPropertyId={result.buck.property_id}
+            buckId={result.buck?.id ?? ''}
+            currentPropertyId={result.buck?.property_id ?? null}
             compact
           />
         </CardContent>
