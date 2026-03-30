@@ -179,12 +179,19 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-3">
-            <Link href={`/render/${result.buck.id}`} className="block">
-              <Button variant="outline" className="w-full min-h-[48px] gap-2">
+            {result.buck?.id ? (
+              <Link href={`/render/${result.buck.id}`} className="block">
+                <Button variant="outline" className="w-full min-h-[48px] gap-2">
+                  <Box className="h-4 w-4" />
+                  View 3D Model
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="outline" className="w-full min-h-[48px] gap-2" disabled>
                 <Box className="h-4 w-4" />
                 View 3D Model
               </Button>
-            </Link>
+            )}
             <Button 
               variant="outline" 
               className="min-h-[48px] gap-2"

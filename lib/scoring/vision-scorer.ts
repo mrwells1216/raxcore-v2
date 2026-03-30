@@ -6,6 +6,7 @@
 
 import { generateObject } from 'ai'
 import { gateway } from '@ai-sdk/gateway'
+import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
@@ -29,8 +30,27 @@ import {
 } from './fallback-handler'
 import { logEventFireForget } from '@/lib/monitoring/service'
 
-// Vision model to use - Gemini 2.0 Flash has strong vision capabilities
-const VISION_MODEL = 'google/gemini-2.0-flash-001'
+// Provider configuration - check env for which path to use
+const SCORING_PROVIDER = process.env.SCORING_PROVIDER || 'gateway'
+
+// Vision models for each provider
+const GATEWAY_VISION_MODEL = 'google/gemini-2.0-flash-001'
+const OPENAI_VISION_MODEL = 'gpt-4o' // GPT-4o has strong vision capabilities
+
+// Get the model instance based on provider setting
+function getVisionModel() {
+  if (SCORING_PROVIDER === 'openai') {
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      console.warn('[vision-scorer] SCORING_PROVIDER=openai but OPENAI_API_KEY not set, falling back to gateway')
+      return { model: gateway(GATEWAY_VISION_MODEL), provider: 'gateway', modelName: GATEWAY_VISION_MODEL }
+    }
+    const openai = createOpenAI({ apiKey })
+    return { model: openai(OPENAI_VISION_MODEL), provider: 'openai', modelName: OPENAI_VISION_MODEL }
+  }
+  // Default: use Vercel AI Gateway
+  return { model: gateway(GATEWAY_VISION_MODEL), provider: 'gateway', modelName: GATEWAY_VISION_MODEL }
+}
 
 export interface VisionImageInput {
   imageUrl: string
@@ -236,6 +256,9 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   const startTime = Date.now()
   const visionErrors: VisionRuntimeError[] = []
 
+  // Get the vision model configuration early for logging
+  const visionConfig = getVisionModel()
+  
   // Phase 39: Log vision call started
   logEventFireForget({
     traceId: input.traceId,
@@ -244,7 +267,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     route: '/api/score',
     status: 'info',
     imagesCount: input.images?.length ?? 0,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionConfig.provider}/${visionConfig.modelName}`,
   })
 
   // Phase 24: Comprehensive image validation
@@ -305,13 +328,18 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   // Use only valid images for vision call
   const validImages = imageValidation.validImageIndices.map(i => input.images[i])
 
+  // Use vision config from earlier
+  const { model: visionModel, provider: visionProvider, modelName: visionModelName } = visionConfig
+  
+  console.log(`[vision-scorer] Using provider: ${visionProvider}, model: ${visionModelName}`)
+
   // Phase 24: Execute vision call with runtime hardening
   const visionCallResult = await executeWithRuntime(async () => {
     const prompt = buildVisionPrompt({ ...input, images: validImages })
     const imageContent = prepareImageContent(validImages)
     
     const { object: visionOutput } = await generateObject({
-      model: gateway(VISION_MODEL),
+      model: visionModel,
       schema: VisionOutputSchema,
       messages: [
         {
@@ -346,6 +374,8 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     const fallbackDecision = makeFallbackDecision(runtimeError, visionCallResult.metadata, imageValidation)
     
     console.error('Vision scoring failed:', {
+      provider: visionProvider,
+      model: visionModelName,
       error: runtimeError.type,
       message: runtimeError.message,
       attempts: visionCallResult.metadata.totalAttempts,
@@ -365,9 +395,9 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       durationMs: visionCallResult.metadata.totalTimeMs,
       retryCount: visionCallResult.metadata.totalAttempts - 1,
       imagesCount: input.images?.length ?? 0,
-      modelUsed: VISION_MODEL,
+      modelUsed: `${visionProvider}/${visionModelName}`,
       fallbackUsed: true,
-      metadata: { timedOut: visionCallResult.metadata.timedOut },
+      metadata: { timedOut: visionCallResult.metadata.timedOut, provider: visionProvider },
     })
 
     return {
@@ -407,7 +437,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       errorType: 'malformed_response',
       errorMessage: outputValidation.issues.join('; '),
       durationMs: visionCallResult.metadata.totalTimeMs,
-      modelUsed: VISION_MODEL,
+      modelUsed: `${visionProvider}/${visionModelName}`,
       fallbackUsed: true,
     })
 
@@ -462,22 +492,25 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     route: '/api/score',
     status: 'success',
     durationMs: processingTimeMs,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionProvider}/${visionModelName}`,
     retryCount: visionCallResult.metadata.totalAttempts - 1,
     imagesCount: validImages.length,
     metadata: {
       confidence: visionOutput.confidence_percent,
       grossScore: visionOutput.gross_score,
       outputIssues: outputValidation.issues.length,
+      provider: visionProvider,
     },
   })
+
+  console.log(`[vision-scorer] Vision scoring successful via ${visionProvider}`)
 
   // Success!
   return {
     success: true,
     output: visionOutput,
     processingTimeMs,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionProvider}/${visionModelName}`,
     runtimeMetadata: visionCallResult.metadata,
     imageValidation,
   }
