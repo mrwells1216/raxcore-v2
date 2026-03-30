@@ -753,6 +753,79 @@ export interface PredictionWithIntakeQuality extends Prediction {
 }
 
 // ========================================
+// SEGMENT-AWARE CONFIDENCE INTERVALS (Phase 47)
+// ========================================
+
+export type MeasurementFamily = 'spread' | 'beam' | 'tine' | 'mass' | 'deduction'
+
+export interface FamilyUncertaintySummary {
+  family: MeasurementFamily
+  confidenceScore: number
+  expectedErrorBand: number
+  tier: 'high' | 'medium' | 'low' | 'very_low'
+}
+
+export interface ConfidenceIntervalSummary {
+  // Overall score bands
+  grossErrorBandLow: number
+  grossErrorBandHigh: number
+  netErrorBandLow: number
+  netErrorBandHigh: number
+  
+  // Calibrated confidence
+  calibratedConfidenceTier: ConfidenceTier
+  calibratedConfidencePercent: number
+  
+  // Family-level
+  familyUncertainty: FamilyUncertaintySummary[]
+  weakestFamily: MeasurementFamily | null
+  strongestFamily: MeasurementFamily | null
+  
+  // Explanation
+  confidenceExplanationSummary: string
+  detailedExplanation: string[]
+  
+  // Profile info
+  intervalProfileType: 'segment_specific' | 'parent_fallback' | 'global_default'
+  intervalProfileSegment: string | null
+  intervalProfileSamples: number
+}
+
+export type PhotoRecommendationType =
+  | 'frontal_straight'
+  | 'left_side'
+  | 'right_side'
+  | 'left_45'
+  | 'right_45'
+  | 'better_lighting'
+  | 'uncropped_rack'
+  | 'closer_face_reference'
+  | 'none_needed'
+
+export type PhotoRequestDecision =
+  | 'proceed_current_only'
+  | 'proceed_but_recommend'
+  | 'strongly_recommend_before_finalize'
+
+export interface NextPhotoGuidanceSummary {
+  recommendationType: PhotoRecommendationType
+  recommendedAngle: AngleType | null
+  decision: PhotoRequestDecision
+  userMessage: string
+  userReason: string
+  expectedConfidenceImprovement: number
+  estimatedBenefit: 'high' | 'medium' | 'low' | 'minimal'
+  shouldAsk: boolean
+  targetFamily: MeasurementFamily | null
+}
+
+// Extended scoring result with Phase 47 data
+export interface ScoringResultWithIntervals extends ScoringResult {
+  confidenceInterval?: ConfidenceIntervalSummary | null
+  photoGuidance?: NextPhotoGuidanceSummary | null
+}
+
+// ========================================
 // PLACEMENT PREVIEW TYPES (Phase 18)
 // ========================================
 
@@ -2921,4 +2994,1038 @@ export interface UsageReportSummary {
   }
   unique_clients: number
   top_error_types: { type: string; count: number }[]
+}
+
+// ========================================
+// PHASE 41: SEGMENTED CALIBRATION TYPES
+// ========================================
+
+export type CalibrationMeasurementType = 'spread' | 'beam' | 'tine' | 'mass' | 'deduction'
+export type SegmentType = 'global' | 'source_type' | 'image_quality' | 'region' | 'state' | 'compound'
+
+export interface CalibrationSegment {
+  id: string
+  name: string
+  description: string | null
+  parent_id: string | null
+  level: number
+  segment_type: string
+  conditions: Record<string, unknown>
+  sample_size: number
+  stability_score: number
+  activation_weight: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CalibrationValue {
+  id: string
+  segment_id: string
+  measurement_type: CalibrationMeasurementType
+  multiplier: number
+  bias: number
+  confidence_adjustment: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SegmentMetric {
+  id: string
+  segment_id: string
+  evaluated_at: string
+  sample_count: number
+  avg_gross_error: number | null
+  avg_abs_gross_error: number | null
+  avg_net_error: number | null
+  avg_abs_net_error: number | null
+  confidence_calib_error: number | null
+  regression_flagged: boolean
+  notes: string | null
+  created_at: string
+}
+
+export interface PredictionSegmentLog {
+  id: string
+  prediction_id: string | null
+  buck_id: string | null
+  trace_id: string | null
+  segment_ids: string[]
+  blend_weights: number[]
+  calibration_deltas: {
+    per_field: Record<string, number>
+    gross_confidence_adj: number
+    segment_trace: Array<{
+      id: string
+      name: string
+      level: number
+      weight: number
+      gated: boolean
+      gate_reason: string | null
+      direct_match: boolean
+    }>
+  }
+  created_at: string
+}
+
+// ========================================
+// PHASE 42: LANDMARK STRENGTHENING & GEOMETRY CONSISTENCY
+// ========================================
+
+export type LandmarkQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
+export type ReferenceSourceType = 'strong_ear' | 'partial_ear' | 'strong_eye' | 'combined_ear_eye' | 'weak_fallback' | 'none'
+export type GeometryConsistencyTier = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
+export type AsymmetryCause = 'real_asymmetry' | 'poor_angle' | 'weak_reference' | 'unknown'
+
+export interface EnhancedLandmarkData {
+  // Quality scores per landmark type
+  ear_base_quality: LandmarkQualityTier
+  ear_tip_quality: LandmarkQualityTier
+  eye_quality: LandmarkQualityTier
+  skull_symmetry_quality: LandmarkQualityTier
+  beam_tip_visibility: LandmarkQualityTier
+  brow_tine_visibility: LandmarkQualityTier
+  inside_spread_visibility: LandmarkQualityTier
+  
+  // Confidence scores (0-1)
+  ear_base_confidence: number
+  ear_tip_confidence: number
+  eye_confidence: number
+  beam_tip_confidence: number
+  
+  // Overall landmark quality
+  overall_quality: LandmarkQualityTier
+  overall_confidence: number
+  
+  // Source image indices
+  best_frontal_image: number | null
+  best_side_images: number[]
+}
+
+export interface ReferenceRankingData {
+  primary_source: ReferenceSourceType
+  primary_confidence: number
+  fallback_source: ReferenceSourceType | null
+  fallback_confidence: number | null
+  overall_reliability: number
+  is_sufficient: boolean
+  
+  // Per-measurement family reference assignment
+  spread_reference: ReferenceSourceType
+  beam_reference: ReferenceSourceType
+  tine_reference: ReferenceSourceType
+  mass_reference: ReferenceSourceType
+  
+  // Warnings
+  warnings: string[]
+}
+
+export interface GeometryConsistencyData {
+  consistency_score: number
+  tier: GeometryConsistencyTier
+  confidence_adjustment: number
+  
+  // Flag counts by severity
+  critical_flags: number
+  warning_flags: number
+  info_flags: number
+  
+  // Per-measurement trust penalties
+  measurement_trust_penalties: Record<string, number>
+  
+  // Asymmetry analysis
+  asymmetry_likely_real: boolean
+  asymmetry_cause: AsymmetryCause
+  asymmetry_divergence: number
+  
+  // Summary
+  summary: string
+  flags: Array<{
+    id: string
+    category: string
+    severity: 'info' | 'warning' | 'critical'
+    field: string | null
+    message: string
+  }>
+}
+
+export interface Phase42Metadata {
+  enhanced_landmarks: EnhancedLandmarkData | null
+  reference_ranking: ReferenceRankingData | null
+  geometry_consistency: GeometryConsistencyData | null
+  
+  // Processing info
+  phase42_version: string
+  processed_at: string
+}
+
+// ========================================
+// PHASE 49.5: CROSS-VIEW CONFLICT ENGINE
+// ========================================
+
+export type CrossViewDisagreementType =
+  | 'scale_reference_conflict'
+  | 'perspective_distortion'
+  | 'occlusion_missing_structure'
+  | 'asymmetry_vs_perspective'
+  | 'landmark_instability'
+  | 'multi_view_inconsistency'
+  | 'low_quality_input'
+
+export type CrossViewFusionStrategy = 'weighted_average' | 'dominant_view' | 'highest_trust' | 'flagged_for_review'
+export type DisagreementLevel = 'low' | 'moderate' | 'high' | 'critical'
+
+export interface ViewTrustData {
+  imageIndex: number
+  angleType: string
+  overallTrust: number
+  isOutlier: boolean
+  perFamilyTrust: Record<MeasurementFamily, number>
+}
+
+export interface PerFamilyResidualData {
+  family: MeasurementFamily
+  maxDeviation: number
+  meanDeviation: number
+  stdDev: number
+  disagreementScore: number
+  disagreementLevel: DisagreementLevel
+  dominantViewIndex: number | null
+}
+
+export interface DisagreementClassificationData {
+  family: MeasurementFamily
+  primaryType: CrossViewDisagreementType
+  reverseEngineeringRecommended: boolean
+  explanation: string
+}
+
+export interface CrossViewConflictData {
+  perFamilyResiduals: Record<string, PerFamilyResidualData>
+  viewTrustScores: Record<number, ViewTrustData>
+  disagreementClassifications: DisagreementClassificationData[]
+  fusionStrategies: Record<MeasurementFamily, CrossViewFusionStrategy>
+  rejectedViews: Array<{
+    imageIndex: number
+    angleType: string
+    reason: string
+  }>
+  conflictSummary: {
+    totalDisagreements: number
+    highDisagreementFamilies: MeasurementFamily[]
+    dominantViewUsed: boolean
+    reverseEngineeringRecommended: boolean
+    reverseEngineeringTriggerReasons: string[]
+    overallConfidence: number
+  }
+}
+
+export interface Phase495Metadata {
+  crossViewConflict: CrossViewConflictData | null
+  enhancedFusionUsed: boolean
+  phase495_version: string
+  processed_at: string
+}
+
+// ========================================
+// PHASE 43: RETRAINING READINESS & EXPORT PACKS
+// ========================================
+
+export type VerificationSource = 'official_scorer' | 'user_reported' | 'taxidermist' | 'contest' | 'estimated'
+export type VerificationConfidence = 'high' | 'medium' | 'low'
+export type ReadinessTier = 'ready' | 'nearly_ready' | 'needs_work' | 'insufficient'
+export type GapSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical'
+export type CandidateModelStatus = 'pending' | 'evaluated' | 'promoted' | 'rejected' | 'archived'
+export type SplitAssignment = 'train' | 'validation' | 'test'
+
+export interface TrainingExample {
+  id: string
+  buck_id: string | null
+  prediction_id: string | null
+  // Ground truth
+  ground_truth_gross: number
+  ground_truth_net: number | null
+  ground_truth_spread: number | null
+  ground_truth_beam_left: number | null
+  ground_truth_beam_right: number | null
+  ground_truth_mass: number | null
+  ground_truth_tine_lengths: Record<string, number> | null
+  ground_truth_deductions: number | null
+  // Predictions
+  predicted_gross: number | null
+  predicted_net: number | null
+  predicted_spread: number | null
+  predicted_beam_left: number | null
+  predicted_beam_right: number | null
+  predicted_mass: number | null
+  predicted_confidence: number | null
+  // Context
+  state: string | null
+  rack_type: 'typical' | 'non-typical' | 'unknown' | null
+  source_type: string | null
+  capture_device: string | null
+  image_count: number
+  angle_types: string[]
+  ears_fully_visible: boolean | null
+  main_frame_points: number | null
+  // Quality
+  verification_source: VerificationSource | null
+  verification_confidence: VerificationConfidence | null
+  health_score: number | null
+  health_tier: string | null
+  // Images
+  image_urls: string[]
+  // Timestamps
+  verified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SplitConfig {
+  train_ratio: number
+  validation_ratio: number
+  test_ratio: number
+  split_seed: number
+  stratify_by: string[]
+  prevent_near_duplicate_leakage: boolean
+}
+
+export interface ExportPackFilters {
+  states?: string[]
+  rack_types?: ('typical' | 'non-typical')[]
+  source_types?: string[]
+  score_range?: { min: number; max: number }
+  health_tiers?: string[]
+  verification_sources?: VerificationSource[]
+  min_image_count?: number
+  require_images?: boolean
+  exclude_ids?: string[]
+}
+
+export interface ExportPack {
+  id: string
+  name: string
+  description: string | null
+  filters: ExportPackFilters
+  split_config: SplitConfig
+  export_formats: string[]
+  include_image_urls: boolean
+  include_segment_context: boolean
+  include_health_metadata: boolean
+  targets_data_gap: string | null
+  gap_priority: number
+  is_archived: boolean
+  example_count: number
+  last_computed_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ExportPackExample {
+  id: string
+  export_pack_id: string
+  training_example_id: string
+  split_assignment: SplitAssignment
+  ground_truth_gross: number | null
+  ground_truth_net: number | null
+  health_score: number | null
+  health_tier: string | null
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  segment_ids: string[]
+  added_at: string
+}
+
+export interface ExportRun {
+  id: string
+  export_pack_id: string
+  format: 'json' | 'csv' | 'both'
+  example_count: number
+  train_count: number
+  validation_count: number
+  test_count: number
+  export_file_path: string | null
+  export_file_size_bytes: number | null
+  export_config: Record<string, unknown> | null
+  run_notes: string | null
+  exported_by: string | null
+  exported_at: string
+}
+
+export interface CandidateModel {
+  id: string
+  name: string
+  version: string
+  description: string | null
+  export_pack_id: string | null
+  training_approach: string | null
+  training_notes: string | null
+  status: CandidateModelStatus
+  metrics_summary: Record<string, number> | null
+  comparison_to_production: {
+    production_mae: number
+    candidate_mae: number
+    delta: number
+    is_improvement: boolean
+  } | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OfflineEvaluation {
+  id: string
+  candidate_model_id: string
+  export_pack_id: string
+  evaluation_split: 'validation' | 'test' | 'full'
+  example_count: number
+  // Metrics
+  mae_gross: number | null
+  mae_net: number | null
+  rmse_gross: number | null
+  rmse_net: number | null
+  mean_error_gross: number | null
+  mean_error_net: number | null
+  correlation_gross: number | null
+  correlation_net: number | null
+  // Error bands
+  within_5_inches_pct: number | null
+  within_10_inches_pct: number | null
+  within_15_inches_pct: number | null
+  // Breakdowns
+  metrics_by_state: Record<string, { mae: number; count: number }> | null
+  metrics_by_rack_type: Record<string, { mae: number; count: number }> | null
+  metrics_by_source_type: Record<string, { mae: number; count: number }> | null
+  metrics_by_score_band: Record<string, { mae: number; count: number }> | null
+  // Comparison
+  production_mae_gross: number | null
+  delta_mae_gross: number | null
+  is_improvement: boolean | null
+  // Meta
+  notes: string | null
+  evaluated_by: string | null
+  evaluated_at: string
+}
+
+export interface DataGap {
+  category: 'state' | 'rack_type' | 'source_type' | 'score_band'
+  value: string
+  current_count: number
+  target_count: number
+  severity: GapSeverity
+  priority: number
+  recommendation: string
+}
+
+export interface RetrainingReadiness {
+  id: string
+  computed_at: string
+  total_examples: number
+  high_quality_examples: number
+  examples_with_images: number
+  coverage_by_state: Record<string, number>
+  typical_count: number
+  non_typical_count: number
+  coverage_by_source: Record<string, number>
+  coverage_by_score_band: Record<string, number>
+  data_gaps: DataGap[]
+  gap_severity: GapSeverity
+  recommendations: string[]
+  readiness_score: number
+  readiness_tier: ReadinessTier
+  notes: string | null
+}
+
+// ========================================
+// PHASE 44: STRIPE SUBSCRIPTIONS
+// ========================================
+
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'inactive'
+export type BillingInterval = 'month' | 'year'
+export type PaymentStatus = 'pending' | 'succeeded' | 'failed' | 'refunded'
+
+export interface Plan {
+  id: string
+  display_name: string
+  description: string | null
+  scores_per_month: number | null
+  scores_per_day: number | null
+  max_images_per_score: number
+  render_enabled: boolean
+  history_enabled: boolean
+  collection_enabled: boolean
+  advanced_analytics: boolean
+  is_guest_plan: boolean
+  sort_order: number
+  is_active: boolean
+  price_cents: number
+  price_yearly_cents: number
+  stripe_price_id: string | null
+  stripe_price_yearly_id: string | null
+  is_purchasable: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Subscription {
+  id: string
+  user_id: string
+  plan_id: string
+  status: SubscriptionStatus
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
+  stripe_price_id: string | null
+  billing_interval: BillingInterval
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  canceled_at: string | null
+  ended_at: string | null
+  trial_start: string | null
+  trial_end: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PaymentHistory {
+  id: string
+  user_id: string
+  subscription_id: string | null
+  stripe_invoice_id: string | null
+  stripe_payment_intent_id: string | null
+  amount_cents: number
+  currency: string
+  status: PaymentStatus
+  description: string | null
+  invoice_pdf_url: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+// ========================================
+// PHASE 48: SCORING VARIANTS SANDBOX + SHADOW SCORING
+// ========================================
+
+export type ScoringVariantType = 'model' | 'pipeline' | 'calibration' | 'hybrid'
+export type ScoringVariantStatus = 'draft' | 'testing' | 'approved' | 'rejected' | 'archived'
+export type EvaluationRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type PromotionGateStatus = 'eligible' | 'needs_review' | 'rejected'
+export type PromotionSignal = 'strongly_recommend' | 'recommend' | 'neutral' | 'caution' | 'do_not_promote'
+export type PromotionAction = 'promoted' | 'rejected' | 'rollback' | 'archived'
+export type GateCriteriaType = 'hard_fail' | 'soft_warning' | 'informational'
+export type ComparisonOperator = '<=' | '>=' | '<' | '>' | '=' | '!='
+
+export interface ScoringVariant {
+  id: string
+  name: string
+  description: string | null
+  version_tag: string
+  variant_type: ScoringVariantType
+  is_production: boolean
+  is_candidate: boolean
+  is_archived: boolean
+  model_version_id: string | null
+  calibration_profile_id: string | null
+  pipeline_config: Record<string, unknown>
+  metadata: Record<string, unknown>
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ScoringVariantWithStats extends ScoringVariant {
+  model_version_name: string | null
+  calibration_profile_name: string | null
+  prediction_count: number
+  shadow_prediction_count: number
+  evaluation_run_count: number
+  completed_evaluation_count: number
+}
+
+export interface ScoringVariantInput {
+  name: string
+  description?: string
+  version_tag: string
+  variant_type: ScoringVariantType
+  model_version_id?: string
+  calibration_profile_id?: string
+  pipeline_config?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  notes?: string
+  is_candidate?: boolean
+}
+
+export interface ShadowPrediction {
+  id: string
+  production_prediction_id: string
+  production_variant_id: string | null
+  shadow_variant_id: string
+  predicted_gross: number | null
+  predicted_net: number | null
+  confidence_percent: number | null
+  error_band_low: number | null
+  error_band_high: number | null
+  measurements: Measurements | null
+  processing_time_ms: number | null
+  gross_diff: number | null
+  net_diff: number | null
+  confidence_diff: number | null
+  spread_diff: number | null
+  beam_diff: number | null
+  tine_diff: number | null
+  mass_diff: number | null
+  confidence_interval_summary: Record<string, unknown> | null
+  geometry_consistency_score: number | null
+  geometry_consistency_diff: number | null
+  created_at: string
+}
+
+export interface ShadowScoringConfig {
+  id: string
+  candidate_variant_id: string
+  sampling_rate: number
+  target_states: string[] | null
+  target_rack_types: string[] | null
+  target_source_types: string[] | null
+  is_enabled: boolean
+  max_per_hour: number | null
+  max_per_day: number | null
+  shadow_count_today: number
+  shadow_count_hour: number
+  last_reset_hour: string | null
+  last_reset_day: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EvaluationRun {
+  id: string
+  variant_id: string
+  dataset_type: 'export_pack' | 'benchmark_pack' | 'custom'
+  export_pack_id: string | null
+  benchmark_pack_id: string | null
+  config: Record<string, unknown>
+  status: EvaluationRunStatus
+  total_examples: number
+  processed_examples: number
+  metrics: EvaluationMetrics | null
+  family_metrics: FamilyEvaluationMetrics | null
+  segment_metrics: SegmentEvaluationMetrics | null
+  confidence_calibration: ConfidenceCalibrationMetrics | null
+  interval_coverage: IntervalCoverageMetrics | null
+  geometry_consistency_metrics: GeometryConsistencyEvalMetrics | null
+  failure_clusters: FailureCluster[] | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  job_id: string | null
+}
+
+export interface EvaluationMetrics {
+  mae_gross: number
+  mae_net: number | null
+  median_error_gross: number
+  median_error_net: number | null
+  rmse_gross: number
+  rmse_net: number | null
+  p95_error: number
+  max_error: number
+  within_5_inches_count: number
+  within_5_inches_percent: number
+  within_10_inches_count: number
+  within_10_inches_percent: number
+  overestimation_count: number
+  underestimation_count: number
+  sample_count: number
+}
+
+export interface FamilyEvaluationMetrics {
+  spread: { mae: number; median: number; p95: number; count: number }
+  beam: { mae: number; median: number; p95: number; count: number }
+  tine: { mae: number; median: number; p95: number; count: number }
+  mass: { mae: number; median: number; p95: number; count: number }
+}
+
+export interface SegmentEvaluationMetrics {
+  by_state: Record<string, { mae: number; median: number; count: number }>
+  by_rack_type: Record<string, { mae: number; median: number; count: number }>
+  by_source_type: Record<string, { mae: number; median: number; count: number }>
+  by_score_band: Record<string, { mae: number; median: number; count: number }>
+}
+
+export interface IntervalCoverageMetrics {
+  coverage_percent: number
+  avg_interval_width: number
+  tight_coverage_percent: number // within 50% of predicted width
+  wide_coverage_percent: number // within 150% of predicted width
+}
+
+export interface GeometryConsistencyEvalMetrics {
+  avg_consistency_score: number
+  median_consistency_score: number
+  consistency_error_correlation: number // correlation between consistency and error
+  low_consistency_mae: number // MAE for low consistency scores
+  high_consistency_mae: number // MAE for high consistency scores
+}
+
+export interface FailureCluster {
+  cluster_name: string
+  cluster_type: 'segment' | 'characteristic' | 'error_pattern'
+  description: string
+  example_count: number
+  avg_error: number
+  example_ids: string[]
+  common_traits: Record<string, string | number>
+}
+
+export interface EvaluationResult {
+  id: string
+  evaluation_run_id: string
+  training_example_id: string | null
+  buck_id: string | null
+  ground_truth_gross: number | null
+  ground_truth_net: number | null
+  predicted_gross: number | null
+  predicted_net: number | null
+  confidence_percent: number | null
+  error_gross: number | null
+  error_net: number | null
+  abs_error_gross: number | null
+  abs_error_net: number | null
+  spread_error: number | null
+  beam_error: number | null
+  tine_error: number | null
+  mass_error: number | null
+  within_interval: boolean | null
+  interval_width: number | null
+  geometry_consistency_score: number | null
+  state: string | null
+  rack_type: string | null
+  source_type: string | null
+  segment_id: string | null
+  processing_time_ms: number | null
+  result_snapshot: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface VariantComparison {
+  id: string
+  production_variant_id: string
+  candidate_variant_id: string
+  production_evaluation_run_id: string | null
+  candidate_evaluation_run_id: string | null
+  dataset_type: string
+  export_pack_id: string | null
+  benchmark_pack_id: string | null
+  sample_count: number
+  production_mae_gross: number | null
+  candidate_mae_gross: number | null
+  mae_improvement: number | null
+  mae_improvement_percent: number | null
+  production_median_error: number | null
+  candidate_median_error: number | null
+  production_p95_error: number | null
+  candidate_p95_error: number | null
+  p95_improvement: number | null
+  production_max_error: number | null
+  candidate_max_error: number | null
+  production_calibration_score: number | null
+  candidate_calibration_score: number | null
+  calibration_improvement: number | null
+  production_interval_coverage: number | null
+  candidate_interval_coverage: number | null
+  interval_coverage_change: number | null
+  production_geometry_correlation: number | null
+  candidate_geometry_correlation: number | null
+  examples_improved: number
+  examples_regressed: number
+  examples_unchanged: number
+  improvement_rate: number | null
+  segment_comparisons: Record<string, SegmentComparisonDetail> | null
+  family_comparisons: Record<string, FamilyComparisonDetail> | null
+  regression_clusters: FailureCluster[] | null
+  improvement_clusters: FailureCluster[] | null
+  confidence_in_improvement: number | null
+  improvement_confidence_tier: 'very_high' | 'high' | 'medium' | 'low' | 'very_low' | null
+  promotion_signal: PromotionSignal | null
+  promotion_signal_reasons: string[] | null
+  summary_text: string | null
+  // PATCH A+B+C: Extended comparison data
+  protected_segment_results?: ProtectedSegmentResult[] | null
+  protected_segment_hard_fails?: number | null
+  high_confidence_regressions?: number | null
+  high_confidence_total?: number | null
+  high_confidence_regression_rate?: number | null
+  family_level_counts?: {
+    spread: { improved: number; regressed: number }
+    beam: { improved: number; regressed: number }
+    tine: { improved: number; regressed: number }
+    mass: { improved: number; regressed: number }
+  } | null
+  net_error_counts?: {
+    improved: number
+    regressed: number
+    unchanged: number
+    total: number
+  } | null
+  confidence_counts?: {
+    improved: number
+    regressed: number
+  } | null
+  created_by: string | null
+  created_at: string
+}
+
+// PATCH A: Protected segment result type
+export interface ProtectedSegmentResult {
+  segmentKey: string
+  segmentName: string
+  sampleCount: number
+  improvedCount: number
+  regressedCount: number
+  unchangedCount: number
+  avgRegressionAmount: number
+  maxRegressionAmount: number
+  isHardFail: boolean
+  failReason: string | null
+}
+
+export interface SegmentComparisonDetail {
+  segment_value: string
+  production_mae: number
+  candidate_mae: number
+  improvement: number
+  improvement_percent: number
+  sample_count: number
+  is_regression: boolean
+}
+
+export interface FamilyComparisonDetail {
+  family: string
+  production_mae: number
+  candidate_mae: number
+  improvement: number
+  improvement_percent: number
+  is_regression: boolean
+}
+
+export interface PromotionGateCriteria {
+  id: string
+  name: string
+  description: string | null
+  criteria_type: GateCriteriaType
+  metric_name: string
+  comparison_operator: ComparisonOperator
+  threshold_value: number
+  threshold_unit: string | null
+  applies_to_segments: string[] | null
+  applies_to_families: string[] | null
+  is_enabled: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PromotionGateResult {
+  criteria_id: string
+  criteria_name: string
+  criteria_type: GateCriteriaType
+  passed: boolean
+  metric_value: number
+  threshold_value: number
+  threshold_unit: string | null
+  message: string
+}
+
+export interface PromotionGateEvaluation {
+  id: string
+  variant_comparison_id: string
+  candidate_variant_id: string
+  overall_status: PromotionGateStatus
+  gate_results: PromotionGateResult[]
+  hard_fail_count: number
+  soft_warning_count: number
+  status_reason: string | null
+  detailed_summary: Record<string, unknown> | null
+  evaluated_at: string
+  evaluated_by: string | null
+}
+
+export interface VariantPromotionHistory {
+  id: string
+  variant_id: string
+  action: PromotionAction
+  gate_evaluation_id: string | null
+  previous_production_variant_id: string | null
+  decision_reason: string | null
+  decision_notes: string | null
+  metrics_snapshot: Record<string, unknown> | null
+  decided_by: string | null
+  decided_at: string
+}
+
+export interface VariantComparisonWithDetails extends VariantComparison {
+  production_variant_name: string
+  production_version_tag: string
+  candidate_variant_name: string
+  candidate_version_tag: string
+  gate_status: PromotionGateStatus | null
+  hard_fail_count: number | null
+  soft_warning_count: number | null
+}
+
+// ========================================
+// PHASE 45: GEOMETRY-FIRST LANDMARK ENGINE
+// ========================================
+
+export type LandmarkQualityTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
+export type GeometryTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
+export type AsymmetryCause = 'real_asymmetry' | 'perspective_induced' | 'missing_visibility' | 'mixed' | 'unknown'
+
+export interface Phase45Metadata {
+  // Landmark coverage
+  landmark_coverage: number
+  fusion_quality: string
+  
+  // Reference quality
+  reference_quality: number
+  primary_reference_source: string
+  
+  // Geometry analysis
+  geometry_consistency: number
+  geometry_tier: GeometryTier45
+  confidence_adjustment: number
+  
+  // Flags
+  critical_flags_count: number
+  warning_flags_count: number
+  
+  // Asymmetry
+  asymmetry_likely_real: boolean
+  asymmetry_cause: AsymmetryCause
+  asymmetry_percent: number
+  
+  // Trust scores
+  spread_trust: number
+  beam_trust: number
+  tine_trust: number
+  mass_trust: number
+  
+  // Processing
+  pipeline_version: string
+  processed_at: string
+}
+
+export interface Phase45Flag {
+  id: string
+  category: 'spread_reference' | 'beam_proportion' | 'tine_progression' | 'mass_progression' | 'asymmetry' | 'anatomical_bounds' | 'reference_conflict'
+  severity: 'info' | 'warning' | 'critical'
+  field: string | null
+  message: string
+}
+
+export interface Phase45AsymmetryAnalysis {
+  is_likely_real: boolean
+  apparent_cause: AsymmetryCause
+  left_side_visibility: number
+  right_side_visibility: number
+  overall_asymmetry_percent: number
+  beam_asymmetry_percent: number
+  tine_asymmetry_percent: number
+  asymmetry_confidence: number
+  recommendation: string
+}
+
+// ========================================
+// MULTI-VIEW FUSION TYPES (Phase 49)
+// ========================================
+
+export type MultiViewMethod = 'graph_fusion' | 'weighted_average' | 'dominant_view' | 'single_view_fallback' | 'hybrid'
+export type MultiViewStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'fallback_used'
+export type ViewGraphQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'disconnected'
+export type FamilyFusionStrategy = 'weighted_fusion' | 'dominant_view' | 'single_view' | 'flagged'
+
+export interface MultiViewSetSummary {
+  id: string
+  predictionId: string | null
+  buckId: string
+  status: MultiViewStatus
+  method: MultiViewMethod
+  imageCount: number
+  graphConnectivity: number
+  graphQualityTier: ViewGraphQualityTier
+  strongestSubgraphSize: number
+  acceptedEdges: number
+  totalEdges: number
+  fallbackUsed: boolean
+  fallbackReason: string | null
+  solveQuality: number
+  processingTimeMs: number
+  createdAt: string
+}
+
+export interface MultiViewSolutionSummary {
+  fusedGrossScore: number | null
+  fusedNetScore: number | null
+  scoreConfidence: number
+  crossViewAgreement: number
+  uncertaintyReduction: number
+  primaryViews: number[]
+  secondaryViews: number[]
+  rejectedViews: { index: number; reason: string }[]
+  familyStrategies: Record<MeasurementFamily, FamilyFusionStrategy>
+  explanation: string[]
+}
+
+export interface MultiViewFamilyFusion {
+  family: MeasurementFamily
+  fusedValue: number
+  fusedConfidence: number
+  strategy: FamilyFusionStrategy
+  primaryViews: number[]
+  secondaryViews: number[]
+  disagreementLevel: 'low' | 'moderate' | 'high' | 'critical'
+  agreementScore: number
+  uncertaintyBand: number
+  explanation: string
+}
+
+export interface MultiViewEdgeSummary {
+  viewAIndex: number
+  viewBIndex: number
+  matchQuality: number
+  geometricConsistency: number
+  accepted: boolean
+  spreadAgreement: number
+  beamAgreement: number
+  tineAgreement: number
+  massAgreement: number
+}
+
+export interface MultiViewBenchmarkSummary {
+  totalComparisons: number
+  avgImprovementInches: number
+  medianImprovementInches: number
+  percentImproved: number
+  avgMultiViewError: number
+  avgSingleViewError: number
+  byImageCount: Record<number, { count: number; avgImprovement: number }>
+  byGraphQuality: Record<ViewGraphQualityTier, { count: number; avgImprovement: number }>
+}
+
+// Extended prediction with multi-view data
+export interface PredictionWithMultiView extends Prediction {
+  mv_set_id?: string | null
+  multi_view_fusion_used?: boolean
+  multi_view_confidence_boost?: number
+  multi_view_method?: MultiViewMethod
+  multiViewSummary?: MultiViewSetSummary | null
+  multiViewSolution?: MultiViewSolutionSummary | null
 }

@@ -6,19 +6,39 @@
  * - Side images (left/right): Best for beams and tines
  * - Front images: Best for spread and symmetry
  * - Multiple angles: Enables conflict resolution
+ * 
+ * Phase 49.5: Enhanced with cross-view conflict detection and trust-weighted fusion.
+ * When views disagree, the system explains rather than averages.
  */
 
 import type { 
   Measurements, 
   AngleType, 
-  FusionResult 
+  FusionResult,
+  LandmarksDetected 
 } from '@/lib/types'
+import { 
+  analyzesCrossViewConflicts, 
+  conflictResultToMetadata,
+  type CrossViewConflictResult,
+  type CrossViewConflictInput 
+} from './cross-view-conflict'
 
 export interface ImageMeasurement {
   angleType: AngleType
   imageIndex: number
   measurements: Partial<Measurements>
   confidence: number
+}
+
+/** Phase 49.5: Extended fusion result with conflict analysis */
+export interface EnhancedFusionResult extends FusionResult {
+  /** Cross-view conflict analysis result */
+  conflictAnalysis?: CrossViewConflictResult
+  /** Metadata-friendly conflict summary */
+  conflictMetadata?: ReturnType<typeof conflictResultToMetadata>
+  /** Whether conflict-aware fusion was used */
+  usedConflictAwareFusion: boolean
 }
 
 // Preferred angles for each measurement type
@@ -298,5 +318,171 @@ export function hasMinimumAngleDiversity(
     reason: unique.size >= 2 
       ? 'Multiple angles detected. Good measurement potential.'
       : 'Single angle detected. Accuracy is limited.',
+  }
+}
+
+// ============================================================================
+// PHASE 49.5: ENHANCED FUSION WITH CONFLICT ANALYSIS
+// ============================================================================
+
+export interface EnhancedFusionInput {
+  imageMeasurements: ImageMeasurement[]
+  baseMeasurements: Measurements
+  /** Per-image landmark data for conflict analysis */
+  perImageLandmarks?: {
+    imageIndex: number
+    angleType: AngleType
+    landmarks: LandmarksDetected
+    landmarkConfidence: number
+    referenceQuality: number
+  }[]
+  /** Whether ears are fully visible */
+  earsFullyVisible?: boolean
+  /** Geometry consistency result (optional) */
+  geometryConsistency?: import('./geometry-consistency').GeometryConsistencyResult | null
+}
+
+/**
+ * Phase 49.5: Enhanced multi-image fusion with cross-view conflict detection
+ * 
+ * This function performs conflict-aware fusion that:
+ * 1. Detects disagreement between views
+ * 2. Classifies why disagreement occurs
+ * 3. Assigns trust per view per measurement family
+ * 4. Performs conflict-aware fusion instead of naive merging
+ * 5. Flags disagreement for reverse-engineering (Phase 50)
+ */
+export function fuseMeasurementsWithConflictAnalysis(
+  input: EnhancedFusionInput
+): EnhancedFusionResult {
+  const { imageMeasurements, baseMeasurements, perImageLandmarks, earsFullyVisible, geometryConsistency } = input
+
+  // First perform basic fusion to get baseline
+  const basicFusion = fuseMeasurements(imageMeasurements, baseMeasurements)
+
+  // If we don't have sufficient data for conflict analysis, return basic fusion
+  if (imageMeasurements.length < 2 || !perImageLandmarks || perImageLandmarks.length < 2) {
+    return {
+      ...basicFusion,
+      usedConflictAwareFusion: false,
+    }
+  }
+
+  // Prepare input for conflict analysis
+  const conflictInput: CrossViewConflictInput = {
+    imageMeasurements,
+    baseMeasurements,
+    perImageLandmarks,
+    geometryConsistency,
+    earsFullyVisible,
+  }
+
+  // Run cross-view conflict analysis
+  const conflictAnalysis = analyzesCrossViewConflicts(conflictInput)
+  const conflictMetadata = conflictResultToMetadata(conflictAnalysis)
+
+  // Use conflict-aware fused measurements if available
+  const fusedMeasurements = conflictAnalysis.fusedMeasurements
+
+  // Recalculate fusion confidence based on conflict analysis
+  const conflictPenalty = conflictAnalysis.conflictSummary.highDisagreementFamilies.length * 0.05
+  const outlierPenalty = conflictAnalysis.rejectedViews.length * 0.03
+  const adjustedFusionConfidence = Math.max(
+    0.2,
+    conflictAnalysis.conflictSummary.overallConfidence - conflictPenalty - outlierPenalty
+  )
+
+  // Rebuild measurement sources incorporating conflict data
+  const measurementSources: FusionResult['measurement_sources'] = { ...basicFusion.measurement_sources }
+
+  // Update conflicts resolved count based on conflict analysis
+  const conflictsResolved = conflictAnalysis.conflictSummary.totalDisagreements
+
+  return {
+    fused_measurements: fusedMeasurements,
+    measurement_sources: measurementSources,
+    conflicts_resolved: conflictsResolved,
+    fusion_confidence: adjustedFusionConfidence,
+    angle_coverage: basicFusion.angle_coverage,
+    preferred_angles: basicFusion.preferred_angles,
+    conflictAnalysis,
+    conflictMetadata,
+    usedConflictAwareFusion: true,
+  }
+}
+
+/**
+ * Get extended fusion quality summary including conflict analysis
+ */
+export function getEnhancedFusionQualitySummary(result: EnhancedFusionResult): {
+  quality: 'poor' | 'fair' | 'good' | 'excellent'
+  summary: string
+  recommendations: string[]
+  conflictWarnings: string[]
+  reverseEngineeringRecommended: boolean
+} {
+  const basicSummary = getFusionQualitySummary(result)
+  const conflictWarnings: string[] = []
+  let reverseEngineeringRecommended = false
+
+  if (result.conflictAnalysis) {
+    const conflict = result.conflictAnalysis
+
+    // Add warnings for high disagreement
+    for (const family of conflict.conflictSummary.highDisagreementFamilies) {
+      const classification = conflict.disagreementClassifications.find(d => d.family === family)
+      if (classification) {
+        conflictWarnings.push(classification.explanation)
+      }
+    }
+
+    // Add warnings for rejected views
+    if (conflict.rejectedViews.length > 0) {
+      conflictWarnings.push(
+        `${conflict.rejectedViews.length} image(s) excluded as outliers: ${
+          conflict.rejectedViews.map(v => `${v.angleType} (${v.reason})`).join(', ')
+        }`
+      )
+    }
+
+    // Check reverse engineering recommendation
+    if (conflict.conflictSummary.reverseEngineeringRecommended) {
+      reverseEngineeringRecommended = true
+      conflictWarnings.push(
+        `Reverse engineering recommended: ${conflict.conflictSummary.reverseEngineeringTriggerReasons.join('; ')}`
+      )
+    }
+
+    // Adjust quality based on conflict severity
+    let adjustedQuality = basicSummary.quality
+    if (conflict.conflictSummary.highDisagreementFamilies.length >= 2) {
+      if (adjustedQuality === 'excellent') adjustedQuality = 'good'
+      else if (adjustedQuality === 'good') adjustedQuality = 'fair'
+    }
+    if (reverseEngineeringRecommended) {
+      if (adjustedQuality === 'excellent') adjustedQuality = 'good'
+      else if (adjustedQuality === 'good') adjustedQuality = 'fair'
+      else if (adjustedQuality === 'fair') adjustedQuality = 'poor'
+    }
+
+    // Adjust summary
+    let summary = basicSummary.summary
+    if (conflict.conflictSummary.dominantViewUsed) {
+      summary += ' Dominant view used for some measurements due to disagreement.'
+    }
+
+    return {
+      quality: adjustedQuality,
+      summary,
+      recommendations: basicSummary.recommendations,
+      conflictWarnings,
+      reverseEngineeringRecommended,
+    }
+  }
+
+  return {
+    ...basicSummary,
+    conflictWarnings,
+    reverseEngineeringRecommended,
   }
 }

@@ -87,7 +87,10 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
             Rx
           </div>
-          <span className="font-semibold text-lg tracking-tight">RAXcore</span>
+          <span className="font-semibold text-lg tracking-tight">
+            <span className="text-black dark:text-white">RAX</span>
+            <span className="text-muted-foreground">core</span>
+          </span>
         </Link>
 
         {/* Desktop navigation */}
@@ -135,7 +138,10 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
                       Rx
                     </div>
-                    <span className="font-semibold">RAXcore</span>
+                    <span className="font-semibold">
+                      <span className="text-black dark:text-white">RAX</span>
+                      <span className="text-muted-foreground">core</span>
+                    </span>
                   </div>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)}>
                     <X className="h-5 w-5" />

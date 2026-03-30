@@ -1,0 +1,222 @@
+'use client'
+
+import { useState } from 'react'
+import useSWR from 'swr'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Loader2, Target, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+const fetcher = (url: string) => fetch(url).then(r => r.json())
+
+interface PrecisionPassCardProps {
+  predictionId: string
+  className?: string
+}
+
+export function PrecisionPassCard({ predictionId, className }: PrecisionPassCardProps) {
+  const [runId, setRunId] = useState<string | null>(null)
+  const [isStarting, setIsStarting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+
+  const { data } = useSWR(
+    runId ? `/api/reverse/runs/${runId}` : null,
+    fetcher,
+    { refreshInterval: runId ? 1500 : 0 }
+  )
+
+  const status = data?.run?.status as string | undefined
+  const best = data?.run?.best_summary as Record<string, unknown> | undefined
+  const decomposition = data?.decomposition as { causes?: Array<{ cause: string; weight: number }> } | undefined
+  const candidates = (data?.candidates ?? []) as Array<{
+    id: string
+    hypothesis_type: string
+    hypothesis_rank: number
+  }>
+  const evaluations = (data?.evaluations ?? {}) as Record<string, {
+    total_score: number
+    delta_gross: number
+  }>
+
+  const isComplete = status === 'completed'
+  const isFailed = status === 'failed'
+  const isRunning = status === 'running' || status === 'queued'
+
+  async function start() {
+    setIsStarting(true)
+    setError(null)
+    
+    try {
+      const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, { 
+        method: 'POST' 
+      })
+      const json = await res.json()
+      
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to start')
+      }
+      
+      if (json.runId) {
+        setRunId(json.runId)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start precision pass')
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  return (
+    <Card className={cn('overflow-hidden', className)}>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Precision Pass</CardTitle>
+          </div>
+          {status && (
+            <Badge 
+              variant={isComplete ? 'default' : isFailed ? 'destructive' : 'secondary'}
+              className="text-xs"
+            >
+              {status}
+            </Badge>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          Optional reverse-engineering pass to cross-check scale/asymmetry and tighten accuracy.
+        </CardDescription>
+      </CardHeader>
+      
+      <CardContent className="space-y-3">
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </div>
+        )}
+
+        {!runId ? (
+          <Button 
+            onClick={start} 
+            disabled={isStarting}
+            className="w-full"
+            variant="outline"
+          >
+            {isStarting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              'Run Precision Pass'
+            )}
+          </Button>
+        ) : (
+          <div className="space-y-3">
+            {isRunning && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Analyzing hypotheses...
+              </div>
+            )}
+
+            {isComplete && best && (
+              <>
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">
+                      Best estimate: {String(best.predicted_gross)} gross
+                      <span className="text-muted-foreground ml-1">
+                        ({Number(best.delta_gross) >= 0 ? '+' : ''}{String(best.delta_gross)}&quot;)
+                      </span>
+                    </div>
+                    {best.hypothesis_type !== 'noop' && (
+                      <div className="text-xs text-muted-foreground">
+                        Applied: {String(best.hypothesis_type).replace(/_/g, ' ')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronDown className={cn(
+                    'h-3 w-3 transition-transform',
+                    expanded && 'rotate-180'
+                  )} />
+                  {expanded ? 'Hide details' : 'Show details'}
+                </button>
+
+                {expanded && (
+                  <div className="space-y-3 pt-2 border-t">
+                    {decomposition?.causes && decomposition.causes.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Identified factors
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {decomposition.causes.slice(0, 4).map((c) => (
+                            <Badge key={c.cause} variant="outline" className="text-xs">
+                              {c.cause.replace(/_/g, ' ')} ({Math.round(c.weight * 100)}%)
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {candidates.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          Top hypotheses tested
+                        </div>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {candidates.slice(0, 6).map((c) => {
+                            const e = evaluations[c.id]
+                            const isBest = c.id === data?.run?.best_hypothesis_id
+                            return (
+                              <div 
+                                key={c.id} 
+                                className={cn(
+                                  'text-xs flex items-center justify-between px-2 py-1 rounded',
+                                  isBest ? 'bg-primary/10 border border-primary/20' : 'bg-muted/50'
+                                )}
+                              >
+                                <span className="font-mono">
+                                  {c.hypothesis_type.replace(/_/g, ' ')}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {e?.total_score?.toFixed?.(1) ?? '—'} pts
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-muted-foreground">
+                      This is a model-based refinement for reference only; not an official score.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {isFailed && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                Precision pass failed. Try again later.
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}

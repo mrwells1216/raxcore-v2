@@ -228,3 +228,214 @@ export function getLandmarkRecommendations(
 
   return recommendations
 }
+
+// ============================================================================
+// PHASE 42: ENHANCED LANDMARK QUALITY TRACKING
+// ============================================================================
+
+import type { 
+  EnhancedLandmarkData, 
+  LandmarkQualityTier 
+} from '@/lib/types'
+
+export interface EnhancedLandmarkInput {
+  images: ImageForLandmarkDetection[]
+  earsFullyVisible?: boolean
+  mainFramePoints?: number
+  visionLandmarks?: {
+    ears_visible?: boolean
+    eyes_visible?: boolean
+    antlers_visible?: boolean
+    ear_base_to_tip_estimated?: number
+  }
+}
+
+/**
+ * Phase 42: Compute enhanced landmark data with per-landmark quality tracking
+ */
+export function computeEnhancedLandmarks(
+  input: EnhancedLandmarkInput
+): EnhancedLandmarkData {
+  const { images, earsFullyVisible, mainFramePoints, visionLandmarks } = input
+  
+  // Analyze angle coverage
+  const angles = images.map(img => img.angleType)
+  const hasFront = angles.includes('front')
+  const hasLeft = angles.includes('left')
+  const hasRight = angles.includes('right')
+  const hasBothSides = hasLeft && hasRight
+  
+  // Determine best images
+  const frontIndex = angles.indexOf('front')
+  const leftIndex = angles.indexOf('left')
+  const rightIndex = angles.indexOf('right')
+  const bestSideImages = [leftIndex, rightIndex].filter(i => i >= 0)
+  
+  // Ear quality assessment
+  let earBaseQuality: LandmarkQualityTier = 'missing'
+  let earTipQuality: LandmarkQualityTier = 'missing'
+  let earBaseConfidence = 0
+  let earTipConfidence = 0
+  
+  if (visionLandmarks?.ears_visible || earsFullyVisible) {
+    if (earsFullyVisible && hasFront) {
+      earBaseQuality = 'excellent'
+      earTipQuality = 'excellent'
+      earBaseConfidence = 0.95
+      earTipConfidence = 0.92
+    } else if (earsFullyVisible) {
+      earBaseQuality = 'good'
+      earTipQuality = 'good'
+      earBaseConfidence = 0.8
+      earTipConfidence = 0.78
+    } else if (hasFront) {
+      earBaseQuality = 'fair'
+      earTipQuality = 'fair'
+      earBaseConfidence = 0.6
+      earTipConfidence = 0.55
+    } else {
+      earBaseQuality = 'poor'
+      earTipQuality = 'poor'
+      earBaseConfidence = 0.35
+      earTipConfidence = 0.3
+    }
+  }
+  
+  // Eye quality assessment
+  let eyeQuality: LandmarkQualityTier = 'missing'
+  let eyeConfidence = 0
+  
+  if (visionLandmarks?.eyes_visible) {
+    if (hasFront) {
+      eyeQuality = 'excellent'
+      eyeConfidence = 0.9
+    } else if (hasLeft || hasRight) {
+      eyeQuality = 'fair'
+      eyeConfidence = 0.5
+    } else {
+      eyeQuality = 'poor'
+      eyeConfidence = 0.3
+    }
+  }
+  
+  // Skull symmetry (derived from having both eyes + front)
+  let skullSymmetryQuality: LandmarkQualityTier = 'missing'
+  if (eyeQuality !== 'missing' && hasFront) {
+    skullSymmetryQuality = eyeQuality
+  } else if (hasFront) {
+    skullSymmetryQuality = 'fair'
+  }
+  
+  // Beam tip visibility
+  let beamTipVisibility: LandmarkQualityTier = 'missing'
+  let beamTipConfidence = 0
+  
+  if (visionLandmarks?.antlers_visible) {
+    if (hasBothSides) {
+      beamTipVisibility = 'excellent'
+      beamTipConfidence = 0.9
+    } else if (hasLeft || hasRight) {
+      beamTipVisibility = 'good'
+      beamTipConfidence = 0.7
+    } else if (hasFront) {
+      beamTipVisibility = 'fair'
+      beamTipConfidence = 0.5
+    } else {
+      beamTipVisibility = 'poor'
+      beamTipConfidence = 0.3
+    }
+  }
+  
+  // Brow tine visibility
+  let browTineVisibility: LandmarkQualityTier = 'missing'
+  if (visionLandmarks?.antlers_visible) {
+    if (hasBothSides && mainFramePoints && mainFramePoints >= 8) {
+      browTineVisibility = 'excellent'
+    } else if (hasLeft || hasRight) {
+      browTineVisibility = 'good'
+    } else if (hasFront) {
+      browTineVisibility = 'fair'
+    } else {
+      browTineVisibility = 'poor'
+    }
+  }
+  
+  // Inside spread visibility
+  let insideSpreadVisibility: LandmarkQualityTier = 'missing'
+  if (hasFront && visionLandmarks?.antlers_visible) {
+    insideSpreadVisibility = earBaseQuality === 'excellent' ? 'excellent' : 'good'
+  } else if (visionLandmarks?.antlers_visible) {
+    insideSpreadVisibility = 'fair'
+  }
+  
+  // Compute overall quality
+  const qualities = [
+    earBaseQuality, 
+    earTipQuality, 
+    eyeQuality, 
+    beamTipVisibility,
+  ].filter(q => q !== 'missing')
+  
+  let overallQuality: LandmarkQualityTier = 'poor'
+  let overallConfidence = 0.3
+  
+  if (qualities.length >= 3) {
+    const excellentCount = qualities.filter(q => q === 'excellent').length
+    const goodCount = qualities.filter(q => q === 'good').length
+    
+    if (excellentCount >= 2) {
+      overallQuality = 'excellent'
+      overallConfidence = 0.9
+    } else if (excellentCount >= 1 || goodCount >= 2) {
+      overallQuality = 'good'
+      overallConfidence = 0.75
+    } else {
+      overallQuality = 'fair'
+      overallConfidence = 0.55
+    }
+  } else if (qualities.length > 0) {
+    overallQuality = 'fair'
+    overallConfidence = 0.45
+  }
+  
+  return {
+    ear_base_quality: earBaseQuality,
+    ear_tip_quality: earTipQuality,
+    eye_quality: eyeQuality,
+    skull_symmetry_quality: skullSymmetryQuality,
+    beam_tip_visibility: beamTipVisibility,
+    brow_tine_visibility: browTineVisibility,
+    inside_spread_visibility: insideSpreadVisibility,
+    ear_base_confidence: earBaseConfidence,
+    ear_tip_confidence: earTipConfidence,
+    eye_confidence: eyeConfidence,
+    beam_tip_confidence: beamTipConfidence,
+    overall_quality: overallQuality,
+    overall_confidence: overallConfidence,
+    best_frontal_image: frontIndex >= 0 ? frontIndex : null,
+    best_side_images: bestSideImages,
+  }
+}
+
+/**
+ * Convert enhanced landmark data to a summary string
+ */
+export function getEnhancedLandmarkSummary(data: EnhancedLandmarkData): string {
+  const parts: string[] = []
+  
+  if (data.ear_base_quality !== 'missing') {
+    parts.push(`Ears: ${data.ear_base_quality}`)
+  }
+  if (data.eye_quality !== 'missing') {
+    parts.push(`Eyes: ${data.eye_quality}`)
+  }
+  if (data.beam_tip_visibility !== 'missing') {
+    parts.push(`Beams: ${data.beam_tip_visibility}`)
+  }
+  
+  if (parts.length === 0) {
+    return 'No landmarks detected'
+  }
+  
+  return `Overall: ${data.overall_quality} (${parts.join(', ')})`
+}

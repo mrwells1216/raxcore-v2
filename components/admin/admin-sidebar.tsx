@@ -22,6 +22,13 @@ import {
   CreditCard,
   Radio,
   Layers,
+  Cpu,
+  ListTodo,
+  TestTubes,
+  Combine,
+  RotateCcw,
+  Boxes,
+  Eye,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -37,6 +44,7 @@ const navigation = [
   { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },
   { name: 'Influence', href: '/admin/influence', icon: Scale },
   { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },
+  { name: 'Retraining', href: '/admin/retraining', icon: Cpu },
   { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
   { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },
@@ -44,6 +52,12 @@ const navigation = [
   { name: 'Error Patterns', href: '/admin/error-patterns', icon: BarChart3 },
   { name: 'Teach AI', href: '/admin/teach', icon: Wand2 },
   { name: 'Export', href: '/admin/export', icon: FileDown },
+  { name: 'Jobs', href: '/admin/jobs', icon: ListTodo },
+  { name: 'Multi-View', href: '/admin/multiview', icon: Combine },
+  { name: 'Reverse Eng', href: '/admin/reverse', icon: RotateCcw },
+  { name: 'Structural', href: '/admin/structural', icon: Boxes },
+  { name: 'Supervision', href: '/admin/supervision', icon: Eye },
+  { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
