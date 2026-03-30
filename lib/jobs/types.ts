@@ -54,6 +54,13 @@ export type JobType =
   | 'billing_usage_sync'
   // Admin
   | 'admin_bulk_action'
+  // Training Pack Generation (Phase 53)
+  | 'training_pack_resolve_items'
+  | 'training_pack_attach_supervision'
+  | 'training_pack_attach_artifacts'
+  | 'training_pack_assign_splits'
+  | 'training_pack_generate_labels'
+  | 'training_pack_export'
 
 export type JobPriority = 'critical' | 'high' | 'normal' | 'low' | 'background'
 
