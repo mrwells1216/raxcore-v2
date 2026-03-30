@@ -191,6 +191,64 @@ export async function updateScoringVariant(
   return data as ScoringVariant
 }
 
+// ============================================================================
+// PHASE 53: TRAINING PACK LINKAGE
+// ============================================================================
+
+/**
+ * Link a training pack to a candidate variant for evaluation
+ */
+export async function linkTrainingPackToVariant(
+  variantId: string,
+  trainingPackId: string
+): Promise<void> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('variant_training_pack_links')
+    .insert({
+      variant_id: variantId,
+      training_pack_id: trainingPackId,
+    })
+
+  if (error && error.code !== '23505') { // Ignore unique constraint violations
+    throw new Error(`Failed to link training pack: ${error.message}`)
+  }
+}
+
+/**
+ * Get training packs linked to a variant
+ */
+export async function getVariantTrainingPacks(variantId: string): Promise<string[]> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('variant_training_pack_links')
+    .select('training_pack_id')
+    .eq('variant_id', variantId)
+
+  if (error) throw new Error(`Failed to get training packs: ${error.message}`)
+  return (data || []).map(r => r.training_pack_id)
+}
+
+/**
+ * Unlink a training pack from a variant
+ */
+export async function unlinkTrainingPackFromVariant(
+  variantId: string,
+  trainingPackId: string
+): Promise<void> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('variant_training_pack_links')
+    .delete()
+    .eq('variant_id', variantId)
+    .eq('training_pack_id', trainingPackId)
+
+  if (error) throw new Error(`Failed to unlink training pack: ${error.message}`)
+}
+
 /**
  * Archive a scoring variant
  */
