@@ -266,11 +266,22 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-2">
+              {process.env.NODE_ENV === 'development' && (() => {
+                console.log('[v0] ConfidenceExplanation payload:', {
+                  confidence_explanation: result.confidence_explanation,
+                  learningSummary: result.learningSummary,
+                  scaling_references_used: result.scaling_references_used,
+                  scoringMethod: result.scoringMethod,
+                  isFallback: normalized.isFallback,
+                })
+                return null
+              })()}
               <ConfidenceExplanation 
-                factors={result.confidence_explanation}
-                learningSummary={result.learningSummary}
-                scalingReferences={result.scaling_references_used}
+                factors={Array.isArray(result.confidence_explanation) ? result.confidence_explanation : []}
+                learningSummary={result.learningSummary ?? undefined}
+                scalingReferences={Array.isArray(result.scaling_references_used) ? result.scaling_references_used : []}
                 scoringMethod={result.scoringMethod}
+                isFallback={normalized.isFallback}
               />
             </CollapsibleContent>
           </Collapsible>
