@@ -12,6 +12,7 @@ import type {
 
 export interface CreateBuckParams {
   sessionId: string
+  state: string // Required - US state code
   nickname?: string
   location?: string
   harvestDate?: string
@@ -21,6 +22,7 @@ export interface CreateBuckParams {
 export interface BuckRecord {
   id: string
   session_id: string
+  state: string
   nickname: string | null
   location: string | null
   harvest_date: string | null
@@ -33,9 +35,15 @@ export interface BuckRecord {
 export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> {
   const supabase = await createClient()
   
+  // Validate required state field
+  if (!params.state) {
+    throw new Error('State is required for scoring submission')
+  }
+  
   // Build minimal payload WITHOUT harvest_date first (safest approach)
   const minimalPayload = {
     session_id: params.sessionId,
+    state: params.state,
     nickname: params.nickname || null,
     location: params.location || null,
     notes: params.notes || null,

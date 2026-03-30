@@ -211,14 +211,15 @@ export async function POST(request: Request) {
     // Generate internal buck session ID (distinct from the form session_id)
     const buckSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 
-    // Create buck record in Supabase
-    const buck = await createBuck({
-      sessionId: buckSessionId,
-      nickname: nickname || undefined,
-      location: location || state,
-      harvestDate: harvestDate || undefined,
-      notes: notes || undefined
-    })
+  // Create buck record in Supabase
+  const buck = await createBuck({
+  sessionId: buckSessionId,
+  state: state, // Required field - validated at API entry
+  nickname: nickname || undefined,
+  location: location || undefined,
+  harvestDate: harvestDate || undefined,
+  notes: notes || undefined
+  })
 
     // Store image URLs (using data URLs or external URLs for now)
     const imageUrls = pendingImages.map(p => p.dataUrl || p.url || '')
