@@ -495,7 +495,7 @@ export async function onHighConfidenceMiss(
 // HELPER FUNCTIONS
 // ============================================================================
 
-function mapCauseToFailureLabel(cause: string): FailureCauseLabel | null {
+function mapDisagreementTypeToFailureLabel(cause: string): FailureCauseLabel | null {
   const mapping: Record<string, FailureCauseLabel> = {
     'scale_reference_conflict': 'scale_reference_failure',
     'perspective_distortion': 'asymmetry_perspective_confound',
@@ -506,7 +506,7 @@ function mapCauseToFailureLabel(cause: string): FailureCauseLabel | null {
     'low_quality_input': 'lighting_quality_failure',
   }
   
-  return mapping[disagreementType] ?? null
+  return mapping[cause] ?? null
 }
 
 function inferLabelFromFamily(family: string): FailureCauseLabel | null {

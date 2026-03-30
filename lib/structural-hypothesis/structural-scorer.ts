@@ -314,8 +314,8 @@ function applySymmetryCorrection(
         })
       }
 
-      (result[left] as number) = Number(newLeft.toFixed(1))
-      (result[right] as number) = Number(newRight.toFixed(1))
+      result[left] = Number(newLeft.toFixed(1)) as never
+      result[right] = Number(newRight.toFixed(1)) as never
     }
   }
 

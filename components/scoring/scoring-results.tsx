@@ -25,10 +25,95 @@ import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQuality
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
+// Raw API response shape — some fields live at the top level, not inside prediction
+interface RawScoringResult extends ScoringResult {
+  intakeQuality?: IntakeQualitySummary | null
+  // Top-level fields from the API route response
+  estimatedScore?: number | null
+  netScore?: number | null
+  scoreRange?: { low: number | null; high: number | null } | null
+  confidencePercent?: number | null
+  fallbackMetadata?: { summary?: string; fallbackStrategy?: string } | null
+}
+
 interface ScoringResultsProps {
-  result: ScoringResult & { intakeQuality?: IntakeQualitySummary | null }
+  result: RawScoringResult
   formData: ScoringFormData
   onReset: () => void
+}
+
+// Normalized shape the UI always consumes
+interface NormalizedResult {
+  grossScore: number | null
+  netScore: number | null
+  rangeLow: number | null
+  rangeHigh: number | null
+  confidencePercent: number
+  isFallback: boolean
+  fallbackMessage: string | null
+  measurements: ScoringResult['prediction']['measurements']
+  predictionId: string
+  buckId: string | null
+  propertyId: string | null
+}
+
+function normalizeResult(result: RawScoringResult): NormalizedResult {
+  const p = result.prediction
+
+  // Gross score: prefer DB field, fall back to top-level API field
+  const grossScore = p?.predicted_gross ?? result.estimatedScore ?? null
+
+  // Net score: prefer DB field, fall back to top-level API field
+  const netScore = p?.predicted_net ?? result.netScore ?? null
+
+  // Error band: prefer DB fields, fall back to scoreRange object
+  const rangeLow = p?.error_band_low ?? result.scoreRange?.low ?? null
+  const rangeHigh = p?.error_band_high ?? result.scoreRange?.high ?? null
+
+  // Confidence: prefer DB field, fall back to top-level, then 0
+  const rawConf = p?.confidence_percent ?? result.confidencePercent ?? 0
+  // Normalize string confidence labels from heuristic fallback
+  let confidencePercent: number
+  if (typeof rawConf === 'string') {
+    const label = (rawConf as string).toLowerCase()
+    confidencePercent = label === 'high' ? 75 : label === 'medium' ? 55 : 30
+  } else {
+    confidencePercent = Number(rawConf) || 0
+  }
+
+  // Fallback detection
+  const isFallback =
+    result.scoringMethod === 'heuristic' ||
+    result.scoringMethod === 'vision_with_fallback' ||
+    !!result.fallbackMetadata?.fallbackStrategy
+
+  const fallbackMessage = isFallback
+    ? result.fallbackMetadata?.summary || 'Using simplified analysis. Some measurements may be unavailable.'
+    : null
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[v0] Normalized scoring result:', {
+      grossScore, netScore, rangeLow, rangeHigh, confidencePercent, isFallback,
+      rawPredictedGross: p?.predicted_gross,
+      rawEstimatedScore: result.estimatedScore,
+      rawScoreRange: result.scoreRange,
+      rawConfidence: p?.confidence_percent ?? result.confidencePercent,
+    })
+  }
+
+  return {
+    grossScore,
+    netScore,
+    rangeLow,
+    rangeHigh,
+    confidencePercent,
+    isFallback,
+    fallbackMessage,
+    measurements: p?.measurements ?? null,
+    predictionId: p?.id ?? '',
+    buckId: result.buck?.id ?? null,
+    propertyId: result.buck?.property_id ?? null,
+  }
 }
 
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
@@ -38,8 +123,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
   const [isSubmittingTraining, setIsSubmittingTraining] = useState(false)
   const [trainingSubmitted, setTrainingSubmitted] = useState(false)
 
+  const normalized = normalizeResult(result)
   const { prediction } = result
-  const confidence = prediction.confidence_percent || 0
+  const confidence = normalized.confidencePercent
 
   const handleTrainingSubmit = async (data: GroundTruthFormData) => {
     setIsSubmittingTraining(true)
@@ -48,8 +134,8 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          buck_id: result.buck?.id ?? null,
-          prediction_id: prediction.id,
+          buck_id: normalized.buckId,
+          prediction_id: normalized.predictionId,
           ...data,
         }),
       })
@@ -104,17 +190,29 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             </div>
           </div>
 
+          {/* Fallback notice */}
+          {normalized.isFallback && normalized.fallbackMessage && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <p className="text-xs text-muted-foreground">{normalized.fallbackMessage}</p>
+            </div>
+          )}
+
           {/* Main Scores */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <ScoreDisplay 
               label="Gross Score"
-              value={prediction.predicted_gross}
-              range={`${prediction.error_band_low?.toFixed(0)} - ${prediction.error_band_high?.toFixed(0)}`}
+              value={normalized.grossScore}
+              range={
+                normalized.rangeLow != null && normalized.rangeHigh != null
+                  ? `${normalized.rangeLow.toFixed(0)}\u2013${normalized.rangeHigh.toFixed(0)}`
+                  : null
+              }
               isPrimary
             />
             <ScoreDisplay 
               label="Net Score"
-              value={prediction.predicted_net}
+              value={normalized.netScore}
               subtitle="After deductions"
             />
           </div>
@@ -124,7 +222,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Estimated Range</span>
               <span className="font-medium tabular-nums">
-                {prediction.error_band_low?.toFixed(1)}&quot; - {prediction.error_band_high?.toFixed(1)}&quot;
+                {normalized.rangeLow != null && normalized.rangeHigh != null
+                  ? `${normalized.rangeLow.toFixed(1)}\u2033 \u2013 ${normalized.rangeHigh.toFixed(1)}\u2033`
+                  : 'Unavailable'}
               </span>
             </div>
             <div className="relative h-2 bg-secondary rounded-full overflow-hidden">
@@ -179,8 +279,8 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-3">
-            {result.buck?.id ? (
-              <Link href={`/render/${result.buck?.id}`} className="block">
+            {normalized.buckId ? (
+              <Link href={`/render/${normalized.buckId}`} className="block">
                 <Button variant="outline" className="w-full min-h-[48px] gap-2">
                   <Box className="h-4 w-4" />
                   View 3D Model
@@ -224,8 +324,12 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {prediction.measurements && (
-                <MeasurementsGrid measurements={prediction.measurements} />
+              {normalized.measurements ? (
+                <MeasurementsGrid measurements={normalized.measurements} />
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Detailed measurements unavailable for this result.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -243,10 +347,10 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       />
 
       {/* Precision Pass - Phase 50 */}
-      <PrecisionPassCard predictionId={prediction.id} />
+      {normalized.predictionId && <PrecisionPassCard predictionId={normalized.predictionId} />}
 
       {/* Structural Hypothesis - Phase 51 */}
-      <StructuralHypothesisCard predictionId={prediction.id} />
+      {normalized.predictionId && <StructuralHypothesisCard predictionId={normalized.predictionId} />}
 
       {/* Location Linking */}
       <Card>
@@ -261,8 +365,8 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         </CardHeader>
         <CardContent>
           <BuckLocationLink 
-            buckId={result.buck?.id ?? ''}
-            currentPropertyId={result.buck?.property_id ?? null}
+            buckId={normalized.buckId ?? ''}
+            currentPropertyId={normalized.propertyId}
             compact
           />
         </CardContent>
@@ -348,12 +452,18 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 interface ScoreDisplayProps {
   label: string
   value: number | null | undefined
-  range?: string
+  range?: string | null
   subtitle?: string
   isPrimary?: boolean
 }
 
 function ScoreDisplay({ label, value, range, subtitle, isPrimary }: ScoreDisplayProps) {
+  // Never show undefined or NaN — use em dash for missing scores
+  const displayValue =
+    value != null && !isNaN(Number(value))
+      ? Number(value).toFixed(1)
+      : '\u2014'
+
   return (
     <div className={cn(
       "text-center p-4 rounded-xl",
@@ -364,13 +474,15 @@ function ScoreDisplay({ label, value, range, subtitle, isPrimary }: ScoreDisplay
         "font-bold tracking-tight tabular-nums",
         isPrimary ? "text-5xl text-primary" : "text-4xl"
       )}>
-        {value?.toFixed(1) || '--'}
+        {displayValue}
       </p>
-      {range && (
+      {range ? (
         <p className="text-xs text-muted-foreground mt-1">
           {range} range
         </p>
-      )}
+      ) : value == null ? (
+        <p className="text-xs text-muted-foreground mt-1">Unavailable</p>
+      ) : null}
       {subtitle && (
         <p className="text-xs text-muted-foreground mt-1">
           {subtitle}

@@ -36,7 +36,7 @@ export default function ScorePage() {
     <div className="min-h-svh flex flex-col bg-background">
       <Header />
       
-      <main className="flex-1 container max-w-screen-xl mx-auto px-4 py-6">
+      <main className="flex-1 overflow-y-auto container max-w-screen-xl mx-auto px-4 py-6 pb-safe">
         {result && formData ? (
           <ScoringResults 
             result={result} 
