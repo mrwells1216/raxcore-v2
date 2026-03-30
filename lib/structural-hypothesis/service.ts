@@ -6,6 +6,7 @@ import 'server-only'
  */
 
 import { getServiceSupabase } from '@/lib/supabase/admin'
+import { onStructuralSolverComplete } from '@/lib/supervision/hooks'
 import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
 import type {
   StructuralHypothesisRunRow,
@@ -405,6 +406,29 @@ export async function executeStructuralSolving(structuralRunId: string): Promise
       },
       structural_solving_used: winningCandidate.candidate_type !== 'baseline_structure',
     }).eq('id', run.prediction_id)
+
+    // Phase 52 Supervision Hook
+    // Create supervision event if structure changed meaningfully
+    try {
+      await onStructuralSolverComplete({
+        structuralRunId,
+        predictionId: run.prediction_id,
+        buckId: run.buck_id ?? '',
+        baselineGross: baseGross,
+        baselineNet: baseNet,
+        finalGross: winner.predictedGross,
+        finalNet: winner.predictedNet,
+        winningCandidateType: winningCandidate.candidate_type,
+        primaryReason,
+        structuralChangeReasons: structuralChangeReasons.map(r => String(r)),
+        confidenceShiftReason,
+        baselineStructureSummary: { topology: baseTopology },
+        winningStructureSummary: { topology: winningTopology, params: winningCandidate.structural_params },
+      })
+    } catch (hookError) {
+      // Log but don't fail the main operation
+      console.error('[Phase 52] Structural solver supervision hook failed:', hookError)
+    }
 
     return {
       structuralRunId,

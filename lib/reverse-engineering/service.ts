@@ -11,6 +11,7 @@ import type {
 import { generateHypotheses, calculateGrossNet } from './hypotheses'
 import { evaluateHypothesis } from './evaluate'
 import { buildErrorDecomposition } from './error-decomposition'
+import { onReversePassComplete } from '@/lib/supervision/hooks'
 import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
 
 function pickMeasurements(pred: Prediction): Measurements {
@@ -289,6 +290,34 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
       status: 'completed',
       completed_at: new Date().toISOString(),
     }).eq('id', reverseRunId)
+
+    // Step 5: Phase 52 Supervision Hook
+    // Create supervision event if result changed meaningfully
+    const bestCandidate = (insertedCandidates as HypothesisCandidateRow[])?.find(
+      c => c.id === best.candidateId
+    )
+    const bestEval = evalRows.find(
+      (e: { candidate_id: string }) => e.candidate_id === best.candidateId
+    ) as { predicted_gross: number; predicted_net: number; delta_gross: number; delta_net: number } | undefined
+
+    if (bestEval) {
+      try {
+        await onReversePassComplete({
+          reverseRunId,
+          predictionId: run.prediction_id,
+          buckId: run.buck_id,
+          baselineGross: baseGross,
+          baselineNet: baseNet,
+          refinedGross: bestEval.predicted_gross,
+          refinedNet: bestEval.predicted_net,
+          winningHypothesisType: bestCandidate?.hypothesis_type ?? null,
+          errorDecompositionCauses: decomposition.causes,
+        })
+      } catch (hookError) {
+        // Log but don't fail the main operation
+        console.error('[Phase 52] Reverse pass supervision hook failed:', hookError)
+      }
+    }
 
   } catch (error) {
     // Mark as failed

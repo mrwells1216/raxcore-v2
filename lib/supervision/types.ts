@@ -17,6 +17,7 @@ export type SupervisionType =
   | 'reverse_pass_found_scale_issue'
   | 'reverse_pass_found_asymmetry_issue'
   | 'structural_solver_corrected_topology'
+  | 'multi_view_inconsistency'
   | 'benchmark_failure_cluster'
   | 'confidence_overclaim'
   | 'confidence_underclaim'
@@ -59,7 +60,7 @@ export type LearningActionStatus = 'pending' | 'approved' | 'rejected' | 'implem
 
 export type MitigationStatus = 'unaddressed' | 'in_progress' | 'mitigated' | 'wont_fix'
 
-export type SupervisionSource = 'auto' | 'reverse_pass' | 'structural_solver' | 'benchmark' | 'admin'
+export type SupervisionSource = 'auto' | 'reverse_pass' | 'structural_solver' | 'conflict_engine' | 'benchmark' | 'admin'
 
 export type LabelSource = 'auto' | 'admin-confirmed' | 'benchmark-derived' | 'reverse-pass-derived'
 
