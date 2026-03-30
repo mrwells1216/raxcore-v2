@@ -50,11 +50,32 @@ export interface BuckRecord {
   updated_at: string
 }
 
+// Normalize source_type values from UI to database-allowed values
+// DB allows: 'live_deer', 'mount', 'trail_cam', 'harvest_photo', 'other'
+const SOURCE_TYPE_MAP: Record<string, string> = {
+  'live_deer': 'live_deer',
+  'mount': 'mount',
+  'mounted_photo': 'mount',      // UI sends mounted_photo -> DB expects mount
+  'european_mount': 'mount',     // UI sends european_mount -> DB expects mount
+  'trail_cam': 'trail_cam',
+  'harvest_photo': 'harvest_photo',
+  'other': 'other',
+}
+
+const ALLOWED_SOURCE_TYPES = ['live_deer', 'mount', 'trail_cam', 'harvest_photo', 'other'] as const
+
+function normalizeSourceType(input: string | null | undefined): string | null {
+  if (!input) return null
+  const normalized = SOURCE_TYPE_MAP[input]
+  if (!normalized) {
+    console.warn(`[createBuck] Unknown source_type "${input}", defaulting to "other"`)
+    return 'other'
+  }
+  return normalized
+}
+
 export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> {
   const supabase = await createClient()
-  
-  // Debug: Log incoming params
-  console.log('[v0] createBuck received params:', JSON.stringify(params))
   
   // Validate required fields before insert
   const missingFields: string[] = []
@@ -65,13 +86,18 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
     throw new Error(`Missing required fields for buck creation: ${missingFields.join(', ')}`)
   }
   
+  // Normalize source_type to match database constraint
+  console.log('[v0] source_type before normalization:', params.sourceType)
+  const normalizedSourceType = normalizeSourceType(params.sourceType)
+  console.log('[v0] source_type after normalization:', normalizedSourceType)
+  
   // Build payload matching exact database schema
   const payload = {
     user_id: params.userId || null,
     state: params.state,
     rack_type: params.rackType,
     harvest_method: params.harvestMethod || null,
-    source_type: params.sourceType || null,
+    source_type: normalizedSourceType,
     ears_fully_visible: params.earsFullyVisible ?? null,
     notes: params.notes || null,
     status: 'pending' as const,
@@ -82,9 +108,6 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
     abnormal_point_notes: params.abnormalPointNotes || null,
     abnormal_point_tags: params.abnormalPointTags?.length ? params.abnormalPointTags : null,
   }
-  
-  // Debug: Log final payload
-  console.log('[v0] createBuck payload:', JSON.stringify(payload))
   
   const { data, error } = await supabase
     .from('bucks')
