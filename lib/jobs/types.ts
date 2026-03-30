@@ -61,6 +61,12 @@ export type JobType =
   | 'training_pack_assign_splits'
   | 'training_pack_generate_labels'
   | 'training_pack_export'
+  // Phase 49.5: Cross-view conflict analysis (internal stages)
+  | 'compute_view_residuals'
+  | 'classify_disagreement'
+  | 'compute_view_trust'
+  | 'resolve_conflicts'
+  | 'update_uncertainty_with_conflict'
 
 export type JobPriority = 'critical' | 'high' | 'normal' | 'low' | 'background'
 

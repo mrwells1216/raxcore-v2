@@ -69,9 +69,10 @@ export interface TrainingPackExportPayload {
  * Stage 1: Query predictions matching filters and add to pack
  */
 async function resolveItems(
-  ctx: StageContext<TrainingPackResolveItemsPayload>
+  payload: TrainingPackResolveItemsPayload,
+  _ctx: StageContext
 ): Promise<{ itemCount: number }> {
-  const { packId, filterConfig } = ctx.payload
+  const { packId, filterConfig } = payload
   const supabase = await createServiceClient()
   
   // Build query based on filters
@@ -171,9 +172,10 @@ async function resolveItems(
  * Stage 2: Fetch supervision events for each item
  */
 async function attachSupervision(
-  ctx: StageContext<TrainingPackAttachSupervisionPayload>
+  payload: TrainingPackAttachSupervisionPayload,
+  _ctx: StageContext
 ): Promise<{ attachedCount: number }> {
-  const { packId } = ctx.payload
+  const { packId } = payload
   const supabase = await createServiceClient()
   
   // Get all items
@@ -211,9 +213,10 @@ async function attachSupervision(
  * Stage 3: Attach reverse/structural runs and build artifact summaries
  */
 async function attachArtifacts(
-  ctx: StageContext<TrainingPackAttachArtifactsPayload>
+  payload: TrainingPackAttachArtifactsPayload,
+  _ctx: StageContext
 ): Promise<{ artifactCount: number }> {
-  const { packId } = ctx.payload
+  const { packId } = payload
   const supabase = await createServiceClient()
   
   // Get all items
@@ -269,9 +272,10 @@ async function attachArtifacts(
  * Stage 4: Compute deterministic splits for all items
  */
 async function assignSplits(
-  ctx: StageContext<TrainingPackAssignSplitsPayload>
+  payload: TrainingPackAssignSplitsPayload,
+  _ctx: StageContext
 ): Promise<{ splitCounts: Record<string, number> }> {
-  const { packId, seed } = ctx.payload
+  const { packId, seed } = payload
   
   // Reassign splits
   await reassignPackSplits(packId, seed)
@@ -297,9 +301,10 @@ async function assignSplits(
  * Stage 5: Generate auxiliary labels from supervision/artifacts
  */
 async function generateLabels(
-  ctx: StageContext<TrainingPackGenerateLabelsPayload>
+  payload: TrainingPackGenerateLabelsPayload,
+  _ctx: StageContext
 ): Promise<{ labelCount: number; errorCount: number }> {
-  const { packId } = ctx.payload
+  const { packId } = payload
   
   const result = await generateLabelsForPack(packId)
   
@@ -317,9 +322,10 @@ async function generateLabels(
  * Stage 6: Generate and store export manifest
  */
 async function exportManifest(
-  ctx: StageContext<TrainingPackExportPayload>
+  payload: TrainingPackExportPayload,
+  _ctx: StageContext
 ): Promise<{ exportId: string; itemCount: number }> {
-  const { packId, format, scope, splitFilter, exportedBy } = ctx.payload
+  const { packId, format, scope, splitFilter, exportedBy } = payload
   
   // Generate manifest
   let manifest: string
@@ -367,7 +373,7 @@ const resolveItemsPipeline = definePipeline<TrainingPackResolveItemsPayload, { i
     {
       name: 'resolve_items',
       weight: 100,
-      execute: resolveItems,
+      execute: (input, ctx) => resolveItems(input, ctx),
     },
   ]
 )
@@ -379,7 +385,7 @@ const attachSupervisionPipeline = definePipeline<TrainingPackAttachSupervisionPa
     {
       name: 'attach_supervision',
       weight: 100,
-      execute: attachSupervision,
+      execute: (input, ctx) => attachSupervision(input, ctx),
     },
   ]
 )
@@ -391,7 +397,7 @@ const attachArtifactsPipeline = definePipeline<TrainingPackAttachArtifactsPayloa
     {
       name: 'attach_artifacts',
       weight: 100,
-      execute: attachArtifacts,
+      execute: (input, ctx) => attachArtifacts(input, ctx),
     },
   ]
 )
@@ -403,7 +409,7 @@ const assignSplitsPipeline = definePipeline<TrainingPackAssignSplitsPayload, { s
     {
       name: 'assign_splits',
       weight: 100,
-      execute: assignSplits,
+      execute: (input, ctx) => assignSplits(input, ctx),
     },
   ]
 )
@@ -415,7 +421,7 @@ const generateLabelsPipeline = definePipeline<TrainingPackGenerateLabelsPayload,
     {
       name: 'generate_labels',
       weight: 100,
-      execute: generateLabels,
+      execute: (input, ctx) => generateLabels(input, ctx),
     },
   ]
 )
@@ -427,7 +433,7 @@ const exportPipeline = definePipeline<TrainingPackExportPayload, { exportId: str
     {
       name: 'export_manifest',
       weight: 100,
-      execute: exportManifest,
+      execute: (input, ctx) => exportManifest(input, ctx),
     },
   ]
 )
@@ -468,60 +474,40 @@ export async function runFullPackGeneration(
   labelCount: number
   exportId?: string
 }> {
-  // Stage 1: Resolve items
-  const resolveResult = await resolveItems({
-    payload: { packId, filterConfig },
+  // Minimal stub context for direct invocation (not through job system)
+  const stubCtx = {
     jobId: '',
-    stage: 'resolve_items',
-    attemptNumber: 1,
-  } as StageContext<TrainingPackResolveItemsPayload>)
+    jobType: 'training_pack_resolve_items' as const,
+    traceId: null,
+    retryCount: 0,
+    updateProgress: async () => {},
+    recordStage: async () => {},
+  } as StageContext
+
+  // Stage 1: Resolve items
+  const resolveResult = await resolveItems({ packId, filterConfig }, stubCtx)
   
   // Stage 2: Attach supervision
-  const supervisionResult = await attachSupervision({
-    payload: { packId },
-    jobId: '',
-    stage: 'attach_supervision',
-    attemptNumber: 1,
-  } as StageContext<TrainingPackAttachSupervisionPayload>)
+  const supervisionResult = await attachSupervision({ packId }, stubCtx)
   
   // Stage 3: Attach artifacts
-  const artifactsResult = await attachArtifacts({
-    payload: { packId },
-    jobId: '',
-    stage: 'attach_artifacts',
-    attemptNumber: 1,
-  } as StageContext<TrainingPackAttachArtifactsPayload>)
+  const artifactsResult = await attachArtifacts({ packId }, stubCtx)
   
   // Stage 4: Assign splits
-  const splitsResult = await assignSplits({
-    payload: { packId, seed: options?.splitSeed },
-    jobId: '',
-    stage: 'assign_splits',
-    attemptNumber: 1,
-  } as StageContext<TrainingPackAssignSplitsPayload>)
+  const splitsResult = await assignSplits({ packId, seed: options?.splitSeed }, stubCtx)
   
   // Stage 5: Generate labels
-  const labelsResult = await generateLabels({
-    payload: { packId },
-    jobId: '',
-    stage: 'generate_labels',
-    attemptNumber: 1,
-  } as StageContext<TrainingPackGenerateLabelsPayload>)
+  const labelsResult = await generateLabels({ packId }, stubCtx)
   
   // Stage 6: Export (optional)
   let exportId: string | undefined
   if (options?.format) {
     const exportResult = await exportManifest({
-      payload: {
-        packId,
-        format: options.format,
-        scope: 'full',
-        exportedBy: options.exportedBy,
-      },
-      jobId: '',
-      stage: 'export',
-      attemptNumber: 1,
-    } as StageContext<TrainingPackExportPayload>)
+      packId,
+      format: options.format,
+      scope: 'full',
+      exportedBy: options.exportedBy,
+    }, stubCtx)
     exportId = exportResult.exportId
   }
   
