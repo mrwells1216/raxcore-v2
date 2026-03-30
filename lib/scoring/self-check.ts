@@ -7,7 +7,14 @@
  */
 
 import type { Measurements, LandmarksDetected, AngleType } from '@/lib/types'
-import { MEASUREMENT_RANGES, ANATOMICAL_RATIOS } from './normalization'
+import { MEASUREMENT_RANGES } from './normalization'
+
+// Local fallback ratios for anatomical self-check validation
+// (ANATOMICAL_RATIOS no longer exported from normalization.ts)
+const ANATOMICAL_RATIOS = {
+  beam_to_spread: { min: 0.35, max: 0.65 },
+  g2_to_beam: { min: 0.15, max: 0.45 },
+}
 import type { NormalizationResult } from './normalization'
 import type { LandmarkConsistencyResult } from './landmark-consistency'
 import type { MeasurementCorrectionResult } from './measurement-correction'
