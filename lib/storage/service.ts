@@ -305,24 +305,56 @@ export interface CreatePredictionParams {
   intakeQuality?: Record<string, unknown> | null
 }
 
+// Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
+function normalizeConfidence(confidence: unknown): number | null {
+  if (confidence === null || confidence === undefined) return null
+  if (typeof confidence === 'number') return confidence
+  if (typeof confidence === 'string') {
+    const lower = confidence.toLowerCase()
+    if (lower === 'low') return 0.3
+    if (lower === 'medium') return 0.6
+    if (lower === 'high') return 0.85
+    // Try parsing as number
+    const parsed = parseFloat(confidence)
+    if (!isNaN(parsed)) return parsed
+  }
+  return null
+}
+
+// Safely extract numeric value, returning null if not a valid number
+function safeNumeric(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number' && !isNaN(value)) return value
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value)
+    if (!isNaN(parsed)) return parsed
+  }
+  return null
+}
+
 export async function createPrediction(params: CreatePredictionParams): Promise<PredictionRecord> {
   const supabase = await createClient()
+  
+  // Normalize all numeric fields to handle string values from heuristic fallback
+  const normalizedConfidence = normalizeConfidence(params.result.confidence)
+  const scoreRangeLow = safeNumeric(params.result.scoreRange?.low)
+  const scoreRangeHigh = safeNumeric(params.result.scoreRange?.high)
   
   const { data, error } = await supabase
     .from('predictions')
     .insert({
       buck_id: params.buckId,
       model_version_id: params.modelVersionId || null,
-      estimated_score: params.result.estimatedScore,
-      score_range_low: params.result.scoreRange?.low,
-      score_range_high: params.result.scoreRange?.high,
-      confidence: params.result.confidence,
-      main_beam_left: params.result.mainBeamLeft,
-      main_beam_right: params.result.mainBeamRight,
-      inside_spread: params.result.insideSpread,
-      points_left: params.result.pointsLeft,
-      points_right: params.result.pointsRight,
-      mass_estimate: params.result.massEstimate,
+      estimated_score: safeNumeric(params.result.estimatedScore),
+      score_range_low: scoreRangeLow,
+      score_range_high: scoreRangeHigh,
+      confidence: normalizedConfidence,
+      main_beam_left: safeNumeric(params.result.mainBeamLeft),
+      main_beam_right: safeNumeric(params.result.mainBeamRight),
+      inside_spread: safeNumeric(params.result.insideSpread),
+      points_left: safeNumeric(params.result.pointsLeft),
+      points_right: safeNumeric(params.result.pointsRight),
+      mass_estimate: safeNumeric(params.result.massEstimate),
       tine_lengths: params.result.tineLengths || null,
       circumferences: params.result.circumferences || null,
       raw_ai_response: params.rawResponse || null,
