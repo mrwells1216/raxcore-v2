@@ -92,9 +92,9 @@ export function ConfidenceExplanation({
   scoringMethod,
   isFallback,
 }: ConfidenceExplanationProps) {
-  // Safe arrays — never undefined going into .map()
-  const safeFactors = Array.isArray(factors) ? factors.filter(Boolean) : []
-  const safeRefs = Array.isArray(scalingReferences) ? scalingReferences.filter(Boolean) : []
+  // Safe arrays — never undefined going into .map(). Guard against null/undefined props.
+  const safeFactors: string[] = Array.isArray(factors) ? (factors as string[]).filter(Boolean) : []
+  const safeRefs: string[] = Array.isArray(scalingReferences) ? (scalingReferences as string[]).filter(Boolean) : []
 
   // Categorize factors into positive and negative
   const positiveKeywords = ['multi', 'high', 'clear', 'visible', 'good', 'strong', 'front', 'excellent']

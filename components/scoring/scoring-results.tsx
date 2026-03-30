@@ -21,12 +21,18 @@ import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
-import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary } from '@/lib/types'
+import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 // Raw API response shape — some fields live at the top level, not inside prediction
-interface RawScoringResult extends ScoringResult {
+// Uses Omit to safely override non-optional ScoringResult fields that can be
+// missing/null in partial or fallback responses.
+type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 'scaling_references_used' | 'prediction'> & {
+  buck?: (Buck & { property_id?: string | null }) | null
+  prediction: Partial<ScoringResult['prediction']> & { id?: string }
+  confidence_explanation?: string[] | null
+  scaling_references_used?: string[] | null
   intakeQuality?: IntakeQualitySummary | null
   // Top-level fields from the API route response
   estimatedScore?: number | null
@@ -109,7 +115,7 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     confidencePercent,
     isFallback,
     fallbackMessage,
-    measurements: p?.measurements ?? null,
+    measurements: (p?.measurements as ScoringResult['prediction']['measurements']) ?? null,
     predictionId: p?.id ?? '',
     buckId: result.buck?.id ?? null,
     propertyId: result.buck?.property_id ?? null,
