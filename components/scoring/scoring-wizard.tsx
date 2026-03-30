@@ -13,6 +13,7 @@ import { ImagePreviewGrid } from './image-preview-grid'
 import { ImageGuidance } from './image-guidance'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { computeIntakeQuality, getBestNextPhoto, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
+import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -154,15 +155,33 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         apiFormData.append('intake_quality', JSON.stringify(qualitySummary))
       }
 
-      // Add images
-      images.forEach((img, index) => {
-        if (img.file) {
-          apiFormData.append(`image_${index}`, img.file)
-        } else {
-          apiFormData.append(`image_url_${index}`, img.url)
+      // Preprocess and add images (resize + compress to reduce payload)
+      for (let index = 0; index < images.length; index++) {
+        const img = images[index]
+        try {
+          // Get source - either file or data URL
+          const source = img.file || img.url
+          
+          // Preprocess: resize to max 1200px, JPEG quality 0.7 to reduce payload
+          const processed = await preprocessImage(source, {
+            maxDimension: 1200,
+            quality: 0.7,
+          })
+          
+          // Send as data URL (smaller than raw file for large images)
+          apiFormData.append(`image_data_${index}`, processed.dataUrl)
+          apiFormData.append(`angle_${index}`, img.angleType)
+        } catch (preprocessError) {
+          console.error(`Failed to preprocess image ${index}:`, preprocessError)
+          // Fallback to original if preprocessing fails
+          if (img.file) {
+            apiFormData.append(`image_${index}`, img.file)
+          } else {
+            apiFormData.append(`image_url_${index}`, img.url)
+          }
+          apiFormData.append(`angle_${index}`, img.angleType)
         }
-        apiFormData.append(`angle_${index}`, img.angleType)
-      })
+      }
 
       const response = await fetch('/api/score', {
         method: 'POST',
