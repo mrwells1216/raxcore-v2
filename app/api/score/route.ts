@@ -86,7 +86,11 @@ export async function POST(request: Request) {
       }
     }
 
+    // Debug: Log parsed form values
+    console.log('[v0] Parsed form data - state:', state, 'rackType:', rackType)
+    
     if (!state || !rackType) {
+      console.error('[v0] Validation failed - state:', state, 'rackType:', rackType)
       return NextResponse.json({ error: 'State and rack type are required' }, { status: 400 })
     }
 
@@ -211,14 +215,16 @@ export async function POST(request: Request) {
     // Generate internal buck session ID (distinct from the form session_id)
     const buckSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 
-  // Create buck record in Supabase
+  // Create buck record in Supabase (pass all fields from wizard)
+  console.log('[v0] Calling createBuck with:', { state, rackType, userId, harvestMethod, sourceType, earsFullyVisible })
   const buck = await createBuck({
-  sessionId: buckSessionId,
-  state: state, // Required field - validated at API entry
-  nickname: nickname || undefined,
-  location: location || undefined,
-  harvestDate: harvestDate || undefined,
-  notes: notes || undefined
+    state: state,
+    rackType: rackType,
+    userId: userId || undefined,
+    harvestMethod: harvestMethod || undefined,
+    sourceType: sourceType || undefined,
+    earsFullyVisible: earsFullyVisible,
+    notes: notes || undefined,
   })
 
     // Store image URLs (using data URLs or external URLs for now)

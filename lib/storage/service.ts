@@ -11,21 +11,25 @@ import type {
 // ============================================================================
 
 export interface CreateBuckParams {
-  sessionId: string
-  state: string // Required - US state code
-  nickname?: string
-  location?: string
-  harvestDate?: string
+  // Required fields (NOT NULL in schema)
+  state: string
+  rackType: 'typical' | 'non-typical'
+  // Optional fields
+  userId?: string
+  harvestMethod?: 'bow' | 'rifle' | 'muzzleloader' | 'crossbow' | 'other' | null
+  sourceType?: 'live_deer' | 'mount' | 'trail_cam' | 'harvest_photo' | 'other' | null
+  earsFullyVisible?: boolean
   notes?: string
 }
 
 export interface BuckRecord {
   id: string
-  session_id: string
+  user_id: string | null
   state: string
-  nickname: string | null
-  location: string | null
-  harvest_date: string | null
+  rack_type: 'typical' | 'non-typical'
+  harvest_method: string | null
+  source_type: string | null
+  ears_fully_visible: boolean | null
   notes: string | null
   status: 'pending' | 'processing' | 'completed' | 'failed'
   created_at: string
@@ -35,53 +39,44 @@ export interface BuckRecord {
 export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> {
   const supabase = await createClient()
   
-  // Validate required state field
-  if (!params.state) {
-    throw new Error('State is required for scoring submission')
+  // Debug: Log incoming params
+  console.log('[v0] createBuck received params:', JSON.stringify(params))
+  
+  // Validate required fields before insert
+  const missingFields: string[] = []
+  if (!params.state) missingFields.push('state')
+  if (!params.rackType) missingFields.push('rack_type')
+  
+  if (missingFields.length > 0) {
+    throw new Error(`Missing required fields for buck creation: ${missingFields.join(', ')}`)
   }
   
-  // Build minimal payload WITHOUT harvest_date first (safest approach)
-  const minimalPayload = {
-    session_id: params.sessionId,
+  // Build payload matching exact database schema
+  const payload = {
+    user_id: params.userId || null,
     state: params.state,
-    nickname: params.nickname || null,
-    location: params.location || null,
+    rack_type: params.rackType,
+    harvest_method: params.harvestMethod || null,
+    source_type: params.sourceType || null,
+    ears_fully_visible: params.earsFullyVisible ?? null,
     notes: params.notes || null,
-    status: 'pending' as const
+    status: 'pending' as const,
   }
   
-  // If harvest_date is provided, try with it first
-  if (params.harvestDate) {
-    const fullPayload = { ...minimalPayload, harvest_date: params.harvestDate }
-    
-    const { data, error } = await supabase
-      .from('bucks')
-      .insert(fullPayload)
-      .select()
-      .single()
-    
-    // If schema error, fall back to minimal payload
-    if (error) {
-      const errMsg = error.message.toLowerCase()
-      if (errMsg.includes('harvest_date') || errMsg.includes('schema cache') || errMsg.includes('column')) {
-        console.warn('[createBuck] harvest_date column not available, retrying without it')
-        // Fall through to minimal insert below
-      } else {
-        throw new Error(`Failed to create buck: ${error.message}`)
-      }
-    } else {
-      return data
-    }
-  }
+  // Debug: Log final payload
+  console.log('[v0] createBuck payload:', JSON.stringify(payload))
   
-  // Insert with minimal payload (no harvest_date)
   const { data, error } = await supabase
     .from('bucks')
-    .insert(minimalPayload)
+    .insert(payload)
     .select()
     .single()
 
-  if (error) throw new Error(`Failed to create buck: ${error.message}`)
+  if (error) {
+    console.error('[createBuck] Insert failed:', error.message)
+    throw new Error(`Failed to create buck: ${error.message}`)
+  }
+  
   return data
 }
 
