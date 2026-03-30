@@ -252,7 +252,8 @@ export function calculateCost(
 // ============================================================================
 
 export async function createUsageRecord(input: UsageRecordInput): Promise<UsageRecord | null> {
-  const supabase = await createClient()
+  // Use service role client for internal bookkeeping (bypasses RLS)
+  const supabase = await getServiceSupabase()
 
   const { data, error } = await supabase
     .from('usage_records')
@@ -283,15 +284,16 @@ export async function createUsageRecord(input: UsageRecordInput): Promise<UsageR
 export async function updateUsageRecord(
   requestId: string,
   updates: UsageRecordUpdate
-): Promise<UsageRecord | null> {
-  const supabase = await createClient()
-
+  ): Promise<UsageRecord | null> {
+  // Use service role client for internal bookkeeping
+  const supabase = await getServiceSupabase()
+  
   const { data, error } = await supabase
-    .from('usage_records')
-    .update(updates)
-    .eq('request_id', requestId)
-    .select()
-    .single()
+  .from('usage_records')
+  .update(updates)
+  .eq('request_id', requestId)
+  .select()
+  .maybeSingle() // Use maybeSingle to handle zero rows gracefully
 
   if (error) {
     console.error('Error updating usage record:', error)

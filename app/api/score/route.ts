@@ -183,16 +183,21 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-    // Create usage tracking record
-    await createUsageRecord({
-      request_id: requestId,
-      endpoint: '/api/score',
-      method: 'POST',
-      client_ip: clientKey.replace('ip:', ''),
-      images_submitted: imageCount,
-      user_agent: request.headers.get('user-agent') || undefined,
-    })
-    usageRecordCreated = true
+    // Create usage tracking record (non-blocking - scoring continues if this fails)
+    try {
+      await createUsageRecord({
+        request_id: requestId,
+        endpoint: '/api/score',
+        method: 'POST',
+        client_ip: clientKey.replace('ip:', ''),
+        images_submitted: imageCount,
+        user_agent: request.headers.get('user-agent') || undefined,
+      })
+      usageRecordCreated = true
+    } catch (usageErr) {
+      console.error('[score] Non-blocking usage record create failed:', usageErr)
+      // Continue scoring - usage logging is not critical
+    }
 
     // Check if vision scoring is enabled
     if (!productionConfig.vision_scoring_enabled) {
@@ -398,21 +403,30 @@ export async function POST(request: Request) {
     const costEstimate = await getActiveCostEstimate()
     const cost = costEstimate ? calculateCost(imageCount, 1, costEstimate) : { total_cost_mc: 0 }
     
+    // Non-blocking usage update - scoring response returns even if this fails
     if (usageRecordCreated) {
-      await completeUsageRecord(requestId, true, {
-        predictionId: prediction.id,
-        imagesProcessed: imageCount,
-        visionCalls: 1,
-        retryCount: scoringResult.runtimeMetadata?.totalAttempts ? scoringResult.runtimeMetadata.totalAttempts - 1 : 0,
-        usedFallback: scoringResult.scoringMethod === 'vision_with_fallback' || scoringResult.scoringMethod === 'heuristic',
-        processingTimeMs,
-        visionTimeMs: scoringResult.processingTimeMs,
-        modelVersionId: model?.id,
-        visionModel: scoringResult.visionModelUsed || undefined,
-      })
+      try {
+        await completeUsageRecord(requestId, true, {
+          predictionId: prediction.id,
+          imagesProcessed: imageCount,
+          visionCalls: 1,
+          retryCount: scoringResult.runtimeMetadata?.totalAttempts ? scoringResult.runtimeMetadata.totalAttempts - 1 : 0,
+          usedFallback: scoringResult.scoringMethod === 'vision_with_fallback' || scoringResult.scoringMethod === 'heuristic',
+          processingTimeMs,
+          visionTimeMs: scoringResult.processingTimeMs,
+          modelVersionId: model?.id,
+          visionModel: scoringResult.visionModelUsed || undefined,
+        })
+      } catch (usageErr) {
+        console.error('[score] Non-blocking usage record update failed:', usageErr)
+      }
       
-      // Record usage for rate limiting
-      await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
+      // Record usage for rate limiting (also non-blocking)
+      try {
+        await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
+      } catch (rateErr) {
+        console.error('[score] Non-blocking rate limit update failed:', rateErr)
+      }
     }
 
     // Phase 39: Log score completed
@@ -513,19 +527,24 @@ export async function POST(request: Request) {
     // Phase 30: Track failed request
     const processingTimeMs = Date.now() - requestStartTime
     if (usageRecordCreated) {
-      await completeUsageRecord(requestId, false, {
-        imagesProcessed: imageCount,
-        visionCalls: 0,
-        processingTimeMs,
-        errorType,
-        errorMessage: errorMessage.slice(0, 500), // Truncate long error messages
-      })
+      // Non-blocking error logging
+      try {
+        await completeUsageRecord(requestId, false, {
+          imagesProcessed: imageCount,
+          visionCalls: 0,
+          processingTimeMs,
+          errorType,
+          errorMessage: errorMessage.slice(0, 500), // Truncate long error messages
+        })
+      } catch (usageErr) {
+        console.error('[score] Non-blocking usage record error update failed:', usageErr)
+      }
       
       // Still record usage for rate limiting (prevents retry abuse)
       try {
         await recordUsage(clientKey, 1, imageCount, 0)
       } catch (usageError) {
-        console.error('Failed to record usage:', usageError)
+        console.error('[score] Non-blocking rate limit update failed:', usageError)
       }
     }
 
@@ -541,6 +560,9 @@ export async function POST(request: Request) {
       statusCode = 429
     } else if (isNetwork) {
       userMessage = 'A network error occurred. Please check your connection and try again.'
+      statusCode = 503
+    } else if (errorMessage.includes('harvest_date') || errorMessage.includes('schema cache')) {
+      userMessage = 'Scoring is temporarily unavailable due to a database configuration issue. Please try again shortly.'
       statusCode = 503
     }
 

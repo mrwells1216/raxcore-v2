@@ -33,16 +33,43 @@ export interface BuckRecord {
 export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> {
   const supabase = await createClient()
   
+  // Build minimal payload WITHOUT harvest_date first (safest approach)
+  const minimalPayload = {
+    session_id: params.sessionId,
+    nickname: params.nickname || null,
+    location: params.location || null,
+    notes: params.notes || null,
+    status: 'pending' as const
+  }
+  
+  // If harvest_date is provided, try with it first
+  if (params.harvestDate) {
+    const fullPayload = { ...minimalPayload, harvest_date: params.harvestDate }
+    
+    const { data, error } = await supabase
+      .from('bucks')
+      .insert(fullPayload)
+      .select()
+      .single()
+    
+    // If schema error, fall back to minimal payload
+    if (error) {
+      const errMsg = error.message.toLowerCase()
+      if (errMsg.includes('harvest_date') || errMsg.includes('schema cache') || errMsg.includes('column')) {
+        console.warn('[createBuck] harvest_date column not available, retrying without it')
+        // Fall through to minimal insert below
+      } else {
+        throw new Error(`Failed to create buck: ${error.message}`)
+      }
+    } else {
+      return data
+    }
+  }
+  
+  // Insert with minimal payload (no harvest_date)
   const { data, error } = await supabase
     .from('bucks')
-    .insert({
-      session_id: params.sessionId,
-      nickname: params.nickname || null,
-      location: params.location || null,
-      harvest_date: params.harvestDate || null,
-      notes: params.notes || null,
-      status: 'pending'
-    })
+    .insert(minimalPayload)
     .select()
     .single()
 
