@@ -5,6 +5,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   UsageRecord,
   UsageRecordInput,
@@ -384,7 +385,8 @@ async function getOrCreateRateLimitState(
   windowType: 'minute' | 'hour' | 'day' | 'month' | 'burst',
   burstSeconds = 10
 ): Promise<RateLimitState> {
-  const supabase = await createClient()
+  // Use service role client to bypass RLS for internal rate limit operations
+  const supabase = await getServiceSupabase()
   const { start, end } = getWindowBounds(windowType, burstSeconds)
 
   // Try to get existing state
@@ -439,7 +441,8 @@ async function incrementRateLimitState(
   costMc: number,
   burstSeconds = 10
 ): Promise<RateLimitState> {
-  const supabase = await createClient()
+  // Use service role client to bypass RLS for internal rate limit operations
+  const supabase = await getServiceSupabase()
   const { start } = getWindowBounds(windowType, burstSeconds)
 
   // Upsert with increment
