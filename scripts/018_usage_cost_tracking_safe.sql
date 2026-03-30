@@ -232,11 +232,13 @@ DO $$ BEGIN DROP POLICY IF EXISTS "Service role full access production_config" O
 CREATE POLICY "Service role full access production_config" ON production_config FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ============================================================================
--- PERFORMANCE INDEXES
+-- PERFORMANCE INDEXES (simple column indexes - no DATE_TRUNC expressions)
 -- ============================================================================
 
-CREATE INDEX IF NOT EXISTS idx_usage_records_date_endpoint 
-  ON usage_records (DATE_TRUNC('day', created_at), endpoint);
-CREATE INDEX IF NOT EXISTS idx_usage_records_client_date 
-  ON usage_records (client_ip, DATE_TRUNC('hour', created_at)) 
+-- Replaced DATE_TRUNC expression indexes with simple composite indexes
+-- DATE_TRUNC is STABLE not IMMUTABLE, so cannot be used in index expressions
+CREATE INDEX IF NOT EXISTS idx_usage_records_endpoint_created 
+  ON usage_records (endpoint, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_records_client_created 
+  ON usage_records (client_ip, created_at) 
   WHERE client_ip IS NOT NULL;
