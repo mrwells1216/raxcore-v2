@@ -1,5 +1,3 @@
-'use server'
-
 /**
  * Phase 39: Structured Runtime Event Logging + Observability
  *
@@ -179,10 +177,13 @@ export function logEventFireForget(input: RuntimeEventInput): void {
  *   const stop = startTimer({ traceId, service: 'score', route: '/api/score', ... })
  *   const result = await doWork()
  *   stop({ status: 'success', buckId: result.id })
+ * 
+ * NOTE: This is NOT exported as a Server Action because it returns a closure.
+ * Import it directly for use in API routes / server components.
  */
 export function startTimer(
   base: Omit<RuntimeEventInput, 'status' | 'durationMs'>,
-) {
+): (overrides: Partial<RuntimeEventInput> & { status: EventStatus }) => void {
   const t0 = Date.now()
   return (overrides: Partial<RuntimeEventInput> & { status: EventStatus }) => {
     logEventFireForget({

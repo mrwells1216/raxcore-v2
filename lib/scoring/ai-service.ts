@@ -1244,6 +1244,7 @@ async function buildVisionScoringOutput(
       processed_at: new Date().toISOString(),
     },
   }
+}
 
 
 /**
