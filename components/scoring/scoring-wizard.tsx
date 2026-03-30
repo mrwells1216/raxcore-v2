@@ -170,7 +170,17 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       })
 
       if (!response.ok) {
-        throw new Error('Scoring failed')
+        let errorMessage = 'Scoring failed'
+
+        try {
+          const errorJson = await response.json()
+          errorMessage = errorJson.error || JSON.stringify(errorJson)
+        } catch {
+          errorMessage = await response.text()
+        }
+
+        console.error('Scoring API error:', errorMessage)
+        throw new Error(`Scoring failed: ${errorMessage}`)
       }
 
       const result: ScoringResult = await response.json()
