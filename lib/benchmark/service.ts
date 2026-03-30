@@ -380,8 +380,9 @@ export async function listBenchmarkRuns(options?: {
 export async function evaluateGuardrails(
   benchmarkRunId: string
 ): Promise<GuardrailEvaluationResult> {
-  const supabase = await createClient()
-
+  // Phase 52 Patch 2: Import supervision hooks for regression detection
+  const { createSupervisionEvent } = await import('@/lib/supervision/service')
+  
   // Get the benchmark run with its config
   const run = await getBenchmarkRun(benchmarkRunId)
   if (!run) throw new Error('Benchmark run not found')
@@ -541,6 +542,57 @@ export async function evaluateGuardrails(
     })
     .eq('id', benchmarkRunId)
 
+  // Phase 52 Patch 2: Benchmark Regression Hook
+  // Create supervision event if meaningful regression detected
+  if (criticalFailures > 0 || warningFailures > 0) {
+    try {
+      // Identify which checks failed
+      const failedChecks = checks.filter(c => !c.passed)
+      const failureClusterSummary = failedChecks.map(c => ({
+        check_name: c.name,
+        severity: c.severity,
+        threshold: c.threshold,
+        actual: c.actual,
+        unit: c.unit,
+      }))
+      
+      // Determine if this is a segment-specific regression
+      const segmentRegressions = subgroupResults
+        .filter(s => !s.passed)
+        .map(s => ({
+          segment: s.segment || 'unknown',
+          regression_inches: s.regression_inches || 0,
+          metric: s.metric || 'unknown',
+        }))
+
+      await createSupervisionEvent({
+        supervision_type: criticalFailures > 0 ? 'benchmark_failure_cluster' : 'segment_regression_detected',
+        source: 'benchmark_system',
+        confidence: Math.max(0.6, 1 - (warningFailures / (criticalFailures + warningFailures + 1))),
+        benchmark_run_id: benchmarkRunId,
+        variant_id: run.candidate_model_version_id || undefined,
+        metadata_json: {
+          affected_segments: segmentRegressions.length > 0 ? segmentRegressions.map(s => s.segment) : ['overall'],
+          severity: criticalFailures > 0 ? 'critical' : 'warning',
+          failure_count: criticalFailures + warningFailures,
+          failure_cluster: failureClusterSummary,
+          segment_regressions: segmentRegressions,
+          candidate_vs_active_regression_inches: regressionInches || 0,
+          candidate_vs_active_regression_percent: regressionPercent || 0,
+        },
+        labels: [
+          ...failedChecks.map(check => ({
+            label: mapCheckToLabel(check.name),
+            confidence: check.severity === 'critical' ? 0.8 : 0.6,
+            source: 'auto' as const,
+          })),
+        ],
+      })
+    } catch (hookError) {
+      console.error('[Phase 52] Benchmark regression supervision hook failed:', hookError)
+    }
+  }
+
   return result
 }
 
@@ -661,6 +713,20 @@ async function evaluateSubgroupRegressions(
   }
 
   return subgroupResults
+}
+
+// Phase 52 Patch 2: Helper to map check names to failure cause labels
+function mapCheckToLabel(checkName: string): string {
+  const labelMap: Record<string, string> = {
+    'Average Gross Error': 'confidence_overestimate',
+    'Average Net Error': 'confidence_overestimate',
+    'Regression vs Active (Absolute)': 'weak_multi_view_agreement',
+    'Regression vs Active (Percent)': 'weak_multi_view_agreement',
+    'Accuracy (5 inches)': 'confidence_overestimate',
+    'Accuracy (10 inches)': 'confidence_overestimate',
+    'Subgroup Regression': 'segment_calibration_miss',
+  }
+  return labelMap[checkName] || 'confidence_overestimate'
 }
 
 // ============================================================================
