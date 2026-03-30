@@ -19,8 +19,8 @@ import type {
   HourlyUsageSummary,
   MonthlyUsageSummary,
   UsageReportSummary,
-  DEFAULT_PRODUCTION_CONFIG,
 } from '@/lib/types'
+import { DEFAULT_PRODUCTION_CONFIG } from '@/lib/types'
 
 // ============================================================================
 // CACHING

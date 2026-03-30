@@ -548,7 +548,7 @@ export async function POST(request: Request) {
       error: 'Scoring failed', 
       userMessage,
       requestId,
-      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      details: errorMessage, // Always include for debugging
       errorType,
     }, { status: statusCode })
   }
