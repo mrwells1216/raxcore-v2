@@ -202,8 +202,10 @@ export async function listBucks(options?: {
 export interface BuckImageRecord {
   id: string
   buck_id: string
-  image_url: string
-  image_type: string
+  storage_path: string
+  public_url: string | null
+  image_url: string | null
+  image_type: string | null
   display_order: number
   created_at: string
 }
@@ -214,19 +216,46 @@ export async function addBuckImages(
 ): Promise<BuckImageRecord[]> {
   const supabase = await createClient()
   
-  const images = imageUrls.map((url, index) => ({
-    buck_id: buckId,
-    image_url: url,
-    image_type: 'user_upload',
-    display_order: index
-  }))
+  // Validate we have URLs before attempting insert
+  if (!imageUrls.length) {
+    throw new Error('No images provided for buck')
+  }
+  
+  // Filter out empty URLs
+  const validUrls = imageUrls.filter(url => url && url.length > 0)
+  if (!validUrls.length) {
+    throw new Error('All provided image URLs are empty')
+  }
+  
+  const images = validUrls.map((url, index) => {
+    // Generate a storage_path for tracking purposes
+    // Format: bucks/{buckId}/image_{index}_{timestamp}
+    const timestamp = Date.now()
+    const storagePath = `bucks/${buckId}/image_${index}_${timestamp}`
+    
+    // Determine if this is a data URL, external URL, or storage URL
+    const isDataUrl = url.startsWith('data:')
+    const isStorageUrl = url.includes('supabase') && url.includes('storage')
+    
+    return {
+      buck_id: buckId,
+      storage_path: storagePath,
+      public_url: isDataUrl ? null : url,  // External/storage URLs go here
+      image_url: url,                       // Keep original for backward compat
+      image_type: 'user_upload',
+      display_order: index,
+    }
+  })
 
   const { data, error } = await supabase
     .from('buck_images')
     .insert(images)
     .select()
 
-  if (error) throw new Error(`Failed to add buck images: ${error.message}`)
+  if (error) {
+    console.error('[addBuckImages] Insert failed:', error.message)
+    throw new Error(`Failed to add buck images: ${error.message}`)
+  }
   return data
 }
 
