@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Target, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { describeHypothesis } from '@/lib/reverse-engineering/hypotheses'
+import type { HypothesisType, HypothesisParams } from '@/lib/reverse-engineering/types'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -36,8 +38,9 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
   const decomposition = data?.decomposition as { causes?: Array<{ cause: string; weight: number }> } | undefined
   const candidates = (data?.candidates ?? []) as Array<{
     id: string
-    hypothesis_type: string
+    hypothesis_type: HypothesisType
     hypothesis_rank: number
+    params?: HypothesisParams
   }>
   const evaluations = (data?.evaluations ?? {}) as Record<string, {
     total_score: number
@@ -150,11 +153,14 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
                         ({Number(best.delta_gross) >= 0 ? '+' : ''}{String(best.delta_gross)}&quot;)
                       </span>
                     </div>
-                    {best.hypothesis_type !== 'noop' && (
-                      <div className="text-xs text-muted-foreground">
-                        Applied: {String(best.hypothesis_type).replace(/_/g, ' ')}
-                      </div>
-                    )}
+              {best.hypothesis_type !== 'noop' && (
+                <div className="text-xs text-muted-foreground">
+                  Applied: {describeHypothesis(
+                    best.hypothesis_type as HypothesisType,
+                    (best.params as HypothesisParams) ?? {}
+                  )}
+                </div>
+              )}
                   </div>
                 </div>
 
@@ -203,9 +209,9 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
                                   isBest ? 'bg-primary/10 border border-primary/20' : 'bg-muted/50'
                                 )}
                               >
-                                <span className="font-mono">
-                                  {c.hypothesis_type.replace(/_/g, ' ')}
-                                </span>
+              <span className="font-mono">
+                {describeHypothesis(c.hypothesis_type, c.params ?? {})}
+              </span>
                                 <span className="text-muted-foreground">
                                   {e?.total_score?.toFixed?.(1) ?? '—'} pts
                                 </span>

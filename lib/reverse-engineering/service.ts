@@ -323,6 +323,7 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
         baseGross,
         baseNet,
         baseConfidence,
+        isNoop: c.hypothesis_type === 'noop',
       })
 
       const deltaGross = Number((res.gross - baseGross).toFixed(1))
