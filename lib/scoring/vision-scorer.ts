@@ -31,11 +31,8 @@ import { logEventFireForget } from '@/lib/monitoring/service'
 
 // OpenAI is the only provider for scoring vision calls.
 // Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
-// (specificationVersion "v2") which ai@6 requires. v1.x only implements v1 and
-// will throw "Unsupported model version v1" regardless of which method is used.
-//
-// Use openai('gpt-4o') — the standard chat path in @ai-sdk/openai v2.
-// This model supports image inputs (vision) and implements spec v2.
+// (specificationVersion "v2") which ai@6 requires.
+// openai('gpt-4o') is the standard chat path — supports vision inputs, spec v2.
 const OPENAI_VISION_MODEL = 'gpt-4o'
 
 function getVisionModel() {
@@ -70,16 +67,7 @@ function getVisionModel() {
   }
 }
 
-  // openai.responses() is the AI SDK 6 / spec-v2 Responses API path.
-  // Do NOT use openai('gpt-4o') — that resolves to spec v1 chat and throws
-  // "Unsupported model version v1 for provider openai.chat".
-  return {
-    model: openai.responses(OPENAI_VISION_MODEL),
-    provider: 'openai',
-    providerAdapter: 'openai.responses',
-    modelName: OPENAI_VISION_MODEL,
-  }
-}
+
 
 export interface VisionImageInput {
   imageUrl: string
