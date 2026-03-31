@@ -73,10 +73,67 @@ export interface LandmarksDetected {
   ears_visible: boolean
   eyes_visible: boolean
   antlers_visible: boolean
+
+  // Ear (secondary/bonus — not primary)
   ear_base_to_tip?: number
-  eye_to_eye?: number
   ear_tip_to_tip?: number
+  ear_base_spacing?: number
+
+  // Top-tier: eye references
+  eye_to_eye?: number
+  eye_width?: number
+  eye_height?: number
+  eye_box_detected?: boolean
+
+  // Top-tier: antler base / pedicle
+  pedicle_spacing?: number
+  eye_to_pedicle_distance?: number
+  pedicle_visible?: boolean
+
+  // Top-tier: skull / forehead width
+  skull_forehead_width?: number
+  skull_width_visible?: boolean
+
+  // Secondary: nose / muzzle
+  nose_bridge_length?: number
+  muzzle_width?: number
+
   quality_notes?: string[]
+}
+
+// ── Weighted reference consensus result (multi-reference model)
+export interface ReferenceConsensusResult {
+  /** Blended scaling factor from all contributing references */
+  blendedScalingFactor: number
+
+  /** Overall agreement score across references: 0 = conflict, 1 = perfect agreement */
+  referenceAgreementScore: number
+
+  /** Conflict score: 0 = no conflict, 1 = maximum conflict */
+  referenceConflictScore: number
+
+  /** Quality of the final blend: 'strong' | 'moderate' | 'weak' | 'fallback' */
+  referenceBlendQuality: 'strong' | 'moderate' | 'weak' | 'fallback'
+
+  /** Effective confidence after applying agreement/conflict modifiers */
+  blendedConfidence: number
+
+  /** Per-reference debug flags */
+  eyeReferenceUsed: boolean
+  antlerBaseReferenceUsed: boolean
+  eyeToBaseReferenceUsed: boolean
+  skullWidthReferenceUsed: boolean
+  noseReferenceUsed: boolean
+  earReferenceUsed: boolean
+
+  /** Human-readable summary of which references contributed */
+  referencesSummary: string[]
+
+  /** If multiple top-tier refs agreed — range was tightened */
+  rangeTightened: boolean
+
+  /** If refs conflicted — range was widened and confidence reduced */
+  rangeWidened: boolean
 }
 
 // Enhanced landmark representation (Phase 8)

@@ -135,10 +135,29 @@ export const CONFIDENCE_THRESHOLDS = {
 } as const
 
 export const ANATOMICAL_REFERENCES = {
+  // ── Ear references (kept as secondary/bonus — not primary)
   EAR_BASE_TO_TIP: 6.25,
-  EYE_TO_EYE: 4.3,
   EAR_TIP_TO_TIP_ALERT: 16.0,
   EAR_TIP_TO_TIP_RELAXED: 14.0,
+  EAR_BASE_SPACING: 7.5,       // center-to-center of ear bases (front view)
+
+  // ── Top-tier: eye box dimensions
+  EYE_TO_EYE: 4.3,             // center-to-center of pupils (front view)
+  EYE_WIDTH: 1.4,              // horizontal width of one eye socket
+  EYE_HEIGHT: 0.9,             // vertical height of one eye socket
+  EYE_BOX_WIDTH: 1.4,          // full bony eye socket box width
+  EYE_BOX_HEIGHT: 1.0,         // full bony eye socket box height
+
+  // ── Top-tier: antler base / pedicle spacing
+  PEDICLE_SPACING: 3.8,        // center-to-center of antler pedicles on skull
+  EYE_TO_PEDICLE: 2.1,         // distance from eye center to nearest pedicle base
+
+  // ── Top-tier: skull / forehead width
+  SKULL_FOREHEAD_WIDTH: 5.2,   // forehead width between orbital ridges (front view)
+
+  // ── Secondary: nose bridge and muzzle
+  NOSE_BRIDGE_LENGTH: 2.8,     // bridge of nose from brow to tip
+  MUZZLE_WIDTH: 2.6,           // muzzle width at widest point (front view)
 } as const
 
 export const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const
