@@ -8,6 +8,8 @@ import { ScoringResults } from '@/components/scoring/scoring-results'
 import { createClient } from '@/lib/supabase/client'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
+const SESSION_KEY = 'raxcore_active_result'
+
 export default function ScorePage() {
   const searchParams = useSearchParams()
   const initialMode = searchParams.get('mode') === 'upload' ? 'upload' : 'camera'
@@ -15,6 +17,22 @@ export default function ScorePage() {
   const [result, setResult] = useState<ScoringResult | null>(null)
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+
+  // Restore result from sessionStorage on mount (survives refresh while on this tab)
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(SESSION_KEY)
+      if (stored) {
+        const { result: r, formData: fd } = JSON.parse(stored)
+        if (r && fd) {
+          setResult(r)
+          setFormData(fd)
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, [])
 
   useEffect(() => {
     createClient().auth.getUser().then(({ data: { user } }) => {
@@ -25,11 +43,22 @@ export default function ScorePage() {
   const handleScoringComplete = (scoringResult: ScoringResult, data: ScoringFormData) => {
     setResult(scoringResult)
     setFormData(data)
+    // Persist so a refresh re-anchors to the results view
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ result: scoringResult, formData: data }))
+    } catch {
+      // ignore quota errors
+    }
   }
 
   const handleReset = () => {
     setResult(null)
     setFormData(null)
+    try {
+      sessionStorage.removeItem(SESSION_KEY)
+    } catch {
+      // ignore
+    }
   }
 
   return (

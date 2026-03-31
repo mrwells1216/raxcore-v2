@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { startPrecisionPass } from '@/lib/reverse-engineering/service'
+import { getServiceSupabase } from '@/lib/supabase/admin'
+import { startPrecisionPass, executePrecisionPass } from '@/lib/reverse-engineering/service'
 
 export const runtime = 'nodejs'
 
@@ -13,7 +14,8 @@ const DEV_ANON_USER_ID = 'dev-anonymous-user'
 
 /**
  * POST /api/reverse/predictions/[predictionId]/precision-pass
- * Start a precision pass for a prediction
+ * Start a precision pass for a prediction.
+ * In development, executes the pipeline inline immediately instead of waiting for a worker.
  */
 export async function POST(
   _: Request, 
@@ -45,17 +47,63 @@ export async function POST(
       requestedByUserId: requesterId,
     })
     
-    console.log('[precision-pass] Precision pass started', {
+    console.log('[precision-pass] Reverse run and job created', {
       runId: run.id,
       jobId,
       status: run.status,
     })
 
+    // DEV-ONLY: execute pipeline inline so results are available immediately
+    // without requiring a background worker process.
+    if (IS_DEV) {
+      console.log('[precision-pass] DEV: executing pipeline inline', { runId: run.id })
+      
+      try {
+        await executePrecisionPass(run.id)
+        console.log('[precision-pass] DEV: inline execution completed', { runId: run.id })
+
+        // Mark the durable job as completed so it doesn't stay permanently queued
+        const adminSupabase = await getServiceSupabase()
+        await adminSupabase
+          .from('durable_jobs')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            result: { inline: true, runId: run.id },
+          })
+          .eq('id', jobId)
+
+      } catch (execError) {
+        const execMsg = execError instanceof Error ? execError.message : 'Inline execution failed'
+        console.error('[precision-pass] DEV: inline execution failed', {
+          runId: run.id,
+          error: execMsg,
+          stack: execError instanceof Error ? execError.stack : undefined,
+        })
+        // Return the runId anyway — the run is now marked failed in DB,
+        // polling will surface the failure status to the UI.
+        return NextResponse.json({ 
+          runId: run.id, 
+          jobId,
+          status: 'failed',
+          devError: execMsg,
+        })
+      }
+
+      return NextResponse.json({ 
+        runId: run.id, 
+        jobId,
+        status: 'completed',
+      })
+    }
+
+    // PRODUCTION: return queued status, worker will process asynchronously
     return NextResponse.json({ 
       runId: run.id, 
       jobId,
       status: run.status,
     })
+
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to start precision pass'
     const stack = e instanceof Error ? e.stack : undefined

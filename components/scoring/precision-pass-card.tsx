@@ -17,14 +17,18 @@ interface PrecisionPassCardProps {
 
 export function PrecisionPassCard({ predictionId, className }: PrecisionPassCardProps) {
   const [runId, setRunId] = useState<string | null>(null)
+  const [initialStatus, setInitialStatus] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
+  // Stop polling once completed or failed — no need to keep hitting the API
+  const shouldPoll = runId && initialStatus !== 'completed' && initialStatus !== 'failed'
+
   const { data } = useSWR(
-    runId ? `/api/reverse/runs/${runId}` : null,
+    shouldPoll ? `/api/reverse/runs/${runId}` : runId ? `/api/reverse/runs/${runId}` : null,
     fetcher,
-    { refreshInterval: runId ? 1500 : 0 }
+    { refreshInterval: shouldPoll ? 1500 : 0, revalidateOnFocus: false }
   )
 
   const status = data?.run?.status as string | undefined
@@ -68,6 +72,8 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
       
       if (json.runId) {
         setRunId(json.runId)
+        // Seed initial status from route response — in dev, route returns 'completed' immediately
+        if (json.status) setInitialStatus(json.status)
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Failed to start precision pass'
