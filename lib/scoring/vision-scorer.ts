@@ -30,9 +30,12 @@ import {
 import { logEventFireForget } from '@/lib/monitoring/service'
 
 // OpenAI is the only provider for scoring vision calls.
-// OPENAI_API_KEY must be set in the server environment.
-// If it is missing, scoring will fail with a clear configuration error rather
-// than silently routing to a different provider.
+// Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
+// (specificationVersion "v2") which ai@6 requires. v1.x only implements v1 and
+// will throw "Unsupported model version v1" regardless of which method is used.
+//
+// Use openai('gpt-4o') — the standard chat path in @ai-sdk/openai v2.
+// This model supports image inputs (vision) and implements spec v2.
 const OPENAI_VISION_MODEL = 'gpt-4o'
 
 function getVisionModel() {
@@ -40,8 +43,13 @@ function getVisionModel() {
 
   console.log('[vision-scorer] provider check', {
     selectedProvider: 'openai',
-    model: OPENAI_VISION_MODEL,
+    selectedModel: OPENAI_VISION_MODEL,
+    sdkMethod: 'generateObject',
+    providerPackage: '@ai-sdk/openai',
+    providerAdapter: 'openai.chat (spec v2)',
     hasOpenAIKey: hasKey,
+    visionCapable: true,
+    isFallback: false,
   })
 
   if (!hasKey) {
@@ -50,6 +58,17 @@ function getVisionModel() {
       'Set OPENAI_API_KEY in your server environment variables.'
     )
   }
+
+  // openai('gpt-4o') uses the chat completions path which supports vision
+  // inputs (image_url content parts) and implements LanguageModelV2 in
+  // @ai-sdk/openai v2.x — compatible with ai@6's generateObject.
+  return {
+    model: openai(OPENAI_VISION_MODEL),
+    provider: 'openai',
+    providerAdapter: 'openai.chat',
+    modelName: OPENAI_VISION_MODEL,
+  }
+}
 
   // openai.responses() is the AI SDK 6 / spec-v2 Responses API path.
   // Do NOT use openai('gpt-4o') — that resolves to spec v1 chat and throws
@@ -432,15 +451,24 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   const validImages = imageValidation.validImageIndices.map(i => input.images[i])
 
   // Use vision config from earlier
-  const { model: visionModel, provider: visionProvider, modelName: visionModelName } = visionConfig
-  
-  console.log(`[vision-scorer] Using provider: ${visionProvider}, model: ${visionModelName}`)
+  const { model: visionModel, provider: visionProvider, modelName: visionModelName, providerAdapter } = visionConfig
+
+  const imageContent = prepareImageContent(validImages)
+  console.log('[vision-scorer] pre-call', {
+    provider: visionProvider,
+    model: visionModelName,
+    providerAdapter,
+    sdkMethod: 'generateObject',
+    imageCount: validImages.length,
+    imageAngles: validImages.map(img => img.angleType),
+    imagePayloadAttached: imageContent.length > 0,
+    visionCapable: true,
+  })
 
   // Phase 24: Execute vision call with runtime hardening
   const visionCallResult = await executeWithRuntime(async () => {
     const prompt = buildVisionPrompt({ ...input, images: validImages })
-    const imageContent = prepareImageContent(validImages)
-    
+
     const { object: visionOutput } = await generateObject({
       model: visionModel,
       schema: VisionOutputSchema,
@@ -455,6 +483,13 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       ],
       // Note: AI SDK has its own retry logic, but we wrap it for timeout/monitoring
       maxRetries: 1,
+    })
+
+    console.log('[vision-scorer] post-call success', {
+      provider: visionProvider,
+      model: visionModelName,
+      visionSucceeded: true,
+      fallbackUsed: false,
     })
 
     return visionOutput
@@ -476,11 +511,15 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     
     const fallbackDecision = makeFallbackDecision(runtimeError, visionCallResult.metadata, imageValidation)
     
-    console.error('Vision scoring failed:', {
+    console.error('[vision-scorer] vision call failed — falling back to heuristic', {
       provider: visionProvider,
       model: visionModelName,
-      error: runtimeError.type,
-      message: runtimeError.message,
+      providerAdapter,
+      visionSucceeded: false,
+      fallbackUsed: true,
+      fallbackReason: runtimeError.type,
+      fallbackMessage: runtimeError.message,
+      retryable: runtimeError.retryable,
       attempts: visionCallResult.metadata.totalAttempts,
       timeMs: visionCallResult.metadata.totalTimeMs,
       timedOut: visionCallResult.metadata.timedOut,
