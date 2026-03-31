@@ -98,7 +98,7 @@ export async function startStructuralSolving(params: {
       max_retries: 1,
       requested_by_user_id: params.requestedByUserId,
       buck_id: pred.buck_id,
-      status: 'pending',
+      status: 'queued',
     })
     .select()
     .single()

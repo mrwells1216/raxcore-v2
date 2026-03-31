@@ -9,6 +9,7 @@ import type {
   ReverseRunDetail
 } from './types'
 import { generateHypotheses, calculateGrossNet } from './hypotheses'
+import { findInvalidHypothesisTypes } from './hypothesis-types'
 import { evaluateHypothesis } from './evaluate'
 import { buildErrorDecomposition } from './error-decomposition'
 import { onReversePassComplete } from '@/lib/supervision/hooks'
@@ -163,7 +164,7 @@ export async function startPrecisionPass(params: {
       max_retries: 1,
       requested_by_user_id: params.requestedByUserId,
       buck_id: pred.buck_id,
-      status: 'pending',
+      status: 'queued',
     })
     .select()
     .single()
@@ -313,12 +314,29 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
       params: h.params,
     }))
 
+    // Pre-insert validation: catch constraint violations before they hit the DB.
+    // If any type is not in the allowed set, throw immediately with a clear message
+    // that includes the run ID, the offending types, and the full batch — no silent
+    // downgrade to generic names.
+    const invalidTypes = findInvalidHypothesisTypes(
+      candidateRows.map(r => r.hypothesis_type)
+    )
+    if (invalidTypes.length > 0) {
+      throw new Error(
+        `[precision-pass] Invalid hypothesis_type values detected before insert | ` +
+        `runId=${reverseRunId} | ` +
+        `invalid=[${invalidTypes.join(', ')}] | ` +
+        `all attempted=[${candidateRows.map(r => r.hypothesis_type).join(', ')}] | ` +
+        `Check hypothesis_candidates_hypothesis_type_check constraint and update it using ` +
+        `the SQL in lib/reverse-engineering/hypothesis-types.ts`
+      )
+    }
+
     // Diagnostic: log every hypothesis_type before inserting so we can identify
     // any value that violates the DB hypothesis_type check constraint.
     console.log('[precision-pass] Inserting candidates', {
       runId: reverseRunId,
       hypothesisTypes: candidateRows.map(r => r.hypothesis_type),
-      candidateRows,
     })
 
     const { data: insertedCandidates, error: candErr } = await supabase
@@ -329,7 +347,10 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
     if (candErr) {
       const types = candidateRows.map(r => r.hypothesis_type).join(', ')
       throw new Error(
-        `Insert candidates failed: ${candErr.message} | hypothesis_types in batch: [${types}]`
+        `[precision-pass] Insert hypothesis_candidates failed | ` +
+        `runId=${reverseRunId} | ` +
+        `dbError=${candErr.message} | ` +
+        `attempted hypothesis_types=[${types}]`
       )
     }
 

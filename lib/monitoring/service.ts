@@ -9,6 +9,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { isOptionalTableError } from '@/lib/supabase/admin'
 
 // ============================================================
 // TYPES
@@ -158,7 +159,7 @@ export async function logEvent(input: RuntimeEventInput): Promise<void> {
       // Silently skip when table doesn't exist yet (schema cache miss).
       // All other errors are downgraded to a console.warn so monitoring
       // never throws into the calling code path.
-      if (!evErr.message.includes('schema cache') && !evErr.message.includes('does not exist')) {
+      if (!isOptionalTableError(evErr)) {
         console.warn('[monitoring] runtime_events insert failed:', evErr.message)
       }
     }

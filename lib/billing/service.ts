@@ -12,6 +12,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { isOptionalTableError } from '@/lib/supabase/admin'
 
 // ============================================================
 // TYPES
@@ -333,8 +334,8 @@ export async function recordScoringRun(input: RecordScoringRunInput): Promise<vo
       block_reason: input.blockReason ?? null,
     })
     if (ulErr) {
-      // Silently skip when table doesn't exist yet; warn on all other errors
-      if (!ulErr.message.includes('schema cache') && !ulErr.message.includes('does not exist')) {
+      // Silently skip when the table doesn't exist yet; warn on all other errors
+      if (!isOptionalTableError(ulErr)) {
         console.warn('[billing] usage_ledger insert failed (non-critical):', ulErr.message)
       }
     }

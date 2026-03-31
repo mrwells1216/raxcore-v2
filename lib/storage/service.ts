@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type { 
   ScoringSubmission, 
   TrainingExample, 
@@ -528,35 +529,61 @@ export interface CreateTrainingExampleParams {
 export async function createTrainingExample(
   params: CreateTrainingExampleParams
 ): Promise<TrainingExampleRecord> {
-  const supabase = await createClient()
+  // Use service-role to bypass RLS on training_examples — this is an internal
+  // system write, not a user-facing action.
+  const supabase = await getServiceSupabase()
   
   const errorAmount = params.predictedScore != null 
     ? params.predictedScore - params.groundTruthScore 
     : null
 
+  // Core payload — only columns that exist in the base schema
+  const corePayload: Record<string, unknown> = {
+    buck_id: params.buckId || null,
+    image_urls: params.imageUrls,
+    ground_truth_score: params.groundTruthScore,
+    predicted_score: params.predictedScore ?? null,
+    error_amount: errorAmount,
+    main_beam_left: params.measurements?.mainBeamLeft ?? null,
+    main_beam_right: params.measurements?.mainBeamRight ?? null,
+    inside_spread: params.measurements?.insideSpread ?? null,
+    points_left: params.measurements?.pointsLeft ?? null,
+    points_right: params.measurements?.pointsRight ?? null,
+    tine_measurements: params.measurements?.tineMeasurements ?? null,
+    circumference_measurements: params.measurements?.circumferenceMeasurements ?? null,
+    verified_for_training: false,
+    source: params.source || 'user_submission',
+    notes: params.notes || null,
+  }
+
+  if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
+    console.log('[training] createTrainingExample payload', {
+      buckId: params.buckId,
+      predictedScore: params.predictedScore,
+      groundTruthScore: params.groundTruthScore,
+      errorAmount,
+      source: params.source,
+      payloadKeys: Object.keys(corePayload),
+    })
+  }
+
   const { data, error } = await supabase
     .from('training_examples')
-    .insert({
-      buck_id: params.buckId || null,
-      image_urls: params.imageUrls,
-      ground_truth_score: params.groundTruthScore,
-      predicted_score: params.predictedScore ?? null,
-      error_amount: errorAmount,
-      main_beam_left: params.measurements?.mainBeamLeft ?? null,
-      main_beam_right: params.measurements?.mainBeamRight ?? null,
-      inside_spread: params.measurements?.insideSpread ?? null,
-      points_left: params.measurements?.pointsLeft ?? null,
-      points_right: params.measurements?.pointsRight ?? null,
-      tine_measurements: params.measurements?.tineMeasurements ?? null,
-      circumference_measurements: params.measurements?.circumferenceMeasurements ?? null,
-      verified_for_training: false,
-      source: params.source || 'user_submission',
-      notes: params.notes || null
-    })
+    .insert(corePayload)
     .select()
     .single()
 
-  if (error) throw new Error(`Failed to create training example: ${error.message}`)
+  if (error) {
+    console.error('[training] createTrainingExample failed', {
+      buckId: params.buckId,
+      predictedScore: params.predictedScore,
+      groundTruthScore: params.groundTruthScore,
+      error: error.message,
+      code: error.code,
+    })
+    throw new Error(`Failed to create training example: ${error.message}`)
+  }
+
   return data
 }
 
@@ -927,8 +954,8 @@ export async function getAllProperties(filters?: {
 
   const { data, error } = await query
   if (error) {
-    // Silently skip schema-cache misses (table may not exist yet); warn on real errors
-    if (!error.message.includes('schema cache') && !error.message.includes('does not exist')) {
+  // Silently skip schema-cache misses (table may not exist yet); warn on real errors
+  if (!isOptionalTableError(error)) {
       console.warn('[storage] getAllProperties failed:', error.message)
     }
     return []
