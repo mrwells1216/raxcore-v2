@@ -4,6 +4,10 @@ import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 
 export const runtime = 'nodejs'
 
+const IS_DEV = process.env.NODE_ENV === 'development'
+// Dev bypass user ID for anonymous precision passes in development
+const DEV_ANON_USER_ID = 'dev-anonymous-user'
+
 /**
  * POST /api/reverse/predictions/[predictionId]/precision-pass
  * Start a precision pass for a prediction
@@ -17,16 +21,33 @@ export async function POST(
   const { data } = await supabase.auth.getUser()
   const user = data?.user
   
-  if (!user) {
+  // In development, allow anonymous access; in production, require auth
+  if (!user && !IS_DEV) {
+    console.error('[precision-pass] Unauthorized: no user and not in dev mode')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const requesterId = user?.id ?? DEV_ANON_USER_ID
+
   try {
+    console.log('[precision-pass] Starting precision pass', {
+      predictionId,
+      requesterId,
+      isDev: IS_DEV,
+      hasUser: !!user,
+    })
+
     const { run, jobId } = await startPrecisionPass({
       predictionId,
-      requestedByUserId: user.id,
+      requestedByUserId: requesterId,
     })
     
+    console.log('[precision-pass] Precision pass started', {
+      runId: run.id,
+      jobId,
+      status: run.status,
+    })
+
     return NextResponse.json({ 
       runId: run.id, 
       jobId,
@@ -34,6 +55,13 @@ export async function POST(
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to start precision pass'
+    const stack = e instanceof Error ? e.stack : undefined
+    console.error('[precision-pass] Failed to start precision pass', {
+      predictionId,
+      requesterId,
+      error: message,
+      stack,
+    })
     const status = message === 'Forbidden' ? 403 : 500
     return NextResponse.json({ error: message }, { status })
   }
