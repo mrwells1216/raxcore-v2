@@ -1,18 +1,14 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Camera, Upload, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
-import { CameraCapture } from './camera-capture'
-import { ImageUploader } from './image-uploader'
 import { ScoringForm } from './scoring-form'
-import { ImagePreviewGrid } from './image-preview-grid'
-import { ImageGuidance } from './image-guidance'
 import { IntakeQualityDisplay } from './intake-quality-display'
-import { computeIntakeQuality, getBestNextPhoto, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
+import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
+import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -38,67 +34,37 @@ const STEPS = [
   { id: 'analyze', title: 'Analyze', description: 'Get your score' },
 ]
 
-export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizardProps) {
-  const [mode, setMode] = useState<'camera' | 'upload'>(initialMode)
+export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
   const [step, setStep] = useState(0)
-  const [images, setImages] = useState<CapturedImage[]>([])
+  const [gridImages, setGridImages] = useState<GridImage[]>([])
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [intakeQuality, setIntakeQuality] = useState<IntakeQualityAssessment | null>(null)
-  const [showQualityWarning, setShowQualityWarning] = useState(false)
 
-  // Compute intake quality whenever images change
-  const updateIntakeQuality = useCallback((currentImages: CapturedImage[], earsVisible?: boolean, sourceType?: string) => {
-    if (currentImages.length === 0) {
-      setIntakeQuality(null)
-      return
-    }
-    
+  // Normalise GridImage[] → CapturedImage[] for the pipeline
+  const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
+    imgs.map(({ id, url, file, angleType, width, height }) => ({
+      id, url, file, angleType, width, height,
+    }))
+
+  // Recompute intake quality whenever grid changes
+  const updateIntakeQuality = useCallback((imgs: GridImage[], earsVisible?: boolean, sourceType?: string) => {
+    if (imgs.length === 0) { setIntakeQuality(null); return }
     const assessment = computeIntakeQuality({
-      images: currentImages.map(img => ({
-        angleType: img.angleType,
-        width: img.width,
-        height: img.height,
-      })),
+      images: imgs.map(img => ({ angleType: img.angleType, width: img.width, height: img.height })),
       earsFullyVisible: earsVisible,
       sourceType: sourceType as any,
     })
-    
     setIntakeQuality(assessment)
-    
-    // Show warning if quality is poor and user tries to proceed
-    if (assessment.tier === 'poor' && currentImages.length >= 1) {
-      setShowQualityWarning(true)
-    }
   }, [])
 
+  const handleGridChange = useCallback((imgs: GridImage[]) => {
+    setGridImages(imgs)
+    updateIntakeQuality(imgs)
+  }, [updateIntakeQuality])
+
   const progress = ((step + 1) / STEPS.length) * 100
-
-  const handleImageCapture = useCallback((image: CapturedImage) => {
-    setImages(prev => {
-      const newImages = [...prev, image]
-      updateIntakeQuality(newImages)
-      return newImages
-    })
-    toast.success(`${image.angleType} image added`)
-  }, [updateIntakeQuality])
-
-  const handleImagesUpload = useCallback((newImages: CapturedImage[]) => {
-    setImages(prev => {
-      const updated = [...prev, ...newImages]
-      updateIntakeQuality(updated)
-      return updated
-    })
-    toast.success(`${newImages.length} image(s) added`)
-  }, [updateIntakeQuality])
-
-  const handleRemoveImage = useCallback((id: string) => {
-    setImages(prev => {
-      const updated = prev.filter(img => img.id !== id)
-      updateIntakeQuality(updated)
-      return updated
-    })
-  }, [updateIntakeQuality])
+  const images = toCapturedImages(gridImages)
 
   const handleFormSubmit = (data: ScoringFormData) => {
     setFormData(data)
@@ -108,7 +74,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const handleAnalyze = async (data: ScoringFormData) => {
     // Re-compute intake quality with form data
     const finalQuality = computeIntakeQuality({
-      images: images.map(img => ({
+      images: gridImages.map(img => ({
         angleType: img.angleType,
         width: img.width,
         height: img.height,
@@ -226,8 +192,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
     }
   }
 
-  const canProceedToDetails = images.length >= 1 && (intakeQuality?.canProceed ?? true)
-  const bestNextPhoto = intakeQuality ? getBestNextPhoto(intakeQuality) : null
+  const canProceedToDetails = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -238,7 +203,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
             Step {step + 1} of {STEPS.length}: {STEPS[step].title}
           </span>
           <span className="text-sm text-muted-foreground">
-            {images.length} image{images.length !== 1 ? 's' : ''}
+            {gridImages.length} photo{gridImages.length !== 1 ? 's' : ''}
           </span>
         </div>
         <Progress value={progress} className="h-2" />
@@ -250,51 +215,19 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
           <CardHeader className="pb-4">
             <CardTitle>Add Buck Photos</CardTitle>
             <CardDescription>
-              Multiple angles with visible ears provide the most accurate score
+              Tap any box to add a photo for that angle — front and sides give the best score
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Tabs value={mode} onValueChange={(v) => setMode(v as 'camera' | 'upload')}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="camera" className="gap-2">
-                  <Camera className="h-4 w-4" />
-                  Camera
-                </TabsTrigger>
-                <TabsTrigger value="upload" className="gap-2">
-                  <Upload className="h-4 w-4" />
-                  Upload
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="camera" className="mt-4">
-                <CameraCapture onCapture={handleImageCapture} />
-              </TabsContent>
-              
-              <TabsContent value="upload" className="mt-4">
-                <ImageUploader onUpload={handleImagesUpload} />
-              </TabsContent>
-            </Tabs>
-
-            {/* Image Guidance - show when no images */}
-            {images.length === 0 && (
-              <ImageGuidance 
-                capturedAngles={[]}
-                showTips={true}
-                compact={false}
-              />
-            )}
-
-            {/* Preview Grid */}
-            {images.length > 0 && (
-              <ImagePreviewGrid 
-                images={images} 
-                onRemove={handleRemoveImage}
-              />
-            )}
+            {/* 3x3 photo grid — replaces dropdown + single uploader */}
+            <PhotoGridUploader
+              images={gridImages}
+              onChange={handleGridChange}
+            />
 
             {/* Intake Quality Assessment - show when images exist */}
-            {intakeQuality && images.length > 0 && (
-              <IntakeQualityDisplay 
+            {intakeQuality && gridImages.length > 0 && (
+              <IntakeQualityDisplay
                 quality={{
                   tier: intakeQuality.tier,
                   overallScore: intakeQuality.overallScore,
@@ -307,31 +240,16 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
                 }}
                 showRecommendations={true}
                 compact={true}
-                onAddPhoto={(angle) => {
-                  // Switch to camera mode with suggested angle
-                  setMode('camera')
-                  toast.info(angle ? `Add a ${angle} angle photo` : 'Add another photo')
+                onAddPhoto={() => {
+                  toast.info('Tap an empty slot in the grid to add a photo')
                 }}
               />
             )}
 
-            {/* Best Next Photo Suggestion - prominent when quality is fair/poor */}
-            {bestNextPhoto && (intakeQuality?.tier === 'fair' || intakeQuality?.tier === 'poor') && (
-              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
-                  <Camera className="h-4 w-4" />
-                  <span className="text-sm font-medium">{bestNextPhoto.message}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  {bestNextPhoto.reason}
-                </p>
-              </div>
-            )}
-
             {/* Navigation */}
             <div className="flex justify-end pt-4 border-t border-border">
-              <Button 
-                onClick={() => setStep(1)} 
+              <Button
+                onClick={() => setStep(1)}
                 disabled={!canProceedToDetails}
                 className="min-h-[48px] gap-2"
               >
