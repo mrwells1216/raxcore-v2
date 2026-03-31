@@ -21,8 +21,11 @@ import {
   scoreWithVision, 
   visionOutputToMeasurements, 
   visionOutputToLandmarks,
+  visionOutputToReferenceQualityData,
   type VisionScoringResult 
 } from './vision-scorer'
+// Phase 54: Weighted multi-reference consensus engine
+import { computeReferenceConsensus, consensusToErrorBands, type ReferenceConsensusOutput } from './reference-consensus'
 import { normalizeMeasurements, type NormalizationResult } from './normalization'
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
@@ -124,6 +127,8 @@ export interface ScoringOutput {
   phase42Metadata?: Phase42Metadata | null
   // Phase 49.5: Cross-view conflict analysis metadata
   phase495Metadata?: import('@/lib/types').Phase495Metadata | null
+  // Phase 54: Weighted multi-reference consensus
+  referenceConsensusResult?: ReferenceConsensusOutput | null
 }
 
 // Learning summary exposed to UI
@@ -813,6 +818,18 @@ async function buildVisionScoringOutput(
   // Phase 42d: Apply geometry refinements if needed (only for critical issues with weak reference)
   const geometryRefinedMeasurements = geometryResult.refinedMeasurements
 
+  // Phase 54: Weighted multi-reference consensus
+  const referenceQualityData = visionOutputToReferenceQualityData(visionOutput)
+  const referenceConsensusResult = computeReferenceConsensus({
+    visionGross:            visionOutput.gross_score,
+    visionConfidencePercent: visionOutput.confidence_percent,
+    landmarks:              rawLandmarks,
+    angleTypes:             angles,
+    earsFullyVisible:       input.earsFullyVisible,
+    referenceQualityData,
+    measurements:           consistentMeasurements,
+  })
+
   // STAGE 4: Confidence recalibration based on all factors
   // Phase 42: Include geometry consistency adjustment in confidence
   const geometryConfidenceAdjustment = geometryResult.confidenceAdjustment
@@ -1063,8 +1080,14 @@ async function buildVisionScoringOutput(
     mainFramePoints: input.mainFramePoints,
   })
 
-  // Use calibrated confidence for error bands
-  const { low, high } = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
+  // Phase 54: Use reference consensus for error bands instead of a single confidence value.
+  // The consensus engine already ran above; here we derive the final band from it.
+  // Blend: use the consensus-derived band as the base, then cap it via calibrated confidence.
+  const consensusBands = consensusToErrorBands(referenceConsensusResult)
+  // Also compute the legacy band so we can take the tighter of the two for conservative estimates
+  const legacyBands = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
+  const low  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
+  const high = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
 
   // Build confidence/trust metadata
   const confidenceTrustMetadata: ConfidenceTrustMetadata = {
@@ -1141,10 +1164,21 @@ async function buildVisionScoringOutput(
     explanations.push(`Self-check: ${selfCheckResult.overallStability} (${selfCheckResult.stabilityScore}% stability).`)
   }
 
+  // Phase 54: Inject reference consensus explanation lines
+  if (referenceConsensusResult.explanation.length > 0) {
+    explanations.push(...referenceConsensusResult.explanation)
+  }
+
   // Build scaling references
   const scalingReferencesUsed: string[] = [...visionOutput.anatomical_references_used]
   if (input.mainFramePoints) {
     scalingReferencesUsed.push(`User-provided frame hint (${input.mainFramePoints}-point)`)
+  }
+  // Phase 54: Add dominant reference labels from consensus
+  if (referenceConsensusResult.dominantReferences.length > 0) {
+    scalingReferencesUsed.push(
+      `Consensus: ${referenceConsensusResult.dominantReferences.map(r => r.replace(/_/g, ' ')).join(', ')}`
+    )
   }
   scalingReferencesUsed.push(`State calibration (${input.state})`)
 
@@ -1243,6 +1277,8 @@ async function buildVisionScoringOutput(
       phase42_version: '1.0.0',
       processed_at: new Date().toISOString(),
     },
+    // Phase 54: Weighted multi-reference consensus output
+    referenceConsensusResult,
   }
 }
 

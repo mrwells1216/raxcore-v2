@@ -23,3 +23,5 @@ export * from './cross-view-conflict'
 export * from './multi-view-engine'
 export * from './multi-view-service'
 export * from './multi-view-uncertainty'
+// Phase 54: Weighted multi-reference consensus engine
+export * from './reference-consensus'

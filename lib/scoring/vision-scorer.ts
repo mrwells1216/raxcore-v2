@@ -98,13 +98,60 @@ const VisionMeasurementsSchema = z.object({
   deductions: z.number().min(0).max(20).describe('Estimated deductions for asymmetry'),
 })
 
+// Per-reference observation sub-schema (Steps 1–2 of multi-reference consensus)
+const ReferenceObservationSchema = z.object({
+  visibility: z.boolean().describe('Whether this reference is clearly visible'),
+  quality: z.number().min(0).max(1).describe('Detection quality (0–1): sharpness, occlusion, angle clarity'),
+  distortion: z.number().min(0).max(1).describe('Perspective/lens distortion on this reference (0–1)'),
+})
+
 const VisionLandmarksSchema = z.object({
   ears_visible: z.boolean().describe('Whether both ears are visible in the image(s)'),
   eyes_visible: z.boolean().describe('Whether both eyes are visible in the image(s)'),
   antlers_visible: z.boolean().describe('Whether both antlers are fully visible'),
-  ear_base_to_tip_estimated: z.number().optional().describe('Estimated ear length if visible'),
+  ear_base_to_tip_estimated: z.number().optional().describe('Estimated ear base-to-tip length in inches if visible'),
   scaling_reference_used: z.string().describe('Primary anatomical reference used for scaling'),
   quality_notes: z.array(z.string()).describe('Notes about image quality affecting estimates'),
+
+  // Multi-reference consensus data (Step 1 of weighted reference system)
+  // Top-tier references — these should dominate scaling:
+  eye_box: ReferenceObservationSchema.optional().describe(
+    'Eye socket / orbital box — top-tier reference. Best detected from front-angle images.'
+  ),
+  pedicle_spacing: ReferenceObservationSchema.optional().describe(
+    'Antler base (pedicle) center-to-center spacing — top-tier reference. Front angle only.'
+  ),
+  eye_to_pedicle: ReferenceObservationSchema.optional().describe(
+    'Eye center to nearest pedicle base distance — top-tier structural proportion.'
+  ),
+  skull_width: ReferenceObservationSchema.optional().describe(
+    'Forehead width between orbital ridges — top-tier reference. Front angle.'
+  ),
+
+  // Secondary references
+  nose_bridge: ReferenceObservationSchema.optional().describe(
+    'Nose bridge length from brow to tip — secondary reference.'
+  ),
+  muzzle_width: ReferenceObservationSchema.optional().describe(
+    'Muzzle width at widest point — secondary reference. Front angle.'
+  ),
+  ear_base_spacing: ReferenceObservationSchema.optional().describe(
+    'Ear base center-to-center spacing — secondary reference. Less reliable than pedicle.'
+  ),
+
+  // Bonus (only populate when ears confirmed visible)
+  ear_base_to_tip: ReferenceObservationSchema.optional().describe(
+    'Ear base-to-tip length — bonus reference. Only populate when ears are fully visible.'
+  ),
+
+  // Detected pixel-space measurements for top-tier references (optional, used by consensus engine)
+  eye_width_px_inches: z.number().optional().describe('Estimated eye box width in the same inch-space as measurements'),
+  pedicle_spacing_px_inches: z.number().optional().describe('Estimated pedicle spacing in inch-space'),
+  eye_to_pedicle_px_inches: z.number().optional().describe('Estimated eye-to-pedicle distance in inch-space'),
+  skull_forehead_width_px_inches: z.number().optional().describe('Estimated skull forehead width in inch-space'),
+  nose_bridge_px_inches: z.number().optional().describe('Estimated nose bridge length in inch-space'),
+  muzzle_width_px_inches: z.number().optional().describe('Estimated muzzle width in inch-space'),
+  ear_base_spacing_px_inches: z.number().optional().describe('Estimated ear base spacing in inch-space'),
 })
 
 const VisionOutputSchema = z.object({
@@ -134,7 +181,7 @@ function buildVisionPrompt(input: VisionScoringInput): string {
     `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})`
   ).join('\n')
 
-  return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records. 
+  return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
 
@@ -149,46 +196,71 @@ CONTEXT:
 IMAGES PROVIDED:
 ${angleDescriptions}
 
-ANATOMICAL SCALING REFERENCES (use these to convert pixel measurements to inches):
-- Whitetail deer ear base-to-tip length: ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP} inches (average)
-- Whitetail deer eye-to-eye distance: ${ANATOMICAL_REFERENCES.EYE_TO_EYE} inches (average)
-- Whitetail deer ear tip-to-tip (alert): ${ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT} inches (average)
-- Whitetail deer ear tip-to-tip (relaxed): ${ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_RELAXED} inches (average)
+═══════════════════════════════════════════════════════════════
+MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS
+═══════════════════════════════════════════════════════════════
+You MUST use MULTIPLE anatomical references to derive scale, not just ears.
+For EACH reference below, report: visibility (true/false), quality (0–1),
+and distortion (0–1). Then use detected sizes to set *_px_inches fields.
 
-MEASUREMENT GUIDELINES:
-1. INSIDE SPREAD: Measure the widest point between main beams at a right angle to the skull centerline. Most mature bucks are 16-22 inches.
+REFERENCE PRIORITY — use top-tier references first:
 
-2. MAIN BEAMS: Measure along the outer curve from the burr to the tip. Typical mature bucks are 22-28 inches per side.
+TOP-TIER (highest accuracy — use these to anchor all measurements):
+  1. Eye box (orbital socket)          — known width: ${ANATOMICAL_REFERENCES.EYE_BOX_WIDTH}" | Best angle: front
+  2. Pedicle spacing (antler bases)    — known c-to-c: ${ANATOMICAL_REFERENCES.PEDICLE_SPACING}"  | Best angle: front
+  3. Eye-to-pedicle distance           — known: ${ANATOMICAL_REFERENCES.EYE_TO_PEDICLE}"         | Best angle: front/45°
+  4. Skull forehead width              — known: ${ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH}"    | Best angle: front
 
-3. TINE LENGTHS (G1-G5): Measure from the top of the main beam to the tine tip along the outer edge:
-   - G1 (brow tine): Usually 3-6 inches
-   - G2: Usually the longest tine, 8-12 inches on mature bucks
-   - G3: Often second longest, 7-11 inches
-   - G4: Shorter, 4-9 inches
-   - G5: If present, usually 2-5 inches
+SECONDARY (use to corroborate if top-tier is unclear):
+  5. Nose bridge length                — known: ${ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH}"      | Best angle: front/45°
+  6. Muzzle width                      — known: ${ANATOMICAL_REFERENCES.MUZZLE_WIDTH}"            | Best angle: front
+  7. Ear base spacing                  — known c-to-c: ${ANATOMICAL_REFERENCES.EAR_BASE_SPACING}"  | Best angle: front
 
-4. CIRCUMFERENCES (H1-H4): Measure at the smallest point between tines:
-   - H1: Between burr and G1, typically 4-5.5 inches
-   - H2: Between G1 and G2, typically 4-5 inches
-   - H3: Between G2 and G3, typically 4-4.5 inches
-   - H4: Between G3 and G4 (or halfway to beam tip), typically 3.5-4.5 inches
+BONUS (only if ears confirmed fully visible — less reliable, do NOT let this override top-tier):
+  8. Ear base-to-tip                   — known: ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}"         | Front/45° only
 
-5. ABNORMAL POINTS: Any point not in the normal typical pattern (extra tines, drop tines, etc.)
+IMPORTANT RULES:
+- DO NOT rely primarily on ears for scaling.
+- Eye box + pedicle spacing + eye-to-pedicle MUST dominate scaling.
+- Nose bridge is secondary; ears are a bonus check only.
+- If you can see the eye socket clearly, you MUST populate eye_box.
+- If pedicle bases are visible from front, you MUST populate pedicle_spacing.
+- For distortion: side/oblique angles distort perspective heavily (0.3–0.7).
+  Front angle = low distortion (0.05–0.2). Trail cam / fisheye = higher.
+- If a reference is NOT visible, still include it with visibility: false.
+- Set *_px_inches fields to your best inch-equivalent estimate of each
+  reference's detected size in the image's scale (same inch space as your
+  other measurements). Leave as undefined if not detected.
 
-6. DEDUCTIONS: Estimate asymmetry deductions by comparing left/right differences.
+═══════════════════════════════════════════════════════════════
+MEASUREMENT GUIDELINES
+═══════════════════════════════════════════════════════════════
+1. INSIDE SPREAD: Widest point between main beams. Mature bucks: 16–22".
+
+2. MAIN BEAMS: Outer curve from burr to tip. Mature bucks: 22–28" per side.
+
+3. TINE LENGTHS (G1–G5): Base of tine at main beam to tine tip:
+   - G1 (brow): 3–6"  |  G2: 8–12"  |  G3: 7–11"  |  G4: 4–9"  |  G5 if present: 2–5"
+
+4. CIRCUMFERENCES (H1–H4): Smallest point between tines:
+   - H1: 4–5.5"  |  H2: 4–5"  |  H3: 4–4.5"  |  H4: 3.5–4.5"
+
+5. ABNORMAL POINTS: Any point outside the normal typical pattern.
+
+6. DEDUCTIONS: Estimate asymmetry from left/right differences.
 
 ANGLE-SPECIFIC GUIDANCE:
-- FRONT angles: Best for inside spread and ear/eye references
-- SIDE angles (left/right): Best for main beam length and tine measurements
-- 45-degree angles: Good for overall verification
+- FRONT: Best for spread, eye box, pedicle, skull width, ear/eye refs.
+- SIDE (left/right): Best for main beam length and tine lengths.
+- 45-degree: Good for overall cross-check.
 
 SCORING CALCULATION:
 - Gross = Sum of all measurements including abnormal points
-- Net (Typical) = Gross - abnormal points - deductions
-- Net (Non-typical) = Gross - deductions (abnormals count as score)
+- Net (Typical) = Gross − abnormal points − deductions
+- Net (Non-typical) = Gross − deductions (abnormals count positively)
 
-Be conservative with estimates - it's better to slightly underestimate than overestimate.
-Consider image quality, angle limitations, and perspective distortion in your confidence level.
+Be conservative — slightly under rather than over. Account for perspective
+distortion, occlusion, and image quality in your confidence level.
 
 Provide your analysis as structured JSON matching the required schema.`
 }
@@ -551,13 +623,50 @@ export function visionOutputToMeasurements(output: VisionOutput): Measurements {
  * Convert vision output to standard landmarks format
  */
 export function visionOutputToLandmarks(output: VisionOutput): LandmarksDetected {
+  const lm = output.landmarks
   return {
-    ears_visible: output.landmarks.ears_visible,
-    eyes_visible: output.landmarks.eyes_visible,
-    antlers_visible: output.landmarks.antlers_visible,
-    ear_base_to_tip: output.landmarks.ear_base_to_tip_estimated ?? ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP,
-    eye_to_eye: ANATOMICAL_REFERENCES.EYE_TO_EYE,
-    ear_tip_to_tip: ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT,
-    quality_notes: output.landmarks.quality_notes,
+    ears_visible:      lm.ears_visible,
+    eyes_visible:      lm.eyes_visible,
+    antlers_visible:   lm.antlers_visible,
+    ear_base_to_tip:   lm.ear_base_to_tip_estimated ?? ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP,
+    eye_to_eye:        ANATOMICAL_REFERENCES.EYE_TO_EYE,
+    ear_tip_to_tip:    ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT,
+    quality_notes:     lm.quality_notes,
+
+    // Top-tier reference pixel-space measurements (inch-equivalent)
+    eye_width:                lm.eye_width_px_inches,
+    eye_box_detected:         lm.eye_box?.visibility,
+    pedicle_spacing:          lm.pedicle_spacing_px_inches,
+    pedicle_visible:          lm.pedicle_spacing?.visibility,
+    eye_to_pedicle_distance:  lm.eye_to_pedicle_px_inches,
+    skull_forehead_width:     lm.skull_forehead_width_px_inches,
+    skull_width_visible:      lm.skull_width?.visibility,
+
+    // Secondary reference sizes
+    nose_bridge_length:       lm.nose_bridge_px_inches,
+    muzzle_width:             lm.muzzle_width_px_inches,
+    ear_base_spacing:         lm.ear_base_spacing_px_inches,
   }
+}
+
+/**
+ * Extract per-reference quality/distortion data from a VisionOutput's landmarks
+ * for use by the ReferenceConsensus engine.
+ */
+export function visionOutputToReferenceQualityData(
+  output: VisionOutput
+): Partial<Record<import('./reference-consensus').ReferenceLabel, { quality: number; distortion: number }>> {
+  const lm = output.landmarks
+  const result: Partial<Record<import('./reference-consensus').ReferenceLabel, { quality: number; distortion: number }>> = {}
+
+  if (lm.eye_box?.visibility)      result.eye_box         = { quality: lm.eye_box.quality,         distortion: lm.eye_box.distortion }
+  if (lm.pedicle_spacing?.visibility) result.pedicle_spacing = { quality: lm.pedicle_spacing.quality, distortion: lm.pedicle_spacing.distortion }
+  if (lm.eye_to_pedicle?.visibility)  result.eye_to_pedicle  = { quality: lm.eye_to_pedicle.quality,  distortion: lm.eye_to_pedicle.distortion }
+  if (lm.skull_width?.visibility)     result.skull_width     = { quality: lm.skull_width.quality,     distortion: lm.skull_width.distortion }
+  if (lm.nose_bridge?.visibility)     result.nose_bridge     = { quality: lm.nose_bridge.quality,     distortion: lm.nose_bridge.distortion }
+  if (lm.muzzle_width?.visibility)    result.muzzle_width    = { quality: lm.muzzle_width.quality,    distortion: lm.muzzle_width.distortion }
+  if (lm.ear_base_spacing?.visibility) result.ear_base_spacing = { quality: lm.ear_base_spacing.quality, distortion: lm.ear_base_spacing.distortion }
+  if (lm.ear_base_to_tip?.visibility) result.ear_base_to_tip = { quality: lm.ear_base_to_tip.quality,  distortion: lm.ear_base_to_tip.distortion }
+
+  return result
 }
