@@ -153,7 +153,15 @@ export async function logEvent(input: RuntimeEventInput): Promise<void> {
       render_job_id: input.renderJobId ?? null,
       metadata: input.metadata ?? {},
     }
-    await supabase.from('runtime_events').insert(row)
+    const { error: evErr } = await supabase.from('runtime_events').insert(row)
+    if (evErr) {
+      // Silently skip when table doesn't exist yet (schema cache miss).
+      // All other errors are downgraded to a console.warn so monitoring
+      // never throws into the calling code path.
+      if (!evErr.message.includes('schema cache') && !evErr.message.includes('does not exist')) {
+        console.warn('[monitoring] runtime_events insert failed:', evErr.message)
+      }
+    }
   } catch {
     // Monitoring must never break the app
   }

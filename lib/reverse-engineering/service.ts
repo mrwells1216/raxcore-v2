@@ -170,12 +170,20 @@ export async function startPrecisionPass(params: {
 
   if (jobErr || !job) throw new Error(`Failed to create job: ${jobErr?.message ?? 'unknown'}`)
 
-  // Link reverse run to job
-  await supabase.from('reverse_jobs').insert({
-    reverse_run_id: run.id,
-    job_id: job.id,
-    job_type: 'reverse_precision_pass',
-  })
+  // Optionally link reverse run to a reverse_jobs bridge table if it exists.
+  // This table is legacy/redundant (job_id is already on reverse_runs) so we
+  // silently skip if the table is missing rather than letting a 404 surface.
+  {
+    const { error: rjErr } = await supabase.from('reverse_jobs').insert({
+      reverse_run_id: run.id,
+      job_id: job.id,
+      job_type: 'reverse_precision_pass',
+    })
+    if (rjErr && !rjErr.message.includes('schema cache')) {
+      // Only log unexpected errors — schema-cache miss just means table doesn't exist yet
+      console.warn('[precision-pass] reverse_jobs insert skipped:', rjErr.message)
+    }
+  }
 
   return { run: run as ReverseRunRow, jobId: job.id }
 }

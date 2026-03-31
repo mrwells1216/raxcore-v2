@@ -319,7 +319,7 @@ export interface RecordScoringRunInput {
 export async function recordScoringRun(input: RecordScoringRunInput): Promise<void> {
   try {
     const supabase = await createClient()
-    await supabase.from('usage_ledger').insert({
+    const { error: ulErr } = await supabase.from('usage_ledger').insert({
       user_id: input.userId ?? null,
       session_id: input.sessionId ?? null,
       client_ip: input.clientIp ?? null,
@@ -332,8 +332,14 @@ export async function recordScoringRun(input: RecordScoringRunInput): Promise<vo
       status: input.status,
       block_reason: input.blockReason ?? null,
     })
+    if (ulErr) {
+      // Silently skip when table doesn't exist yet; warn on all other errors
+      if (!ulErr.message.includes('schema cache') && !ulErr.message.includes('does not exist')) {
+        console.warn('[billing] usage_ledger insert failed (non-critical):', ulErr.message)
+      }
+    }
   } catch (err) {
-    console.error('[billing] recordScoringRun failed (non-critical):', err)
+    console.warn('[billing] recordScoringRun failed (non-critical):', err)
   }
 }
 

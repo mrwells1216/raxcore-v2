@@ -89,9 +89,7 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
   }
   
   // Normalize source_type to match database constraint
-  console.log('[v0] source_type before normalization:', params.sourceType)
   const normalizedSourceType = normalizeSourceType(params.sourceType)
-  console.log('[v0] source_type after normalization:', normalizedSourceType)
   
   // Build payload matching exact database schema
   const payload = {
@@ -929,7 +927,10 @@ export async function getAllProperties(filters?: {
 
   const { data, error } = await query
   if (error) {
-    console.error('Error fetching properties:', error)
+    // Silently skip schema-cache misses (table may not exist yet); warn on real errors
+    if (!error.message.includes('schema cache') && !error.message.includes('does not exist')) {
+      console.warn('[storage] getAllProperties failed:', error.message)
+    }
     return []
   }
   return data || []
