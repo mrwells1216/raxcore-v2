@@ -5,7 +5,6 @@
  */
 
 import { generateObject } from 'ai'
-import { gateway } from '@ai-sdk/gateway'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
@@ -30,26 +29,31 @@ import {
 } from './fallback-handler'
 import { logEventFireForget } from '@/lib/monitoring/service'
 
-// Provider configuration - check env for which path to use
-const SCORING_PROVIDER = process.env.SCORING_PROVIDER || 'gateway'
+// OpenAI is the only provider for scoring vision calls.
+// OPENAI_API_KEY must be set in the server environment.
+// If it is missing, scoring will fail with a clear configuration error rather
+// than silently routing to a different provider.
+const OPENAI_VISION_MODEL = 'gpt-4o'
 
-// Vision models for each provider
-const GATEWAY_VISION_MODEL = 'google/gemini-2.0-flash-001'
-const OPENAI_VISION_MODEL = 'gpt-4o' // GPT-4o has strong vision capabilities
-
-// Get the model instance based on provider setting
 function getVisionModel() {
-  if (SCORING_PROVIDER === 'openai') {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      console.warn('[vision-scorer] SCORING_PROVIDER=openai but OPENAI_API_KEY not set, falling back to gateway')
-      return { model: gateway(GATEWAY_VISION_MODEL), provider: 'gateway', modelName: GATEWAY_VISION_MODEL }
-    }
-    const openai = createOpenAI({ apiKey })
-    return { model: openai(OPENAI_VISION_MODEL), provider: 'openai', modelName: OPENAI_VISION_MODEL }
+  const apiKey = process.env.OPENAI_API_KEY
+  const hasKey = !!apiKey
+
+  console.log('[vision-scorer] provider check', {
+    selectedProvider: 'openai',
+    model: OPENAI_VISION_MODEL,
+    hasOpenAIKey: hasKey,
+  })
+
+  if (!hasKey) {
+    throw new Error(
+      '[vision-scorer] Missing OPENAI_API_KEY — cannot score. ' +
+      'Set OPENAI_API_KEY in your server environment variables.'
+    )
   }
-  // Default: use Vercel AI Gateway
-  return { model: gateway(GATEWAY_VISION_MODEL), provider: 'gateway', modelName: GATEWAY_VISION_MODEL }
+
+  const openai = createOpenAI({ apiKey })
+  return { model: openai(OPENAI_VISION_MODEL), provider: 'openai', modelName: OPENAI_VISION_MODEL }
 }
 
 export interface VisionImageInput {
@@ -328,9 +332,30 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   const startTime = Date.now()
   const visionErrors: VisionRuntimeError[] = []
 
-  // Get the vision model configuration early for logging
-  const visionConfig = getVisionModel()
-  
+  // Get the vision model configuration — throws clearly if OPENAI_API_KEY is missing
+  let visionConfig: ReturnType<typeof getVisionModel>
+  try {
+    visionConfig = getVisionModel()
+  } catch (configErr) {
+    const msg = configErr instanceof Error ? configErr.message : String(configErr)
+    console.error('[vision-scorer] Configuration error — cannot score:', msg)
+    return {
+      success: false,
+      error: msg,
+      userMessage: 'Scoring is unavailable: missing API key configuration. Contact support.',
+      fallbackReason: 'missing_api_key',
+      runtimeMetadata: null,
+      imageValidation: null,
+      visionErrors: [{ type: 'config_error' as const, message: msg, retryable: false }],
+      fallbackMetadata: createFallbackMetadata(
+        makeFallbackDecision({ type: 'config_error' as const, message: msg, retryable: false }, null, null),
+        [{ type: 'config_error' as const, message: msg, retryable: false }],
+        null,
+        null
+      ),
+    }
+  }
+
   // Phase 39: Log vision call started
   logEventFireForget({
     traceId: input.traceId,

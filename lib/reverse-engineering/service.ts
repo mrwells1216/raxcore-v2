@@ -22,19 +22,30 @@ import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
  * source field on the returned object is set to "fallback_estimated" for traceability.
  */
 function buildFallbackMeasurements(pred: Prediction): Measurements {
-  const gross = pred.predicted_gross ?? 100
-  // Typical B&C proportions: spread ~15%, main beam ~25%, G1 ~8%, G2 ~10%, G3 ~9%, G4 ~6%
-  const spread       = Math.round((gross * 0.15) * 10) / 10
-  const beam         = Math.round((gross * 0.25) * 10) / 10
-  const g1           = Math.round((gross * 0.08) * 10) / 10
-  const g2           = Math.round((gross * 0.10) * 10) / 10
-  const g3           = Math.round((gross * 0.09) * 10) / 10
-  const g4           = Math.round((gross * 0.06) * 10) / 10
-  const h1           = Math.round((gross * 0.045) * 10) / 10
+  // Require the actual saved gross from the prediction row — never synthesize
+  // from a hardcoded value like 100. If the prediction has no gross score, the
+  // precision pass cannot produce a meaningful baseline and must fail clearly.
+  const gross = pred.predicted_gross ?? pred.estimated_score
+  if (!gross) {
+    throw new Error(
+      `[precision-pass] Cannot build fallback measurements: prediction ${pred.id} ` +
+      `has no predicted_gross or estimated_score saved. ` +
+      `The precision pass requires a real scoring baseline to operate.`
+    )
+  }
 
-  console.warn('[precision-pass] Using fallback measurements for prediction', pred.id, {
+  // Typical B&C proportions: spread ~15%, main beam ~25%, G1 ~8%, G2 ~10%, G3 ~9%, G4 ~6%
+  const spread = Math.round((gross * 0.15) * 10) / 10
+  const beam   = Math.round((gross * 0.25) * 10) / 10
+  const g1     = Math.round((gross * 0.08) * 10) / 10
+  const g2     = Math.round((gross * 0.10) * 10) / 10
+  const g3     = Math.round((gross * 0.09) * 10) / 10
+  const g4     = Math.round((gross * 0.06) * 10) / 10
+  const h1     = Math.round((gross * 0.045) * 10) / 10
+
+  console.warn('[precision-pass] Using proportion-derived fallback measurements for prediction', pred.id, {
     grossScore: gross,
-    source: 'fallback_estimated',
+    source: 'fallback_estimated_from_saved_gross',
   })
 
   return {
@@ -52,8 +63,6 @@ function buildFallbackMeasurements(pred: Prediction): Measurements {
     h4_left: null, h4_right: null,
     abnormal_points: 0,
     deductions: 0,
-    // Extended traceability field (not in Measurements interface but stored in raw_response)
-    ...(({ source: 'fallback_estimated' }) as Record<string, unknown>),
   } as Measurements
 }
 

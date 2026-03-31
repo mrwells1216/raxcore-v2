@@ -120,9 +120,9 @@ export function ConfidenceExplanation({
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <span className="text-sm">
-            {scoringMethod === 'vision' && 'Analyzed with Vision AI'}
-            {scoringMethod === 'heuristic' && 'Analyzed with Heuristic Model'}
-            {scoringMethod === 'vision_with_fallback' && 'Vision AI with Heuristic Backup'}
+            {scoringMethod === 'vision' && 'Analyzed with Vision AI (OpenAI GPT-4o)'}
+            {scoringMethod === 'heuristic' && 'Simplified Estimate — Vision AI unavailable'}
+            {scoringMethod === 'vision_with_fallback' && 'Vision AI with Simplified Fallback'}
             {scoringMethod !== 'vision' && scoringMethod !== 'heuristic' && scoringMethod !== 'vision_with_fallback' && 'Analyzed with AI Model'}
           </span>
         </div>

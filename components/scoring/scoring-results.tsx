@@ -235,7 +235,10 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                   score={result.intakeQuality.overallScore} 
                 />
               )}
-              <Badge variant="secondary" className="text-xs gap-1">
+              <Badge
+                variant={result.scoringMethod === 'vision' ? 'secondary' : 'outline'}
+                className="text-xs gap-1"
+              >
                 {result.scoringMethod === 'vision' ? (
                   <>
                     <Cpu className="h-3 w-3" />
@@ -244,7 +247,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                 ) : (
                   <>
                     <Calculator className="h-3 w-3" />
-                    Heuristic
+                    Simplified Estimate
                   </>
                 )}
               </Badge>
