@@ -525,6 +525,8 @@ export async function POST(request: Request) {
       confidenceReliability: scoringResult.confidenceReliability,
       // Phase 10: Extended learning data (for admin)
       extendedLearningSummary: scoringResult.extendedLearningSummary,
+      // Training correction layer output
+      trainingCorrectionResult: scoringResult.trainingCorrectionResult ?? null,
       // Phase 15: Intake quality
       intakeQuality: intakeQuality || null,
       // Phase 24: Runtime/fallback metadata

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
   RefreshCw, Plus, Check, Ruler, Box, Cpu, Calculator,
-  TrendingUp, TrendingDown, Minus
+  TrendingUp, TrendingDown, Minus, Brain, Sparkles
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -42,6 +42,20 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
     matchQuality?: 'none' | 'weak' | 'moderate' | 'strong'
     strongestMatchingFeatures?: string[]
   } | null
+  trainingCorrectionResult?: {
+    correctionApplied: boolean
+    correctionAmount: number
+    correctionSourcesUsed: string[]
+    correctionSampleSize: number
+    correctionStrength: 'none' | 'low' | 'medium' | 'high'
+    learningAdjusted: boolean
+    historicalPatternSummary: string
+    similarExampleCount: number
+    estimatedBiasBeforeCorrection: number
+    finalBiasAdjustment: number
+    exampleConsistency: number
+    averageSimilarity: number
+  } | null
   intakeQuality?: IntakeQualitySummary | null
   // Top-level fields from the API route response
   estimatedScore?: number | null
@@ -76,6 +90,7 @@ interface NormalizedResult {
   confidenceExplanation: string[]
   scalingReferencesUsed: string[]
   learningSummary: RawScoringResult['learningSummary']
+  trainingCorrectionResult: RawScoringResult['trainingCorrectionResult']
 }
 
 function normalizeResult(result: RawScoringResult): NormalizedResult {
@@ -157,12 +172,14 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     confidenceExplanation,
     scalingReferencesUsed,
     learningSummary: result.learningSummary ?? null,
+    trainingCorrectionResult: result.trainingCorrectionResult ?? null,
   }
 }
 
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
+  const [showLearning, setShowLearning] = useState(false)
   const [showTrainingForm, setShowTrainingForm] = useState(false)
   const [isSubmittingTraining, setIsSubmittingTraining] = useState(false)
   const [trainingSubmitted, setTrainingSubmitted] = useState(false)
@@ -348,6 +365,15 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           </div>
         </CardContent>
       </Card>
+
+      {/* Learning Adjustment Card */}
+      {normalized.trainingCorrectionResult && (
+        <LearningAdjustmentCard
+          correction={normalized.trainingCorrectionResult}
+          open={showLearning}
+          onOpenChange={setShowLearning}
+        />
+      )}
 
       {/* Image Quality Summary - Phase 15 */}
       {result.intakeQuality && (
@@ -651,5 +677,172 @@ function MeasurementCard({ label, value, highlight }: MeasurementCardProps) {
         {value?.toFixed(1) || '-'}&quot;
       </p>
     </div>
+  )
+}
+
+// ─── Learning Adjustment Card ──────────────────────────────────────────────
+
+interface LearningAdjustmentCardProps {
+  correction: NonNullable<RawScoringResult['trainingCorrectionResult']>
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+function LearningAdjustmentCard({ correction, open, onOpenChange }: LearningAdjustmentCardProps) {
+  const { correctionApplied, correctionAmount, correctionStrength, correctionSampleSize,
+    historicalPatternSummary, similarExampleCount, estimatedBiasBeforeCorrection,
+    finalBiasAdjustment, exampleConsistency, averageSimilarity, correctionSourcesUsed,
+    learningAdjusted } = correction
+
+  const isPositive = correctionAmount > 0
+  const isNegative = correctionAmount < 0
+  const absAmount = Math.abs(correctionAmount)
+
+  const strengthColor = correctionStrength === 'high'
+    ? 'text-primary'
+    : correctionStrength === 'medium'
+    ? 'text-amber-600 dark:text-amber-400'
+    : 'text-muted-foreground'
+
+  const adjustmentLabel = !correctionApplied
+    ? 'No adjustment'
+    : isPositive
+    ? `+${absAmount.toFixed(1)}\u2033 (upward)`
+    : `-${absAmount.toFixed(1)}\u2033 (downward)`
+
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <Card className={cn(
+        "border",
+        learningAdjusted
+          ? "border-primary/20 bg-primary/5"
+          : "border-border"
+      )}>
+        <CollapsibleTrigger asChild>
+          <button
+            className="w-full text-left p-4 flex items-center justify-between gap-3 hover:bg-secondary/30 rounded-t-xl transition-colors"
+            aria-expanded={open}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                learningAdjusted ? "bg-primary/10" : "bg-secondary"
+              )}>
+                <Brain className={cn("h-4 w-4", learningAdjusted ? "text-primary" : "text-muted-foreground")} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium leading-none">
+                  Learning Adjustment
+                </p>
+                <p className={cn("text-xs mt-1 tabular-nums", strengthColor)}>
+                  {correctionApplied
+                    ? adjustmentLabel
+                    : 'Insufficient data for correction'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {learningAdjusted && (
+                <Badge variant="secondary" className="text-xs gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Applied
+                </Badge>
+              )}
+              {open
+                ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              }
+            </div>
+          </button>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className="px-4 pb-4 space-y-4">
+            <Separator />
+
+            {/* Pattern summary */}
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {historicalPatternSummary}
+            </p>
+
+            {/* Correction grid */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-lg bg-secondary/50 space-y-0.5">
+                <p className="text-xs text-muted-foreground">Raw AI Bias</p>
+                <p className={cn(
+                  "text-base font-semibold tabular-nums",
+                  estimatedBiasBeforeCorrection > 0
+                    ? "text-amber-600 dark:text-amber-400"
+                    : estimatedBiasBeforeCorrection < 0
+                    ? "text-blue-600 dark:text-blue-400"
+                    : "text-muted-foreground"
+                )}>
+                  {estimatedBiasBeforeCorrection > 0 ? '+' : ''}
+                  {estimatedBiasBeforeCorrection.toFixed(2)}&quot;
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-secondary/50 space-y-0.5">
+                <p className="text-xs text-muted-foreground">Applied Fix</p>
+                <p className={cn(
+                  "text-base font-semibold tabular-nums",
+                  finalBiasAdjustment > 0
+                    ? "text-primary"
+                    : finalBiasAdjustment < 0
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                )}>
+                  {finalBiasAdjustment >= 0 ? '+' : ''}
+                  {finalBiasAdjustment.toFixed(2)}&quot;
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-secondary/50 space-y-0.5">
+                <p className="text-xs text-muted-foreground">Examples Used</p>
+                <p className="text-base font-semibold tabular-nums">
+                  {correctionSampleSize}
+                  <span className="text-xs font-normal text-muted-foreground ml-1">
+                    / {similarExampleCount} found
+                  </span>
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-secondary/50 space-y-0.5">
+                <p className="text-xs text-muted-foreground">Consistency</p>
+                <p className="text-base font-semibold tabular-nums">
+                  {Math.round(exampleConsistency * 100)}%
+                </p>
+              </div>
+            </div>
+
+            {/* Similarity bar */}
+            {averageSimilarity > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Avg. scenario similarity</span>
+                  <span className="font-medium tabular-nums">
+                    {Math.round(averageSimilarity * 100)}%
+                  </span>
+                </div>
+                <Progress value={Math.round(averageSimilarity * 100)} className="h-1.5" />
+              </div>
+            )}
+
+            {/* Matching features */}
+            {correctionSourcesUsed.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Matched on
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {correctionSourcesUsed.map((src) => (
+                    <Badge key={src} variant="outline" className="text-xs font-normal">
+                      {src}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   )
 }

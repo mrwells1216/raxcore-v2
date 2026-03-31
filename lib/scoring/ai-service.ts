@@ -129,6 +129,8 @@ export interface ScoringOutput {
   phase495Metadata?: import('@/lib/types').Phase495Metadata | null
   // Phase 54: Weighted multi-reference consensus
   referenceConsensusResult?: ReferenceConsensusOutput | null
+  // Training correction layer — structured output for UI and logging
+  trainingCorrectionResult?: TrainingCorrectionResult | null
 }
 
 // Learning summary exposed to UI
@@ -140,6 +142,37 @@ export interface LearningSummary {
   confidenceImpact: number
   matchQuality: 'none' | 'weak' | 'moderate' | 'strong'
   notes: string[]
+}
+
+/**
+ * Structured output from the training correction layer.
+ * Surfaced in the score API response and displayed in the UI.
+ */
+export interface TrainingCorrectionResult {
+  /** Whether any correction was actually applied (vs. returned 0) */
+  correctionApplied: boolean
+  /** Signed gross correction in inches (positive = AI was under-estimating) */
+  correctionAmount: number
+  /** Which feature buckets contributed to this correction */
+  correctionSourcesUsed: string[]
+  /** Number of training examples that matched this scenario */
+  correctionSampleSize: number
+  /** Qualitative strength of the correction */
+  correctionStrength: 'none' | 'low' | 'medium' | 'high'
+  /** True when the final score was adjusted by the learning layer */
+  learningAdjusted: boolean
+  /** Human-readable summary of the historical pattern driving the correction */
+  historicalPatternSummary: string
+  /** Number of similar examples found (may be 0) */
+  similarExampleCount: number
+  /** The estimated systematic bias in the raw AI output before correction */
+  estimatedBiasBeforeCorrection: number
+  /** The final bias adjustment actually applied to gross score */
+  finalBiasAdjustment: number
+  /** Consistency score among contributing training examples (0–1) */
+  exampleConsistency: number
+  /** The average similarity of contributing examples (0–1) */
+  averageSimilarity: number
 }
 
 interface LearnedAdjustment {
@@ -1185,6 +1218,36 @@ async function buildVisionScoringOutput(
   // Convert to simple learning summary for backward compatibility
   const simpleSummary = toSimpleLearningSummary(learningResult.summary)
 
+  // Build TrainingCorrectionResult — structured output for UI and downstream logging
+  const _correctionApplied = Math.abs(scaledGrossCorrection) >= 0.25
+  const _lSummary = learningResult.summary
+  const _correctionSources: string[] = _lSummary.strongestMatchingFeatures.slice(0, 4)
+  const _biasDirection = scaledGrossCorrection > 0.25
+    ? 'under-estimated'
+    : scaledGrossCorrection < -0.25
+    ? 'over-estimated'
+    : 'no consistent bias detected'
+  const _patternNote = _correctionApplied
+    ? `AI ${_biasDirection} by ~${Math.abs(scaledGrossCorrection).toFixed(1)}" in ${_lSummary.highlySimilarExamplesUsed ?? _lSummary.verifiedExamplesConsidered ?? 0} similar historical examples`
+    : `${_lSummary.notes[0] ?? 'Insufficient matching examples for correction'}`
+
+  const trainingCorrectionResult: TrainingCorrectionResult = {
+    correctionApplied: _correctionApplied,
+    correctionAmount: Number(scaledGrossCorrection.toFixed(2)),
+    correctionSourcesUsed: _correctionSources,
+    correctionSampleSize: _lSummary.highlySimilarExamplesUsed ?? 0,
+    correctionStrength: _lSummary.correctionStrength ?? 'none',
+    learningAdjusted: _correctionApplied,
+    historicalPatternSummary: _patternNote,
+    similarExampleCount: _lSummary.verifiedExamplesConsidered ?? 0,
+    estimatedBiasBeforeCorrection: Number(learningResult.grossCorrection.toFixed(2)),
+    finalBiasAdjustment: Number(scaledGrossCorrection.toFixed(2)),
+    exampleConsistency: _lSummary.exampleConsistency ?? 0,
+    averageSimilarity: typeof (_lSummary as { avgSimilarity?: number }).avgSimilarity === 'number'
+      ? ((_lSummary as { avgSimilarity?: number }).avgSimilarity as number)
+      : 0,
+  }
+
   // Phase 41: Fire-and-forget segment audit log (PATCH E: clean typed deltas, no unsafe cast)
   logPredictionSegments({
     traceId: input.traceId ?? null,
@@ -1279,6 +1342,8 @@ async function buildVisionScoringOutput(
     },
     // Phase 54: Weighted multi-reference consensus output
     referenceConsensusResult,
+    // Training correction layer output
+    trainingCorrectionResult,
   }
 }
 
