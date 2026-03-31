@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { getServiceSupabase } from '@/lib/supabase/admin'
+import { getServiceSupabase, isOptionalTableError } from '@/lib/supabase/admin'
 import type { 
   ScoringSubmission, 
   TrainingExample, 
