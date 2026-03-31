@@ -32,7 +32,9 @@ export interface CreateBuckParams {
 
 export interface BuckRecord {
   id: string
+  session_id?: string | null
   user_id: string | null
+  property_id?: string | null
   state: string
   rack_type: 'typical' | 'non-typical'
   harvest_method: string | null

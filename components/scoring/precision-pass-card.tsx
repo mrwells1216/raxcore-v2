@@ -48,11 +48,19 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
     setIsStarting(true)
     setError(null)
     
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[v0] Starting precision pass for prediction:', predictionId)
+    }
+    
     try {
       const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, { 
         method: 'POST' 
       })
       const json = await res.json()
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[v0] Precision pass response:', { ok: res.ok, status: res.status, json })
+      }
       
       if (!res.ok) {
         throw new Error(json.error || 'Failed to start')
@@ -62,7 +70,9 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
         setRunId(json.runId)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start precision pass')
+      const errorMsg = e instanceof Error ? e.message : 'Failed to start precision pass'
+      console.error('[v0] Precision pass error:', errorMsg)
+      setError(errorMsg)
     } finally {
       setIsStarting(false)
     }

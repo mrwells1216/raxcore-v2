@@ -76,9 +76,9 @@ export function ConfidenceIndicator({ confidence, showLabel = true, size = 'md' 
 interface ConfidenceExplanationProps {
   factors?: string[] | null
   learningSummary?: {
-    similarExamplesUsed: number
-    matchQuality: 'none' | 'weak' | 'moderate' | 'strong'
-    strongestMatchingFeatures: string[]
+    similarExamplesUsed?: number
+    matchQuality?: 'none' | 'weak' | 'moderate' | 'strong'
+    strongestMatchingFeatures?: string[]
   } | null
   scalingReferences?: string[] | null
   scoringMethod?: 'vision' | 'heuristic' | 'vision_with_fallback' | string | null

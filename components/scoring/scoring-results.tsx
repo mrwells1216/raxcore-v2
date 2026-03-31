@@ -28,17 +28,27 @@ import { cn } from '@/lib/utils'
 // Raw API response shape — some fields live at the top level, not inside prediction
 // Uses Omit to safely override non-optional ScoringResult fields that can be
 // missing/null in partial or fallback responses.
+// Note: API returns camelCase (confidenceExplanation) but we also accept snake_case for compat.
 type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 'scaling_references_used' | 'prediction'> & {
   buck?: (Buck & { property_id?: string | null }) | null
   prediction: Partial<ScoringResult['prediction']> & { id?: string }
+  // Accept both camelCase (API) and snake_case (legacy) field names
   confidence_explanation?: string[] | null
+  confidenceExplanation?: string[] | null
   scaling_references_used?: string[] | null
+  scalingReferencesUsed?: string[] | null
+  learningSummary?: {
+    similarExamplesUsed?: number
+    matchQuality?: 'none' | 'weak' | 'moderate' | 'strong'
+    strongestMatchingFeatures?: string[]
+  } | null
   intakeQuality?: IntakeQualitySummary | null
   // Top-level fields from the API route response
   estimatedScore?: number | null
   netScore?: number | null
   scoreRange?: { low: number | null; high: number | null } | null
   confidencePercent?: number | null
+  confidence?: 'low' | 'medium' | 'high' | string | null
   fallbackMetadata?: { summary?: string; fallbackStrategy?: string } | null
 }
 
@@ -55,12 +65,17 @@ interface NormalizedResult {
   rangeLow: number | null
   rangeHigh: number | null
   confidencePercent: number
+  confidenceLabel: 'low' | 'medium' | 'high'
   isFallback: boolean
   fallbackMessage: string | null
   measurements: ScoringResult['prediction']['measurements']
   predictionId: string
   buckId: string | null
   propertyId: string | null
+  // Normalized explanation arrays (handle both camelCase and snake_case from API)
+  confidenceExplanation: string[]
+  scalingReferencesUsed: string[]
+  learningSummary: RawScoringResult['learningSummary']
 }
 
 function normalizeResult(result: RawScoringResult): NormalizedResult {
@@ -87,6 +102,10 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     confidencePercent = Number(rawConf) || 0
   }
 
+  // Confidence label based on percent
+  const confidenceLabel: 'low' | 'medium' | 'high' =
+    confidencePercent >= 75 ? 'high' : confidencePercent >= 50 ? 'medium' : 'low'
+
   // Fallback detection
   const isFallback =
     result.scoringMethod === 'heuristic' ||
@@ -97,13 +116,28 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     ? result.fallbackMetadata?.summary || 'Using simplified analysis. Some measurements may be unavailable.'
     : null
 
+  // Normalize explanation arrays — handle both camelCase (API) and snake_case (legacy)
+  const confidenceExplanation: string[] = Array.isArray(result.confidenceExplanation)
+    ? result.confidenceExplanation.filter(Boolean)
+    : Array.isArray(result.confidence_explanation)
+      ? result.confidence_explanation.filter(Boolean)
+      : []
+
+  const scalingReferencesUsed: string[] = Array.isArray(result.scalingReferencesUsed)
+    ? result.scalingReferencesUsed.filter(Boolean)
+    : Array.isArray(result.scaling_references_used)
+      ? result.scaling_references_used.filter(Boolean)
+      : []
+
   if (process.env.NODE_ENV === 'development') {
     console.log('[v0] Normalized scoring result:', {
-      grossScore, netScore, rangeLow, rangeHigh, confidencePercent, isFallback,
+      grossScore, netScore, rangeLow, rangeHigh, confidencePercent, confidenceLabel, isFallback,
       rawPredictedGross: p?.predicted_gross,
       rawEstimatedScore: result.estimatedScore,
       rawScoreRange: result.scoreRange,
       rawConfidence: p?.confidence_percent ?? result.confidencePercent,
+      hasExplanation: confidenceExplanation.length > 0,
+      hasScalingRefs: scalingReferencesUsed.length > 0,
     })
   }
 
@@ -113,12 +147,16 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     rangeLow,
     rangeHigh,
     confidencePercent,
+    confidenceLabel,
     isFallback,
     fallbackMessage,
     measurements: (p?.measurements as ScoringResult['prediction']['measurements']) ?? null,
     predictionId: p?.id ?? '',
     buckId: result.buck?.id ?? null,
     propertyId: result.buck?.property_id ?? null,
+    confidenceExplanation,
+    scalingReferencesUsed,
+    learningSummary: result.learningSummary ?? null,
   }
 }
 
@@ -272,20 +310,10 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-2">
-              {process.env.NODE_ENV === 'development' && (() => {
-                console.log('[v0] ConfidenceExplanation payload:', {
-                  confidence_explanation: result.confidence_explanation,
-                  learningSummary: result.learningSummary,
-                  scaling_references_used: result.scaling_references_used,
-                  scoringMethod: result.scoringMethod,
-                  isFallback: normalized.isFallback,
-                })
-                return null
-              })()}
               <ConfidenceExplanation 
-                factors={Array.isArray(result.confidence_explanation) ? result.confidence_explanation : []}
-                learningSummary={result.learningSummary ?? undefined}
-                scalingReferences={Array.isArray(result.scaling_references_used) ? result.scaling_references_used : []}
+                factors={normalized.confidenceExplanation}
+                learningSummary={normalized.learningSummary}
+                scalingReferences={normalized.scalingReferencesUsed}
                 scoringMethod={result.scoringMethod}
                 isFallback={normalized.isFallback}
               />

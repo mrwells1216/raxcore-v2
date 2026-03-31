@@ -488,6 +488,12 @@ export async function POST(request: Request) {
 
     // Return result
     return NextResponse.json({
+      // Include buck object for UI to access id and property_id
+      buck: {
+        id: buck.id,
+        session_id: buck.session_id,
+        property_id: buck.property_id ?? null,
+      },
       sessionId: buck.session_id,
       buckId: buck.id,
       estimatedScore: scoringResult.predictedGross,
