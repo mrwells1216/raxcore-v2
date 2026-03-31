@@ -5,7 +5,7 @@
  */
 
 import { generateObject } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
+import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
@@ -36,8 +36,7 @@ import { logEventFireForget } from '@/lib/monitoring/service'
 const OPENAI_VISION_MODEL = 'gpt-4o'
 
 function getVisionModel() {
-  const apiKey = process.env.OPENAI_API_KEY
-  const hasKey = !!apiKey
+  const hasKey = !!process.env.OPENAI_API_KEY
 
   console.log('[vision-scorer] provider check', {
     selectedProvider: 'openai',
@@ -52,8 +51,15 @@ function getVisionModel() {
     )
   }
 
-  const openai = createOpenAI({ apiKey })
-  return { model: openai(OPENAI_VISION_MODEL), provider: 'openai', modelName: OPENAI_VISION_MODEL }
+  // openai.responses() is the AI SDK 6 / spec-v2 Responses API path.
+  // Do NOT use openai('gpt-4o') — that resolves to spec v1 chat and throws
+  // "Unsupported model version v1 for provider openai.chat".
+  return {
+    model: openai.responses(OPENAI_VISION_MODEL),
+    provider: 'openai',
+    providerAdapter: 'openai.responses',
+    modelName: OPENAI_VISION_MODEL,
+  }
 }
 
 export interface VisionImageInput {
