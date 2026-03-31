@@ -14,12 +14,57 @@ import { buildErrorDecomposition } from './error-decomposition'
 import { onReversePassComplete } from '@/lib/supervision/hooks'
 import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
 
+/**
+ * Build a fallback Measurements object estimated from the prediction score.
+ * Used when vision did not produce structured measurements (heuristic or fallback path).
+ * All estimates are keyed to the gross score using typical B&C proportions.
+ * source field on the returned object is set to "fallback_estimated" for traceability.
+ */
+function buildFallbackMeasurements(pred: Prediction): Measurements {
+  const gross = pred.predicted_gross ?? 100
+  // Typical B&C proportions: spread ~15%, main beam ~25%, G1 ~8%, G2 ~10%, G3 ~9%, G4 ~6%
+  const spread       = Math.round((gross * 0.15) * 10) / 10
+  const beam         = Math.round((gross * 0.25) * 10) / 10
+  const g1           = Math.round((gross * 0.08) * 10) / 10
+  const g2           = Math.round((gross * 0.10) * 10) / 10
+  const g3           = Math.round((gross * 0.09) * 10) / 10
+  const g4           = Math.round((gross * 0.06) * 10) / 10
+  const h1           = Math.round((gross * 0.045) * 10) / 10
+
+  console.warn('[precision-pass] Using fallback measurements for prediction', pred.id, {
+    grossScore: gross,
+    source: 'fallback_estimated',
+  })
+
+  return {
+    inside_spread:   spread,
+    main_beam_left:  beam,
+    main_beam_right: beam,
+    g1_left: g1,  g1_right: g1,
+    g2_left: g2,  g2_right: g2,
+    g3_left: g3,  g3_right: g3,
+    g4_left: g4,  g4_right: g4,
+    g5_left: null, g5_right: null,
+    h1_left: h1,  h1_right: h1,
+    h2_left: null, h2_right: null,
+    h3_left: null, h3_right: null,
+    h4_left: null, h4_right: null,
+    abnormal_points: 0,
+    deductions: 0,
+    // Extended traceability field (not in Measurements interface but stored in raw_response)
+    ...(({ source: 'fallback_estimated' }) as Record<string, unknown>),
+  } as Measurements
+}
+
 function pickMeasurements(pred: Prediction): Measurements {
-  // Prefer canonical measurements JSON; fallback to raw_response.measurements if present
+  // 1. Prefer canonical measurements JSON on the prediction row
   if (pred.measurements) return pred.measurements
+  // 2. Fall back to raw_response.measurements if vision stored them there
   const rr = (pred as Record<string, unknown>).raw_response as Record<string, unknown> | undefined
   if (rr?.measurements) return rr.measurements as Measurements
-  throw new Error('Prediction missing measurements')
+  // 3. Last resort: build estimated fallback measurements from the score
+  //    Never throw — precision pass must always be able to run.
+  return buildFallbackMeasurements(pred)
 }
 
 // Check for development: NODE_ENV=development OR Vercel preview (not production deployment)
