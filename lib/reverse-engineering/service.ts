@@ -22,6 +22,13 @@ function pickMeasurements(pred: Prediction): Measurements {
   throw new Error('Prediction missing measurements')
 }
 
+// Check for development: NODE_ENV=development OR Vercel preview (not production deployment)
+// VERCEL_ENV can be 'development', 'preview', or 'production'
+const IS_DEV = process.env.NODE_ENV === 'development' || 
+  process.env.VERCEL_ENV === 'preview' || 
+  process.env.VERCEL_ENV === 'development'
+const DEV_ANON_USER_ID = 'dev-anonymous-user'
+
 /**
  * Start a precision pass for a prediction
  */
@@ -38,11 +45,42 @@ export async function startPrecisionPass(params: {
     .eq('id', params.predictionId)
     .single()
 
-  if (pErr || !pred) throw new Error(`Prediction not found: ${pErr?.message ?? 'unknown'}`)
+  if (pErr || !pred) {
+    console.error('[precision-pass] Prediction not found:', { predictionId: params.predictionId, error: pErr?.message })
+    throw new Error(`Prediction not found: ${pErr?.message ?? 'unknown'}`)
+  }
   
   const buckData = (pred as Record<string, unknown>).bucks as Record<string, unknown>
-  if (buckData?.user_id !== params.requestedByUserId) {
+  const isDevBypass = IS_DEV && params.requestedByUserId === DEV_ANON_USER_ID
+  const isOwner = buckData?.user_id === params.requestedByUserId
+  
+  console.log('[precision-pass] Permission check:', {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+    IS_DEV,
+    isDevBypass,
+    isOwner,
+    requesterId: params.requestedByUserId,
+    buckUserId: buckData?.user_id,
+  })
+  
+  // In development with dev-anonymous-user, bypass ownership check
+  // In production, require ownership
+  if (!isOwner && !isDevBypass) {
+    console.error('[precision-pass] Forbidden: ownership mismatch', {
+      buckUserId: buckData?.user_id,
+      requesterId: params.requestedByUserId,
+      isDev: IS_DEV,
+      isDevBypass,
+    })
     throw new Error('Forbidden')
+  }
+  
+  if (isDevBypass) {
+    console.log('[precision-pass] DEV BYPASS: allowing anonymous precision pass', {
+      predictionId: params.predictionId,
+      buckId: buckData?.id,
+    })
   }
 
   const predRecord = pred as Record<string, unknown>

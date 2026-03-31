@@ -4,7 +4,10 @@ import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 
 export const runtime = 'nodejs'
 
-const IS_DEV = process.env.NODE_ENV === 'development'
+// Check for development: NODE_ENV=development OR Vercel preview (not production deployment)
+const IS_DEV = process.env.NODE_ENV === 'development' || 
+  process.env.VERCEL_ENV === 'preview' || 
+  process.env.VERCEL_ENV === 'development'
 // Dev bypass user ID for anonymous precision passes in development
 const DEV_ANON_USER_ID = 'dev-anonymous-user'
 
