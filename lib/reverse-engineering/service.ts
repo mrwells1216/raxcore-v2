@@ -305,12 +305,25 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
       params: h.params,
     }))
 
+    // Diagnostic: log every hypothesis_type before inserting so we can identify
+    // any value that violates the DB hypothesis_type check constraint.
+    console.log('[precision-pass] Inserting candidates', {
+      runId: reverseRunId,
+      hypothesisTypes: candidateRows.map(r => r.hypothesis_type),
+      candidateRows,
+    })
+
     const { data: insertedCandidates, error: candErr } = await supabase
       .from('hypothesis_candidates')
       .insert(candidateRows)
       .select()
 
-    if (candErr) throw new Error(`Insert candidates failed: ${candErr.message}`)
+    if (candErr) {
+      const types = candidateRows.map(r => r.hypothesis_type).join(', ')
+      throw new Error(
+        `Insert candidates failed: ${candErr.message} | hypothesis_types in batch: [${types}]`
+      )
+    }
 
     // Step 3: Evaluate candidates
     const evalRows: unknown[] = []
