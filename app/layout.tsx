@@ -45,13 +45,6 @@ export const viewport: Viewport = {
   ],
 }
 
-console.log("[v0] ENV CHECK", {
-  supabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-  anon: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  service: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-  openai: !!process.env.OPENAI_API_KEY,
-})
-
 export default function RootLayout({
   children,
 }: Readonly<{

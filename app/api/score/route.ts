@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasRequiredServerEnv } from '@/lib/env'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
@@ -44,31 +45,16 @@ function getClientKey(request: Request): string {
   return `ip:${ip}`
 }
 
-// Verify required environment variables at runtime
-function verifyEnvVars(): { ok: true } | { ok: false; missing: string[] } {
-  const required = [
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SUPABASE_SERVICE_ROLE_KEY',
-    'OPENAI_API_KEY',
-  ]
-  const missing = required.filter(key => !process.env[key])
-  if (missing.length > 0) {
-    console.error('[score] Missing required environment variables:', missing)
-    return { ok: false, missing }
-  }
-  return { ok: true }
-}
-
 export async function POST(request: Request) {
-  // Verify env vars before any scoring logic
-  const envCheck = verifyEnvVars()
+  // Verify env vars before any scoring logic using shared validator
+  const envCheck = hasRequiredServerEnv()
   if (!envCheck.ok) {
+    console.error('[score] Missing required environment variables:', envCheck.missing)
     return NextResponse.json(
       {
         error: 'Server configuration error: missing environment variables',
         missing: envCheck.missing,
-        fix: 'Set these variables in the Vercel project settings or .env.development.local',
+        fix: 'Set these variables in the Vercel/v0 project environment settings. Do not rely on .env file rewrites during dev restarts.',
       },
       { status: 500 }
     )
