@@ -6,6 +6,7 @@ import {
   createBuck, 
   addBuckImages, 
   uploadBuckImage,
+  getBuckImageBucketName,
   createPrediction, 
   updateBuckStatus,
   getActiveModelVersion,
@@ -254,9 +255,19 @@ export async function POST(request: Request) {
   })
 
     // Upload data URL images to Supabase Storage so we have real https:// URLs.
-    // OpenAI's vision API rejects data: URL scheme — only http/https is accepted.
+    // OpenAI vision requires http/https — data: URL scheme is rejected by the API.
+    // We never silently fall back to data: when using OpenAI; instead we fail with
+    // an actionable error so the user knows exactly what to fix.
+    const isOpenAI = !!process.env.OPENAI_API_KEY
+    const bucket = getBuckImageBucketName()
     const resolvedImages: ImageAnalysisInput[] = []
     const storedImageUrls: string[] = []
+
+    console.log('[score] image upload phase', {
+      bucket,
+      imageCount: pendingImages.length,
+      provider: isOpenAI ? 'openai' : 'heuristic',
+    })
 
     for (let i = 0; i < pendingImages.length; i++) {
       const p = pendingImages[i]
@@ -265,11 +276,26 @@ export async function POST(request: Request) {
       if (p.dataUrl) {
         try {
           imageUrl = await uploadBuckImage(buck.id, p.dataUrl, i)
-          console.log(`[score] Uploaded image ${i} to storage: ${imageUrl.substring(0, 60)}...`)
+          console.log(`[score] image ${i} uploaded to storage: ${imageUrl.substring(0, 80)}`)
         } catch (uploadErr) {
-          console.error(`[score] Storage upload failed for image ${i}, falling back to data URL:`, uploadErr)
-          // If upload fails, keep the data URL — vision will fall back to heuristic
-          // but we should not break the entire scoring flow.
+          const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+
+          if (isOpenAI) {
+            // Hard fail — OpenAI cannot accept data: URLs. Surface the exact error.
+            console.error(`[score] image ${i} upload failed and provider is OpenAI — cannot proceed with data: URL`, errMsg)
+            return NextResponse.json(
+              {
+                error: 'Image storage upload failed. OpenAI vision requires https:// image URLs.',
+                detail: errMsg,
+                bucket,
+                fix: `Create a Supabase Storage bucket named exactly "${bucket}" and set it to Public, or check that your service-role key has storage.write permissions.`,
+              },
+              { status: 500 }
+            )
+          }
+
+          // Non-OpenAI path (heuristic fallback already handles data: URLs)
+          console.warn(`[score] image ${i} upload failed, using data URL (non-OpenAI path):`, errMsg)
           imageUrl = p.dataUrl
         }
       } else {
@@ -280,7 +306,7 @@ export async function POST(request: Request) {
       resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
     }
 
-    // Store the resolved URLs (https:// where possible, data: as fallback)
+    // Store the resolved URLs
     await addBuckImages(buck.id, storedImageUrls)
 
     // Update status to processing

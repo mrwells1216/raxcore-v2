@@ -211,18 +211,56 @@ export interface BuckImageRecord {
   created_at: string
 }
 
-const BUCK_IMAGES_BUCKET = 'buck-images'
+// Canonical storage bucket name for buck images.
+// Must match the bucket created in scripts/001_create_schema.sql.
+// Override with BUCK_IMAGES_BUCKET env var if bucket name differs per environment.
+export const BUCK_IMAGES_BUCKET = process.env.BUCK_IMAGES_BUCKET ?? 'buck-images'
+
+/** Returns the configured bucket name. Useful for log/error messages. */
+export function getBuckImageBucketName(): string {
+  return BUCK_IMAGES_BUCKET
+}
+
+/**
+ * Test whether the storage bucket is accessible using the service-role client.
+ * Returns `{ ok: true }` or `{ ok: false, reason: string }`.
+ */
+export async function checkBuckImageBucketAccess(): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const supabase = await getServiceSupabase()
+    const { data, error } = await supabase.storage.getBucket(BUCK_IMAGES_BUCKET)
+    if (error) {
+      return { ok: false, reason: error.message }
+    }
+    if (!data) {
+      return { ok: false, reason: 'Bucket not returned by API' }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
 
 /**
  * Upload a base64 data URL to Supabase Storage and return the public https:// URL.
  * Used to convert data: payloads into real URLs before passing to OpenAI vision.
+ *
+ * Throws with an actionable message if the bucket is missing or upload fails.
+ * Never falls back silently — callers decide whether to degrade or fail hard.
  */
 export async function uploadBuckImage(
   buckId: string,
   dataUrl: string,
   index: number
 ): Promise<string> {
+  const bucket = getBuckImageBucketName()
   const supabase = await getServiceSupabase()
+
+  console.log('[uploadBuckImage] starting upload', {
+    bucket,
+    buckId,
+    index,
+  })
 
   // Parse data URL: data:image/jpeg;base64,<data>
   const match = dataUrl.match(/^data:([a-zA-Z0-9+/]+\/[a-zA-Z0-9+/]+);base64,(.+)$/)
@@ -236,26 +274,40 @@ export async function uploadBuckImage(
   const timestamp = Date.now()
   const path = `bucks/${buckId}/image_${index}_${timestamp}.${ext}`
 
+  console.log('[uploadBuckImage] uploading', { bucket, path, mimeType, sizeChars: base64Data.length })
+
   const buffer = Buffer.from(base64Data, 'base64')
 
   const { error: uploadError } = await supabase.storage
-    .from(BUCK_IMAGES_BUCKET)
+    .from(bucket)
     .upload(path, buffer, {
       contentType: mimeType,
       upsert: false,
     })
 
   if (uploadError) {
-    throw new Error(`[uploadBuckImage] Upload failed for index ${index}: ${uploadError.message}`)
+    const isBucketMissing =
+      uploadError.message.toLowerCase().includes('bucket not found') ||
+      uploadError.message.toLowerCase().includes('not found')
+
+    const detail = isBucketMissing
+      ? `Bucket "${bucket}" does not exist. Create it in Supabase Storage > New Bucket, name it exactly "${bucket}", and set it to Public.`
+      : uploadError.message
+
+    console.error('[uploadBuckImage] upload failed', { bucket, path, isBucketMissing, error: uploadError.message })
+
+    throw new Error(`[uploadBuckImage] Upload failed for image ${index}: ${detail}`)
   }
 
   const { data: urlData } = supabase.storage
-    .from(BUCK_IMAGES_BUCKET)
+    .from(bucket)
     .getPublicUrl(path)
 
   if (!urlData?.publicUrl) {
-    throw new Error(`[uploadBuckImage] Could not get public URL for path ${path}`)
+    throw new Error(`[uploadBuckImage] Could not get public URL for bucket "${bucket}" path "${path}"`)
   }
+
+  console.log('[uploadBuckImage] success', { bucket, path, publicUrl: urlData.publicUrl })
 
   return urlData.publicUrl
 }
