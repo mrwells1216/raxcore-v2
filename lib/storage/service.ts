@@ -211,6 +211,55 @@ export interface BuckImageRecord {
   created_at: string
 }
 
+const BUCK_IMAGES_BUCKET = 'buck-images'
+
+/**
+ * Upload a base64 data URL to Supabase Storage and return the public https:// URL.
+ * Used to convert data: payloads into real URLs before passing to OpenAI vision.
+ */
+export async function uploadBuckImage(
+  buckId: string,
+  dataUrl: string,
+  index: number
+): Promise<string> {
+  const supabase = await getServiceSupabase()
+
+  // Parse data URL: data:image/jpeg;base64,<data>
+  const match = dataUrl.match(/^data:([a-zA-Z0-9+/]+\/[a-zA-Z0-9+/]+);base64,(.+)$/)
+  if (!match) {
+    throw new Error(`[uploadBuckImage] Invalid data URL format at index ${index}`)
+  }
+  const mimeType = match[1]
+  const base64Data = match[2]
+  const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg'
+
+  const timestamp = Date.now()
+  const path = `bucks/${buckId}/image_${index}_${timestamp}.${ext}`
+
+  const buffer = Buffer.from(base64Data, 'base64')
+
+  const { error: uploadError } = await supabase.storage
+    .from(BUCK_IMAGES_BUCKET)
+    .upload(path, buffer, {
+      contentType: mimeType,
+      upsert: false,
+    })
+
+  if (uploadError) {
+    throw new Error(`[uploadBuckImage] Upload failed for index ${index}: ${uploadError.message}`)
+  }
+
+  const { data: urlData } = supabase.storage
+    .from(BUCK_IMAGES_BUCKET)
+    .getPublicUrl(path)
+
+  if (!urlData?.publicUrl) {
+    throw new Error(`[uploadBuckImage] Could not get public URL for path ${path}`)
+  }
+
+  return urlData.publicUrl
+}
+
 export async function addBuckImages(
   buckId: string, 
   imageUrls: string[]

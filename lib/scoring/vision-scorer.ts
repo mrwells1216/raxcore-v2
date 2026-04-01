@@ -283,23 +283,55 @@ Provide your analysis as structured JSON matching the required schema.`
 }
 
 /**
- * Prepare image content for the vision model
- * Handles both data URLs and regular URLs
+ * Prepare image content for the vision model.
+ *
+ * Transport rules:
+ *  - https:// URL  → URL object  (preferred, works with all providers)
+ *  - data:         → string      (only supported by gateway, NOT OpenAI)
+ *
+ * For OpenAI: throws if any image is a data: URL, because the OpenAI API
+ * requires http/https scheme and returns "URL scheme must be http or https".
  */
-function prepareImageContent(images: VisionImageInput[]): Array<{ type: 'image'; image: URL | string }> {
+function prepareImageContent(
+  images: VisionImageInput[],
+  provider: string
+): Array<{ type: 'image'; image: URL | string }> {
+  const transportTypes = images.map(img => {
+    if (img.imageUrl.startsWith('https://')) return 'https_url'
+    if (img.imageUrl.startsWith('http://'))  return 'http_url'
+    if (img.imageUrl.startsWith('data:'))    return 'data_url'
+    return 'unknown'
+  })
+
+  const allHttps = transportTypes.every(t => t === 'https_url')
+  const hasDataUrl = transportTypes.some(t => t === 'data_url')
+
+  console.log('[vision-scorer] image transport check', {
+    provider,
+    imageCount: images.length,
+    transportTypes,
+    allHttps,
+    hasDataUrl,
+  })
+
+  // OpenAI requires https:// — reject data: URLs before they reach the API
+  if (provider === 'openai' && hasDataUrl) {
+    const badIndices = transportTypes
+      .map((t, i) => (t === 'data_url' ? i : -1))
+      .filter(i => i >= 0)
+    throw new Error(
+      `[vision-scorer] OpenAI vision requires https:// image URLs. ` +
+      `data: URLs found at indices [${badIndices.join(', ')}]. ` +
+      `Ensure images are uploaded to storage before scoring.`
+    )
+  }
+
   return images.map(img => {
-    // Data URLs are passed as strings directly
-    if (img.imageUrl.startsWith('data:image/')) {
-      return {
-        type: 'image' as const,
-        image: img.imageUrl,
-      }
+    if (img.imageUrl.startsWith('data:')) {
+      // Non-OpenAI providers (gateway) accept data URL strings directly
+      return { type: 'image' as const, image: img.imageUrl }
     }
-    // Regular URLs need to be URL objects
-    return {
-      type: 'image' as const,
-      image: new URL(img.imageUrl),
-    }
+    return { type: 'image' as const, image: new URL(img.imageUrl) }
   })
 }
 
@@ -441,7 +473,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   // Use vision config from earlier
   const { model: visionModel, provider: visionProvider, modelName: visionModelName, providerAdapter } = visionConfig
 
-  const imageContent = prepareImageContent(validImages)
+  const imageContent = prepareImageContent(validImages, visionProvider)
   console.log('[vision-scorer] pre-call', {
     provider: visionProvider,
     model: visionModelName,

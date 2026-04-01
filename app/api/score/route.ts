@@ -5,6 +5,7 @@ import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, Int
 import { 
   createBuck, 
   addBuckImages, 
+  uploadBuckImage,
   createPrediction, 
   updateBuckStatus,
   getActiveModelVersion,
@@ -117,30 +118,30 @@ export async function POST(request: Request) {
     const harvestYear = harvestYearRaw ? Number(harvestYearRaw) : null
     const mainFramePoints = mainFrameRaw ? Number(mainFrameRaw) : null
 
-    // Collect images from form data
+    // Collect images from form data — data URLs are held separately and uploaded
+    // to Supabase Storage after the buck is created so we have a real https:// URL
+    // to pass to OpenAI. Using data: URLs directly causes "URL scheme must be http
+    // or https" errors from the OpenAI API.
     const pendingImages: { dataUrl?: string; url?: string; angle: AngleType }[] = []
-    const images: ImageAnalysisInput[] = []
 
     for (let i = 0; i < 10; i++) {
       const dataUrl = formData.get(`image_data_${i}`) as string | null
       const url = formData.get(`image_url_${i}`) as string | null
       const angle = formData.get(`angle_${i}`) as AngleType | null
       if (!angle) continue
-      
+
       if (dataUrl) {
         pendingImages.push({ dataUrl, angle })
-        images.push({ imageUrl: dataUrl, angleType: angle, width: 1920, height: 1080 })
       } else if (url) {
         pendingImages.push({ url, angle })
-        images.push({ imageUrl: url, angleType: angle, width: 1920, height: 1080 })
       }
     }
 
-    if (images.length === 0) {
+    if (pendingImages.length === 0) {
       return NextResponse.json({ error: 'At least one image is required' }, { status: 400 })
     }
     
-    imageCount = images.length
+    imageCount = pendingImages.length
 
     // Phase 38: Per-user plan limit enforcement (runs before any DB writes or AI calls)
     const sessionId = formData.get('session_id') as string | null
@@ -252,16 +253,42 @@ export async function POST(request: Request) {
     abnormalPointTags: abnormalPointTags,
   })
 
-    // Store image URLs (using data URLs or external URLs for now)
-    const imageUrls = pendingImages.map(p => p.dataUrl || p.url || '')
-    await addBuckImages(buck.id, imageUrls)
+    // Upload data URL images to Supabase Storage so we have real https:// URLs.
+    // OpenAI's vision API rejects data: URL scheme — only http/https is accepted.
+    const resolvedImages: ImageAnalysisInput[] = []
+    const storedImageUrls: string[] = []
+
+    for (let i = 0; i < pendingImages.length; i++) {
+      const p = pendingImages[i]
+      let imageUrl: string
+
+      if (p.dataUrl) {
+        try {
+          imageUrl = await uploadBuckImage(buck.id, p.dataUrl, i)
+          console.log(`[score] Uploaded image ${i} to storage: ${imageUrl.substring(0, 60)}...`)
+        } catch (uploadErr) {
+          console.error(`[score] Storage upload failed for image ${i}, falling back to data URL:`, uploadErr)
+          // If upload fails, keep the data URL — vision will fall back to heuristic
+          // but we should not break the entire scoring flow.
+          imageUrl = p.dataUrl
+        }
+      } else {
+        imageUrl = p.url || ''
+      }
+
+      storedImageUrls.push(imageUrl)
+      resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
+    }
+
+    // Store the resolved URLs (https:// where possible, data: as fallback)
+    await addBuckImages(buck.id, storedImageUrls)
 
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
-      images,
+      images: resolvedImages,
       state,
       rackType,
       earsFullyVisible,
