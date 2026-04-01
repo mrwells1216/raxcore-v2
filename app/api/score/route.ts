@@ -44,7 +44,36 @@ function getClientKey(request: Request): string {
   return `ip:${ip}`
 }
 
+// Verify required environment variables at runtime
+function verifyEnvVars(): { ok: true } | { ok: false; missing: string[] } {
+  const required = [
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'OPENAI_API_KEY',
+  ]
+  const missing = required.filter(key => !process.env[key])
+  if (missing.length > 0) {
+    console.error('[score] Missing required environment variables:', missing)
+    return { ok: false, missing }
+  }
+  return { ok: true }
+}
+
 export async function POST(request: Request) {
+  // Verify env vars before any scoring logic
+  const envCheck = verifyEnvVars()
+  if (!envCheck.ok) {
+    return NextResponse.json(
+      {
+        error: 'Server configuration error: missing environment variables',
+        missing: envCheck.missing,
+        fix: 'Set these variables in the Vercel project settings or .env.development.local',
+      },
+      { status: 500 }
+    )
+  }
+
   const requestId = generateRequestId()
   const clientKey = getClientKey(request)
   const requestStartTime = Date.now()
