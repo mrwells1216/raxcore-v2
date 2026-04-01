@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getDashboardMetrics } from '@/lib/supervision/service'
+import { getSupervisionDashboardStats } from '@/lib/supervision/service'
 
 export async function GET() {
   const supabase = await createClient()
@@ -21,6 +21,6 @@ export async function GET() {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
   }
 
-  const metrics = await getDashboardMetrics()
+  const metrics = await getSupervisionDashboardStats()
   return NextResponse.json(metrics)
 }

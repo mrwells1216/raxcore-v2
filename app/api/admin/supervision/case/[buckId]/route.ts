@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getCaseTimeline } from '@/lib/supervision/service'
+import { getCaseSupervisionTrail } from '@/lib/supervision/service'
 
 export async function GET(
   request: NextRequest,
@@ -24,6 +24,6 @@ export async function GET(
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
   }
 
-  const timeline = await getCaseTimeline(buckId)
+  const timeline = await getCaseSupervisionTrail(buckId)
   return NextResponse.json(timeline)
 }

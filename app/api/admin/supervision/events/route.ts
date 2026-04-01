@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getSupervisionEvents } from '@/lib/supervision/service'
+import { listSupervisionEvents } from '@/lib/supervision/service'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const eventType = searchParams.get('eventType') || undefined
   const severityLevel = searchParams.get('severityLevel') || undefined
 
-  const events = await getSupervisionEvents({ 
+  const events = await listSupervisionEvents({ 
     limit, 
     offset, 
     eventType: eventType as 'prediction' | 'validation' | 'pattern_detected' | 'action_applied' | undefined,

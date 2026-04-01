@@ -5,7 +5,8 @@
  * Integrates with supervision events, reverse/structural artifacts, and auxiliary labels.
  */
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   TrainingPack,
   TrainingPackItem,
@@ -30,7 +31,7 @@ import type {
 export async function createTrainingPack(
   input: CreateTrainingPackInput
 ): Promise<TrainingPack> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('training_packs')
@@ -156,7 +157,7 @@ export async function updateTrainingPack(
   packId: string,
   updates: Partial<Pick<TrainingPack, 'name' | 'description' | 'status' | 'filter_config_json' | 'split_config_json' | 'variant_id' | 'split_seed'>>
 ): Promise<TrainingPack> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('training_packs')
@@ -180,7 +181,7 @@ export async function updateTrainingPack(
  * Delete a training pack
  */
 export async function deleteTrainingPack(packId: string): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('training_packs')
@@ -204,7 +205,7 @@ export async function addItemsToTrainingPack(
   packId: string,
   items: AddTrainingPackItemInput[]
 ): Promise<TrainingPackItem[]> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Get pack to determine split seed
   const pack = await getTrainingPackById(packId)
@@ -313,7 +314,7 @@ export async function updateItemArtifactSummary(
   itemId: string,
   summary: TrainingPackArtifactSummary
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('training_pack_items')
@@ -333,7 +334,7 @@ export async function removeItemsFromPack(
   packId: string,
   itemIds: string[]
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('training_pack_items')
@@ -381,7 +382,7 @@ export async function reassignPackSplits(
   packId: string,
   seed?: number
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Get pack and items
   const pack = await getTrainingPackById(packId)
@@ -526,7 +527,7 @@ export async function linkPackToVariant(
   packId: string,
   variantId: string
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Update pack
   await updateTrainingPack(packId, { variant_id: variantId })
@@ -563,7 +564,7 @@ export async function unlinkPackFromVariant(
   packId: string,
   variantId: string
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Update pack
   await updateTrainingPack(packId, { variant_id: null })
@@ -604,7 +605,7 @@ export async function createPackJob(
   packId: string,
   jobType: string
 ): Promise<TrainingPackJob> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('training_pack_jobs')
@@ -631,7 +632,7 @@ export async function updatePackJobStatus(
   jobId: string,
   updates: Partial<Pick<TrainingPackJob, 'status' | 'processed_items' | 'total_items' | 'result_json' | 'error_message' | 'started_at' | 'completed_at'>>
 ): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('training_pack_jobs')

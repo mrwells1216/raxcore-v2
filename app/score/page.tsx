@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/header'
 import { ScoringWizard } from '@/components/scoring/scoring-wizard'
@@ -10,7 +10,7 @@ import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 const SESSION_KEY = 'raxcore_active_result'
 
-export default function ScorePage() {
+function ScorePageContent() {
   const searchParams = useSearchParams()
   const initialMode = searchParams.get('mode') === 'upload' ? 'upload' : 'camera'
   
@@ -81,5 +81,17 @@ export default function ScorePage() {
         )}
       </main>
     </div>
+  )
+}
+
+export default function ScorePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-svh flex items-center justify-center bg-background">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
+    }>
+      <ScorePageContent />
+    </Suspense>
   )
 }

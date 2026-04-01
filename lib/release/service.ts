@@ -15,7 +15,7 @@ import type {
   ReleaseReadinessStatus,
 } from '@/lib/types'
 import { getRuntimeHealthMetrics } from '@/lib/validation/service'
-import { getLatestBenchmarkRun, evaluateGuardrails } from '@/lib/benchmark/service'
+import { listBenchmarkRuns, evaluateGuardrails } from '@/lib/benchmark/service'
 import { getActiveCalibrationProfile } from '@/lib/calibration/utils'
 import { getDatasetHealthSummary } from '@/lib/health/service'
 
@@ -197,7 +197,7 @@ export async function runReadinessChecks(
   // =====================
   
   try {
-    const benchmarkRun = await getLatestBenchmarkRun(modelVersionId, calibrationProfileId)
+    const benchmarkRun = await listBenchmarkRuns(modelVersionId, calibrationProfileId)
     
     if (benchmarkRun) {
       // MAE Gross Check

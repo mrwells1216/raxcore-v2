@@ -5,7 +5,8 @@
  * Includes full supervision provenance and auxiliary labels.
  */
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   TrainingPack,
   TrainingPackItem,
@@ -410,7 +411,7 @@ export async function createExportRecord(
   filterJson?: Record<string, unknown>,
   exportedBy?: string
 ): Promise<TrainingPackExport> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('training_pack_exports')
