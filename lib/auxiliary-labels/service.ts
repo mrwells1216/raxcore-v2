@@ -5,7 +5,8 @@
  * Maps supervision events and artifacts to structured auxiliary labels.
  */
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   AuxiliaryLabel,
   AuxiliaryLabelType,
@@ -24,7 +25,7 @@ import type {
 export async function createAuxiliaryLabel(
   input: CreateAuxiliaryLabelInput
 ): Promise<AuxiliaryLabel> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('auxiliary_labels')
@@ -56,7 +57,7 @@ export async function createAuxiliaryLabels(
 ): Promise<AuxiliaryLabel[]> {
   if (inputs.length === 0) return []
   
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const records = inputs.map(input => ({
     training_pack_item_id: input.training_pack_item_id,
@@ -172,7 +173,7 @@ export async function updateLabelStatus(
   status: AuxiliaryLabelStatus,
   confidence?: number
 ): Promise<AuxiliaryLabel> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const updates: Record<string, unknown> = { status }
   if (confidence !== undefined) {
@@ -215,7 +216,7 @@ export async function rejectLabel(labelId: string): Promise<AuxiliaryLabel> {
  * Delete labels for an item
  */
 export async function deleteLabelsForItem(itemId: string): Promise<void> {
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('auxiliary_labels')

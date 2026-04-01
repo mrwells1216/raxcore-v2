@@ -56,7 +56,7 @@ export function ErrorDistributionChart({ data }: ErrorDistributionChartProps) {
             axisLine={false}
             width={35}
           />
-          <ReferenceLine x="0 to 5\"" stroke="hsl(var(--border))" strokeDasharray="3 3" />
+          <ReferenceLine x="0 to 5" stroke="hsl(var(--border))" strokeDasharray="3 3" />
           <Tooltip
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null

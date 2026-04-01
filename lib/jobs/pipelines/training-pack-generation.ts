@@ -7,7 +7,7 @@
 
 import { registerPipeline, definePipeline } from '../'
 import type { StageContext } from '../types'
-import { createServiceClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import {
   getTrainingPackById,
   addItemsToTrainingPack,
@@ -73,7 +73,7 @@ async function resolveItems(
   _ctx: StageContext
 ): Promise<{ itemCount: number }> {
   const { packId, filterConfig } = payload
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Build query based on filters
   let query = supabase
@@ -176,7 +176,7 @@ async function attachSupervision(
   _ctx: StageContext
 ): Promise<{ attachedCount: number }> {
   const { packId } = payload
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Get all items
   const items = await getTrainingPackItems(packId, { limit: 10000 })
@@ -217,7 +217,7 @@ async function attachArtifacts(
   _ctx: StageContext
 ): Promise<{ artifactCount: number }> {
   const { packId } = payload
-  const supabase = await createServiceClient()
+  const supabase = await getServiceSupabase()
   
   // Get all items
   const items = await getTrainingPackItems(packId, { limit: 10000 })
