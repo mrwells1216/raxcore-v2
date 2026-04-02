@@ -206,3 +206,57 @@ export interface ComputedScores {
     abnormalDeduction: number
   }
 }
+
+// ============================================================================
+// MUTATION TYPES (for precision pass field-level adjustments)
+// ============================================================================
+
+/**
+ * Types of hypothesis mutations the precision pass can apply.
+ * Each operates on specific measurement fields.
+ */
+export type HypothesisMutationType =
+  | 'noop'
+  | 'scale_up'
+  | 'scale_down'
+  | 'spread_expand'
+  | 'spread_reduce'
+  | 'beam_extend'
+  | 'beam_reduce'
+  | 'symmetry_beam'
+  | 'symmetry_tine'
+  | 'mass_boost'
+  | 'mass_reduce'
+  | 'deduction_reduce'
+  | 'deduction_increase'
+  | 'swap_sides'
+  | 'tine_extend'
+  | 'tine_reduce'
+  | 'combo'
+
+/**
+ * A patch describing deltas to apply to measurement fields.
+ * All values are deltas (positive or negative) to add to current values.
+ */
+export interface MeasurementPatch {
+  insideSpreadDelta?: number
+  leftMainBeamDelta?: number
+  rightMainBeamDelta?: number
+  /** Tine deltas by tine index (1-5 for G1-G5) */
+  leftTineDeltas?: Record<number, number>
+  rightTineDeltas?: Record<number, number>
+  /** Mass deltas by circumference index (1-4 for H1-H4) */
+  leftMassDeltas?: Record<number, number>
+  rightMassDeltas?: Record<number, number>
+  deductionDelta?: number
+  abnormalPointsDelta?: number
+}
+
+/**
+ * A mutation candidate with hypothesis type and patch.
+ */
+export interface SheetMutationCandidate {
+  hypothesisType: HypothesisMutationType
+  patch: MeasurementPatch
+  notes?: string[]
+}

@@ -16,6 +16,8 @@ import type {
   MassMeasurement,
   ComputedScores,
   ScoringSystem,
+  SheetMutationCandidate,
+  MeasurementPatch,
 } from './types'
 
 // ============================================================================
@@ -371,4 +373,292 @@ export function getMissingMeasurements(measurements: ScoreSheetMeasurements): st
   }
   
   return missing
+}
+
+// ============================================================================
+// MUTATION APPLICATION (for precision pass)
+// ============================================================================
+
+/**
+ * Apply a mutation patch to a measurement sheet.
+ * Returns a new sheet with the mutations applied and scores recomputed.
+ * 
+ * This is the core function for precision pass field-level adjustments.
+ * Instead of adjusting gross/net directly, we mutate individual fields
+ * and then recompute through the rules engine.
+ */
+export function applySheetMutation(
+  sheet: ScoreSheetMeasurements,
+  candidate: SheetMutationCandidate
+): ScoreSheetMeasurements {
+  // Deep clone to avoid mutation
+  const next: ScoreSheetMeasurements = JSON.parse(JSON.stringify(sheet))
+  const patch = candidate.patch
+
+  // Log what we're applying
+  console.log(`[precision-pass] Applying mutation: ${candidate.hypothesisType}`, {
+    patch,
+    notes: candidate.notes,
+  })
+
+  // Apply inside spread delta
+  if (patch.insideSpreadDelta !== undefined) {
+    next.insideSpread = round2((next.insideSpread ?? 0) + patch.insideSpreadDelta)
+    console.log(`[precision-pass]   insideSpread: ${sheet.insideSpread} -> ${next.insideSpread} (delta: ${patch.insideSpreadDelta})`)
+  }
+
+  // Apply main beam deltas
+  if (patch.leftMainBeamDelta !== undefined) {
+    next.left.mainBeamLength = round2((next.left.mainBeamLength ?? 0) + patch.leftMainBeamDelta)
+    console.log(`[precision-pass]   leftMainBeam: ${sheet.left.mainBeamLength} -> ${next.left.mainBeamLength} (delta: ${patch.leftMainBeamDelta})`)
+  }
+  if (patch.rightMainBeamDelta !== undefined) {
+    next.right.mainBeamLength = round2((next.right.mainBeamLength ?? 0) + patch.rightMainBeamDelta)
+    console.log(`[precision-pass]   rightMainBeam: ${sheet.right.mainBeamLength} -> ${next.right.mainBeamLength} (delta: ${patch.rightMainBeamDelta})`)
+  }
+
+  // Apply tine deltas
+  if (patch.leftTineDeltas) {
+    for (const [indexStr, delta] of Object.entries(patch.leftTineDeltas)) {
+      const index = Number(indexStr)
+      const tine = next.left.tines.find(t => t.index === index)
+      if (tine) {
+        const oldLen = tine.length
+        tine.length = round2((tine.length ?? 0) + delta)
+        console.log(`[precision-pass]   leftG${index}: ${oldLen} -> ${tine.length} (delta: ${delta})`)
+      }
+    }
+  }
+  if (patch.rightTineDeltas) {
+    for (const [indexStr, delta] of Object.entries(patch.rightTineDeltas)) {
+      const index = Number(indexStr)
+      const tine = next.right.tines.find(t => t.index === index)
+      if (tine) {
+        const oldLen = tine.length
+        tine.length = round2((tine.length ?? 0) + delta)
+        console.log(`[precision-pass]   rightG${index}: ${oldLen} -> ${tine.length} (delta: ${delta})`)
+      }
+    }
+  }
+
+  // Apply mass deltas
+  if (patch.leftMassDeltas) {
+    for (const [indexStr, delta] of Object.entries(patch.leftMassDeltas)) {
+      const index = Number(indexStr)
+      const mass = next.left.masses.find(m => m.index === index)
+      if (mass) {
+        const oldCirc = mass.circumference
+        mass.circumference = round2((mass.circumference ?? 0) + delta)
+        console.log(`[precision-pass]   leftH${index}: ${oldCirc} -> ${mass.circumference} (delta: ${delta})`)
+      }
+    }
+  }
+  if (patch.rightMassDeltas) {
+    for (const [indexStr, delta] of Object.entries(patch.rightMassDeltas)) {
+      const index = Number(indexStr)
+      const mass = next.right.masses.find(m => m.index === index)
+      if (mass) {
+        const oldCirc = mass.circumference
+        mass.circumference = round2((mass.circumference ?? 0) + delta)
+        console.log(`[precision-pass]   rightH${index}: ${oldCirc} -> ${mass.circumference} (delta: ${delta})`)
+      }
+    }
+  }
+
+  // Apply deduction delta
+  if (patch.deductionDelta !== undefined) {
+    next.deductions.totalDeductions = round2(
+      (next.deductions.totalDeductions ?? 0) + patch.deductionDelta
+    )
+    console.log(`[precision-pass]   deductions: ${sheet.deductions.totalDeductions} -> ${next.deductions.totalDeductions} (delta: ${patch.deductionDelta})`)
+  }
+
+  // Recompute gross and net through the rules engine
+  const oldGross = next.grossScore
+  const oldNet = next.netScore
+  next.grossScore = computeGrossScore(next)
+  next.netScore = computeNetScoreTypical(next) // Default to typical
+
+  console.log(`[precision-pass] Scores recomputed: gross ${oldGross} -> ${next.grossScore}, net ${oldNet} -> ${next.netScore}`)
+
+  return next
+}
+
+/**
+ * Generate mutation candidates for precision pass.
+ * Each candidate is a specific field-level adjustment.
+ */
+export function generateMutationCandidates(
+  sheet: ScoreSheetMeasurements,
+  options: {
+    weakReference?: boolean
+    errorDirection?: 'high' | 'low' | 'unknown'
+  } = {}
+): SheetMutationCandidate[] {
+  const candidates: SheetMutationCandidate[] = []
+  const { weakReference = false, errorDirection = 'unknown' } = options
+
+  // 1. Baseline (no-op)
+  candidates.push({
+    hypothesisType: 'noop',
+    patch: {},
+    notes: ['Baseline - no changes'],
+  })
+
+  // 2. Spread adjustments
+  if (sheet.insideSpread !== null) {
+    candidates.push({
+      hypothesisType: 'spread_expand',
+      patch: { insideSpreadDelta: 0.5 },
+      notes: ['+0.5"'],
+    })
+    candidates.push({
+      hypothesisType: 'spread_reduce',
+      patch: { insideSpreadDelta: -0.5 },
+      notes: ['-0.5"'],
+    })
+    if (weakReference) {
+      candidates.push({
+        hypothesisType: 'spread_expand',
+        patch: { insideSpreadDelta: 2.0 },
+        notes: ['+2.0"'],
+      })
+      candidates.push({
+        hypothesisType: 'spread_reduce',
+        patch: { insideSpreadDelta: -2.0 },
+        notes: ['-2.0"'],
+      })
+    }
+  }
+
+  // 3. Main beam adjustments (both sides together)
+  if (sheet.left.mainBeamLength !== null && sheet.right.mainBeamLength !== null) {
+    candidates.push({
+      hypothesisType: 'beam_extend',
+      patch: { leftMainBeamDelta: 0.5, rightMainBeamDelta: 0.5 },
+      notes: ['+0.5" each'],
+    })
+    candidates.push({
+      hypothesisType: 'beam_reduce',
+      patch: { leftMainBeamDelta: -0.5, rightMainBeamDelta: -0.5 },
+      notes: ['-0.5" each'],
+    })
+    if (weakReference) {
+      candidates.push({
+        hypothesisType: 'beam_extend',
+        patch: { leftMainBeamDelta: 2.0, rightMainBeamDelta: 2.0 },
+        notes: ['+2.0" each'],
+      })
+      candidates.push({
+        hypothesisType: 'beam_reduce',
+        patch: { leftMainBeamDelta: -2.0, rightMainBeamDelta: -2.0 },
+        notes: ['-2.0" each'],
+      })
+    }
+  }
+
+  // 4. Tine adjustments (G2 is typically the longest, most impactful)
+  const g2Left = sheet.left.tines.find(t => t.index === 2)
+  const g2Right = sheet.right.tines.find(t => t.index === 2)
+  if (g2Left?.length !== null && g2Right?.length !== null) {
+    candidates.push({
+      hypothesisType: 'tine_extend',
+      patch: { leftTineDeltas: { 2: 0.5 }, rightTineDeltas: { 2: 0.5 } },
+      notes: ['G2 +0.5" each'],
+    })
+    candidates.push({
+      hypothesisType: 'tine_reduce',
+      patch: { leftTineDeltas: { 2: -0.5 }, rightTineDeltas: { 2: -0.5 } },
+      notes: ['G2 -0.5" each'],
+    })
+  }
+
+  // 5. Mass adjustments (H1 is the most impactful circumference)
+  const h1Left = sheet.left.masses.find(m => m.index === 1)
+  const h1Right = sheet.right.masses.find(m => m.index === 1)
+  if (h1Left?.circumference !== null && h1Right?.circumference !== null) {
+    candidates.push({
+      hypothesisType: 'mass_boost',
+      patch: { leftMassDeltas: { 1: 0.25 }, rightMassDeltas: { 1: 0.25 } },
+      notes: ['H1 +0.25" each'],
+    })
+    candidates.push({
+      hypothesisType: 'mass_reduce',
+      patch: { leftMassDeltas: { 1: -0.25 }, rightMassDeltas: { 1: -0.25 } },
+      notes: ['H1 -0.25" each'],
+    })
+  }
+
+  // 6. Deduction adjustments
+  if (sheet.deductions.totalDeductions !== null) {
+    candidates.push({
+      hypothesisType: 'deduction_reduce',
+      patch: { deductionDelta: -1.0 },
+      notes: ['-1.0"'],
+    })
+    candidates.push({
+      hypothesisType: 'deduction_increase',
+      patch: { deductionDelta: 1.0 },
+      notes: ['+1.0"'],
+    })
+  }
+
+  // 7. Combo adjustments for larger errors
+  if (weakReference || errorDirection !== 'unknown') {
+    const sign = errorDirection === 'high' ? -1 : 1
+    candidates.push({
+      hypothesisType: 'combo',
+      patch: {
+        leftMainBeamDelta: sign * 1.0,
+        rightMainBeamDelta: sign * 1.0,
+        insideSpreadDelta: sign * 0.5,
+      },
+      notes: [errorDirection === 'high' ? 'Scale down combo' : 'Scale up combo'],
+    })
+  }
+
+  return candidates
+}
+
+/**
+ * Describe a mutation candidate in human-readable form
+ */
+export function describeMutation(candidate: SheetMutationCandidate): string {
+  const { hypothesisType, patch, notes } = candidate
+  const notesStr = notes?.join(', ') || ''
+
+  switch (hypothesisType) {
+    case 'noop':
+      return 'Baseline (no changes)'
+    case 'spread_expand':
+      return `Expand spread ${notesStr}`
+    case 'spread_reduce':
+      return `Reduce spread ${notesStr}`
+    case 'beam_extend':
+      return `Extend main beams ${notesStr}`
+    case 'beam_reduce':
+      return `Reduce main beams ${notesStr}`
+    case 'tine_extend':
+      return `Extend tines ${notesStr}`
+    case 'tine_reduce':
+      return `Reduce tines ${notesStr}`
+    case 'mass_boost':
+      return `Increase mass ${notesStr}`
+    case 'mass_reduce':
+      return `Reduce mass ${notesStr}`
+    case 'deduction_reduce':
+      return `Reduce deductions ${notesStr}`
+    case 'deduction_increase':
+      return `Increase deductions ${notesStr}`
+    case 'symmetry_beam':
+      return `Symmetrize beams ${notesStr}`
+    case 'symmetry_tine':
+      return `Symmetrize tines ${notesStr}`
+    case 'swap_sides':
+      return 'Swap left/right'
+    case 'combo':
+      return `Combination adjustment ${notesStr}`
+    default:
+      return `${hypothesisType} ${notesStr}`
+  }
 }

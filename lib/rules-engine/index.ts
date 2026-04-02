@@ -33,6 +33,10 @@ export type {
   ComputedScores,
   Point2D,
   LandmarkLine,
+  // Mutation types for precision pass
+  HypothesisMutationType,
+  MeasurementPatch,
+  SheetMutationCandidate,
 } from './types'
 
 // Computation functions
@@ -56,6 +60,10 @@ export {
   computeFromPayload,
   canComputeScore,
   getMissingMeasurements,
+  // Mutation functions for precision pass
+  applySheetMutation,
+  generateMutationCandidates,
+  describeMutation,
 } from './compute'
 
 // Format converters
