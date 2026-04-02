@@ -21,6 +21,7 @@ import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { BCScoreSheet } from './bc-score-sheet'
+import { ScoreSheetEditor } from './score-sheet-editor'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
@@ -389,6 +390,19 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         />
       )}
 
+
+      {/* Human Review / Edit Mode for AI Score Sheets */}
+      {result.scoreSheet && normalized.predictionId && result.buck?.id && (
+        <ScoreSheetEditor
+          predictionId={normalized.predictionId}
+          buckId={result.buck.id}
+          aiScoreSheet={result.scoreSheet}
+          aiGrossScore={normalized.grossScore}
+          aiNetScore={normalized.netScore}
+          aiConfidence={normalized.confidencePercent}
+          isFallback={normalized.isFallback}
+        />
+      )}
       {/* Measurements Breakdown (Legacy) */}
       <Collapsible open={showMeasurements} onOpenChange={setShowMeasurements}>
         <CollapsibleContent>
