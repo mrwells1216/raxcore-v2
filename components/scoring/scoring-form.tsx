@@ -60,12 +60,6 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
       abnormal_point_notes: '',
       abnormal_point_tags: [],
     },
-      state: '',
-      rack_type: 'typical',
-      ears_fully_visible: true,
-      capture_device: 'unknown',
-      abnormal_point_tags: [],
-    },
   })
   
   const watchRackType = form.watch('rack_type')
