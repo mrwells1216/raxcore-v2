@@ -1,21 +1,37 @@
 /**
- * Phase 42: Reference Source Ranking System
- * 
- * Implements a ranked reference system for anatomical scaling and geometry checks.
- * Determines which reference points (ears, eyes, combined) were most trusted
- * for each measurement type in a given prediction.
+ * Phase 42 / Extended: Reference Source Ranking System
+ *
+ * Implements a weighted consensus model across all available anatomical
+ * reference candidates. Top-tier references (eye box, pedicle spacing,
+ * eye-to-pedicle, skull width) drive the scale factor and error range.
+ * Secondary references (nose, muzzle, ear base spacing) contribute to
+ * confidence but don't dominate the blend. Ears are a bonus reference, not
+ * the primary one.
+ *
+ * Exports a buildReferenceConsensus() function that returns a
+ * ReferenceConsensusResult with full debug fields as requested.
  */
 
-import type { LandmarksDetected, AngleType, DetailedLandmarks } from '@/lib/types'
+import type { LandmarksDetected, AngleType, DetailedLandmarks, ReferenceConsensusResult } from '@/lib/types'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-export type ReferenceSource = 
+export type ReferenceSource =
+  // Top-tier
+  | 'eye_box'              // eye width + height (full box visible)
+  | 'pedicle_spacing'      // antler base spacing on skull
+  | 'eye_to_pedicle'       // eye-center to pedicle-base distance
+  | 'skull_width'          // forehead / orbital-ridge width
+  // Secondary
+  | 'nose_bridge'          // nose bridge length
+  | 'muzzle_width'         // muzzle width
+  | 'ear_base_spacing'     // ear-base center-to-center (not tip-to-tip)
+  // Legacy / existing — kept for compat
   | 'strong_ear'
-  | 'partial_ear' 
+  | 'partial_ear'
   | 'strong_eye'
   | 'combined_ear_eye'
   | 'weak_fallback'
@@ -67,22 +83,53 @@ export interface ReferenceRankingInput {
 // REFERENCE CONFIDENCE SCORES
 // ============================================================================
 
+// Base reliability scores per reference type.
+// Top-tier references score 0.80+; secondary 0.55–0.70; legacy/ears 0.60–0.75; fallback 0.35.
 const REFERENCE_BASE_SCORES: Record<ReferenceSource, number> = {
-  strong_ear: 0.95,
-  combined_ear_eye: 0.88,
-  partial_ear: 0.70,
-  strong_eye: 0.65,
-  weak_fallback: 0.35,
-  none: 0.0,
+  // Top-tier
+  eye_box:          0.90,
+  pedicle_spacing:  0.87,
+  eye_to_pedicle:   0.85,
+  skull_width:      0.82,
+  // Secondary
+  nose_bridge:      0.65,
+  muzzle_width:     0.62,
+  ear_base_spacing: 0.60,
+  // Legacy (kept for compat)
+  strong_ear:       0.75,
+  combined_ear_eye: 0.80,
+  partial_ear:      0.58,
+  strong_eye:       0.72,
+  weak_fallback:    0.35,
+  none:             0.0,
+}
+
+// How much each reference contributes to the blended scale factor.
+// Weights within the consensus blend — top-tier references carry more weight.
+const REFERENCE_BLEND_WEIGHT: Record<ReferenceSource, number> = {
+  eye_box:          0.30,
+  pedicle_spacing:  0.28,
+  eye_to_pedicle:   0.22,
+  skull_width:      0.20,
+  nose_bridge:      0.08,
+  muzzle_width:     0.07,
+  ear_base_spacing: 0.05,
+  // Legacy
+  strong_ear:       0.10,
+  combined_ear_eye: 0.20,
+  partial_ear:      0.06,
+  strong_eye:       0.15,
+  weak_fallback:    0.00,
+  none:             0.00,
 }
 
 // Which reference is best for which measurement family
 const FAMILY_REFERENCE_PRIORITY: Record<MeasurementFamily, ReferenceSource[]> = {
-  spread: ['strong_ear', 'combined_ear_eye', 'strong_eye', 'partial_ear', 'weak_fallback'],
-  beam: ['combined_ear_eye', 'strong_ear', 'strong_eye', 'partial_ear', 'weak_fallback'],
-  tine: ['combined_ear_eye', 'strong_eye', 'partial_ear', 'strong_ear', 'weak_fallback'],
-  mass: ['strong_ear', 'combined_ear_eye', 'partial_ear', 'strong_eye', 'weak_fallback'],
-  deduction: ['combined_ear_eye', 'strong_ear', 'strong_eye', 'partial_ear', 'weak_fallback'],
+  spread:    ['pedicle_spacing', 'skull_width', 'eye_box', 'eye_to_pedicle', 'ear_base_spacing', 'strong_ear', 'combined_ear_eye', 'strong_eye', 'partial_ear', 'weak_fallback'],
+  beam:      ['eye_to_pedicle', 'eye_box', 'pedicle_spacing', 'skull_width', 'combined_ear_eye', 'strong_ear', 'strong_eye', 'partial_ear', 'weak_fallback'],
+  tine:      ['eye_to_pedicle', 'eye_box', 'nose_bridge', 'combined_ear_eye', 'strong_eye', 'partial_ear', 'strong_ear', 'weak_fallback'],
+  mass:      ['skull_width', 'pedicle_spacing', 'ear_base_spacing', 'strong_ear', 'combined_ear_eye', 'partial_ear', 'strong_eye', 'weak_fallback'],
+  deduction: ['eye_box', 'skull_width', 'combined_ear_eye', 'strong_ear', 'strong_eye', 'partial_ear', 'weak_fallback'],
 }
 
 // ============================================================================
@@ -222,33 +269,67 @@ function determineAvailableSources(
   earsFullyVisible?: boolean
 ): ReferenceSource[] {
   const sources: ReferenceSource[] = []
-  
-  const hasEars = landmarks.ears_visible
-  const hasEyes = landmarks.eyes_visible
+  const hasEars  = landmarks.ears_visible
+  const hasEyes  = landmarks.eyes_visible
   const hasFront = angleTypes.includes('front')
-  
-  // Strong ear reference: ears fully visible + front angle + detailed landmarks
+
+  // ── Top-tier: eye box (full eye socket visible, front angle)
+  if (hasEyes && hasFront && landmarks.eye_box_detected) {
+    sources.push('eye_box')
+  }
+
+  // ── Top-tier: pedicle / antler base spacing
+  if (landmarks.pedicle_visible && hasFront && landmarks.pedicle_spacing) {
+    sources.push('pedicle_spacing')
+  }
+
+  // ── Top-tier: eye-to-pedicle structural proportion
+  if (hasEyes && landmarks.pedicle_visible && landmarks.eye_to_pedicle_distance) {
+    sources.push('eye_to_pedicle')
+  }
+
+  // ── Top-tier: skull / forehead width
+  if (hasFront && landmarks.skull_width_visible && landmarks.skull_forehead_width) {
+    sources.push('skull_width')
+  }
+
+  // ── Secondary: nose bridge
+  if (hasFront && landmarks.nose_bridge_length) {
+    sources.push('nose_bridge')
+  }
+
+  // ── Secondary: muzzle width
+  if (hasFront && landmarks.muzzle_width) {
+    sources.push('muzzle_width')
+  }
+
+  // ── Secondary: ear base spacing (bonus, not primary)
+  if (hasEars && hasFront && landmarks.ear_base_spacing) {
+    sources.push('ear_base_spacing')
+  }
+
+  // ── Legacy: strong/partial ear (kept for compat)
   if (hasEars && earsFullyVisible && hasFront) {
     sources.push('strong_ear')
   } else if (hasEars && (earsFullyVisible || hasFront)) {
     sources.push('partial_ear')
   }
-  
-  // Eye reference
-  if (hasEyes && hasFront) {
+
+  // ── Legacy: strong_eye
+  if (hasEyes && hasFront && !sources.includes('eye_box')) {
     sources.push('strong_eye')
   }
-  
-  // Combined reference: both ear and eye available
+
+  // ── Legacy: combined_ear_eye
   if (hasEars && hasEyes && hasFront) {
     sources.push('combined_ear_eye')
   }
-  
-  // If nothing else, add weak fallback
+
+  // ── If nothing was detected, fall back to statistical priors
   if (sources.length === 0) {
     sources.push('weak_fallback')
   }
-  
+
   return sources
 }
 
@@ -279,34 +360,78 @@ function buildReferenceQuality(
   
   // Calculate scaling factor based on reference type
   switch (source) {
+    case 'eye_box': {
+      const detectedEyeW = landmarks.eye_width ?? ANATOMICAL_REFERENCES.EYE_BOX_WIDTH
+      const detectedEyeH = landmarks.eye_height ?? ANATOMICAL_REFERENCES.EYE_BOX_HEIGHT
+      const scaleW = ANATOMICAL_REFERENCES.EYE_BOX_WIDTH / detectedEyeW
+      const scaleH = ANATOMICAL_REFERENCES.EYE_BOX_HEIGHT / detectedEyeH
+      scalingFactor = (scaleW + scaleH) / 2
+      explanation = `Eye box scaling (w: ${detectedEyeW.toFixed(2)}", h: ${detectedEyeH.toFixed(2)}", factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'pedicle_spacing': {
+      const detectedPedicle = landmarks.pedicle_spacing ?? ANATOMICAL_REFERENCES.PEDICLE_SPACING
+      scalingFactor = ANATOMICAL_REFERENCES.PEDICLE_SPACING / detectedPedicle
+      explanation = `Pedicle spacing scaling (${detectedPedicle.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.PEDICLE_SPACING}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'eye_to_pedicle': {
+      const detectedE2P = landmarks.eye_to_pedicle_distance ?? ANATOMICAL_REFERENCES.EYE_TO_PEDICLE
+      scalingFactor = ANATOMICAL_REFERENCES.EYE_TO_PEDICLE / detectedE2P
+      explanation = `Eye-to-pedicle scaling (${detectedE2P.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.EYE_TO_PEDICLE}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'skull_width': {
+      const detectedSkull = landmarks.skull_forehead_width ?? ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH
+      scalingFactor = ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH / detectedSkull
+      explanation = `Skull width scaling (${detectedSkull.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'nose_bridge': {
+      const detectedNose = landmarks.nose_bridge_length ?? ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH
+      scalingFactor = ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH / detectedNose
+      explanation = `Nose bridge scaling (${detectedNose.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'muzzle_width': {
+      const detectedMuzzle = landmarks.muzzle_width ?? ANATOMICAL_REFERENCES.MUZZLE_WIDTH
+      scalingFactor = ANATOMICAL_REFERENCES.MUZZLE_WIDTH / detectedMuzzle
+      explanation = `Muzzle width scaling (${detectedMuzzle.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.MUZZLE_WIDTH}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
+    case 'ear_base_spacing': {
+      const detectedEarBase = landmarks.ear_base_spacing ?? ANATOMICAL_REFERENCES.EAR_BASE_SPACING
+      scalingFactor = ANATOMICAL_REFERENCES.EAR_BASE_SPACING / detectedEarBase
+      explanation = `Ear base spacing scaling (${detectedEarBase.toFixed(2)}" detected vs ${ANATOMICAL_REFERENCES.EAR_BASE_SPACING}" expected, factor: ${scalingFactor.toFixed(3)}x)`
+      break
+    }
     case 'strong_ear':
-    case 'partial_ear':
+    case 'partial_ear': {
       const earLength = visionReportedEarLength || landmarks.ear_base_to_tip || ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
       scalingFactor = ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP / earLength
-      explanation = `Scaling from ear base-to-tip (${earLength.toFixed(1)}" detected vs ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}" expected)`
+      explanation = `Ear base-to-tip scaling (${earLength.toFixed(1)}" detected vs ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}" expected, factor: ${scalingFactor.toFixed(3)}x)`
       break
-      
-    case 'strong_eye':
+    }
+    case 'strong_eye': {
       const eyeDistance = visionReportedEyeDistance || landmarks.eye_to_eye || ANATOMICAL_REFERENCES.EYE_TO_EYE
       scalingFactor = ANATOMICAL_REFERENCES.EYE_TO_EYE / eyeDistance
-      explanation = `Scaling from eye-to-eye distance (${eyeDistance.toFixed(1)}" detected vs ${ANATOMICAL_REFERENCES.EYE_TO_EYE}" expected)`
+      explanation = `Eye-to-eye scaling (${eyeDistance.toFixed(1)}" detected vs ${ANATOMICAL_REFERENCES.EYE_TO_EYE}" expected, factor: ${scalingFactor.toFixed(3)}x)`
       break
-      
-    case 'combined_ear_eye':
-      const earRef = visionReportedEarLength || landmarks.ear_base_to_tip || ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
-      const eyeRef = visionReportedEyeDistance || landmarks.eye_to_eye || ANATOMICAL_REFERENCES.EYE_TO_EYE
+    }
+    case 'combined_ear_eye': {
+      const earRef  = visionReportedEarLength  || landmarks.ear_base_to_tip || ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
+      const eyeRef  = visionReportedEyeDistance || landmarks.eye_to_eye      || ANATOMICAL_REFERENCES.EYE_TO_EYE
       const earScale = ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP / earRef
-      const eyeScale = ANATOMICAL_REFERENCES.EYE_TO_EYE / eyeRef
-      // Weighted average favoring ears (more reliable)
-      scalingFactor = earScale * 0.65 + eyeScale * 0.35
-      explanation = `Combined ear+eye scaling (ear: ${earScale.toFixed(2)}x, eye: ${eyeScale.toFixed(2)}x, blended: ${scalingFactor.toFixed(2)}x)`
+      const eyeScale = ANATOMICAL_REFERENCES.EYE_TO_EYE      / eyeRef
+      // Eye gets more weight now that it is a first-class reference
+      scalingFactor = eyeScale * 0.55 + earScale * 0.45
+      explanation = `Combined eye+ear scaling (eye: ${eyeScale.toFixed(2)}x, ear: ${earScale.toFixed(2)}x, blended: ${scalingFactor.toFixed(3)}x)`
       break
-      
+    }
     case 'weak_fallback':
       scalingFactor = 1.0
       explanation = 'No clear reference; using statistical priors for typical whitetail proportions'
       break
-      
     case 'none':
       scalingFactor = 1.0
       explanation = 'No anatomical reference available'
@@ -330,6 +455,139 @@ function buildReferenceQuality(
     scalingFactor,
     contributingImages,
     explanation,
+  }
+}
+
+// ============================================================================
+// WEIGHTED CONSENSUS MODEL
+// ============================================================================
+
+export interface BuildReferenceConsensusInput {
+  landmarks: LandmarksDetected
+  detailedLandmarks?: DetailedLandmarks
+  angleTypes: AngleType[]
+  earsFullyVisible?: boolean
+  visionReportedEarLength?: number
+  visionReportedEyeDistance?: number
+}
+
+/**
+ * Build a weighted consensus scaling factor from all available anatomical
+ * references. Top-tier references (eye box, pedicle, eye-to-pedicle, skull)
+ * drive the blend; secondary references influence confidence but are weighted
+ * lightly. Ears are treated as a bonus contributor.
+ *
+ * Returns a ReferenceConsensusResult with full debug fields.
+ */
+export function buildReferenceConsensus(
+  input: BuildReferenceConsensusInput
+): ReferenceConsensusResult {
+  const { landmarks, detailedLandmarks, angleTypes, earsFullyVisible, visionReportedEarLength, visionReportedEyeDistance } = input
+
+  const availableSources = determineAvailableSources(landmarks, detailedLandmarks, angleTypes, earsFullyVisible)
+
+  // Build quality objects for all available sources
+  const qualities = new Map<ReferenceSource, ReferenceQuality>()
+  for (const src of availableSources) {
+    qualities.set(
+      src,
+      buildReferenceQuality(src, landmarks, detailedLandmarks, angleTypes, visionReportedEarLength, visionReportedEyeDistance)
+    )
+  }
+
+  // Separate top-tier from secondary/legacy
+  const topTierSources: ReferenceSource[] = ['eye_box', 'pedicle_spacing', 'eye_to_pedicle', 'skull_width']
+  const secondarySources: ReferenceSource[] = ['nose_bridge', 'muzzle_width', 'ear_base_spacing']
+  const earSources: ReferenceSource[] = ['strong_ear', 'combined_ear_eye', 'partial_ear']
+
+  const activeTopTier  = topTierSources.filter(s  => qualities.has(s))
+  const activeSecondary = secondarySources.filter(s => qualities.has(s))
+  const activeEar      = earSources.filter(s       => qualities.has(s))
+
+  // Compute weighted blend of scaling factors
+  let totalWeight = 0
+  let weightedScaleSum = 0
+  const contributingScales: number[] = []
+
+  for (const [src, q] of qualities.entries()) {
+    const w = REFERENCE_BLEND_WEIGHT[src]
+    if (w > 0 && src !== 'weak_fallback' && src !== 'none') {
+      weightedScaleSum += q.scalingFactor * w
+      totalWeight += w
+      contributingScales.push(q.scalingFactor)
+    }
+  }
+
+  const blendedScalingFactor = totalWeight > 0 ? weightedScaleSum / totalWeight : 1.0
+
+  // Agreement / conflict scores from standard deviation of scale factors
+  let agreementScore = 1.0
+  let conflictScore = 0.0
+  if (contributingScales.length > 1) {
+    const mean = contributingScales.reduce((a, b) => a + b, 0) / contributingScales.length
+    const stdDev = Math.sqrt(
+      contributingScales.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / contributingScales.length
+    )
+    // stdDev of 0.1 (10% scale spread) ≈ full conflict
+    conflictScore  = Math.min(1.0, stdDev / 0.1)
+    agreementScore = 1.0 - conflictScore
+  }
+
+  // Blend quality tier
+  let blendQuality: ReferenceConsensusResult['referenceBlendQuality'] = 'fallback'
+  if (activeTopTier.length >= 2 && agreementScore >= 0.8) {
+    blendQuality = 'strong'
+  } else if (activeTopTier.length >= 1 && agreementScore >= 0.6) {
+    blendQuality = 'moderate'
+  } else if (activeTopTier.length >= 1 || activeSecondary.length >= 2) {
+    blendQuality = 'weak'
+  }
+
+  // Blended confidence: base from best top-tier, modified by agreement
+  const topTierConfidences = activeTopTier.map(s => qualities.get(s)!.confidence)
+  const baseConfidence = topTierConfidences.length > 0
+    ? Math.max(...topTierConfidences)
+    : (activeSecondary.length > 0 ? 0.52 : 0.35)
+  const blendedConfidence = Math.max(0.15, Math.min(0.98, baseConfidence * (0.6 + agreementScore * 0.4)))
+
+  // Debug flags
+  const eyeReferenceUsed        = qualities.has('eye_box') || qualities.has('strong_eye')
+  const antlerBaseReferenceUsed = qualities.has('pedicle_spacing')
+  const eyeToBaseReferenceUsed  = qualities.has('eye_to_pedicle')
+  const skullWidthReferenceUsed = qualities.has('skull_width')
+  const noseReferenceUsed       = qualities.has('nose_bridge') || qualities.has('muzzle_width')
+  const earReferenceUsed        = activeEar.length > 0 || qualities.has('ear_base_spacing')
+
+  // Summary strings
+  const referencesSummary: string[] = []
+  for (const [src, q] of qualities.entries()) {
+    if (src !== 'weak_fallback' && src !== 'none') {
+      referencesSummary.push(`${src}: ${(q.confidence * 100).toFixed(0)}% conf, scale ${q.scalingFactor.toFixed(3)}x`)
+    }
+  }
+  if (referencesSummary.length === 0) {
+    referencesSummary.push('No reliable anatomical reference — statistical prior used')
+  }
+
+  // Whether range was tightened (multiple top-tier agreed) or widened (conflict)
+  const rangeTightened = activeTopTier.length >= 2 && agreementScore >= 0.8
+  const rangeWidened   = conflictScore >= 0.4
+
+  return {
+    blendedScalingFactor,
+    referenceAgreementScore: Number(agreementScore.toFixed(3)),
+    referenceConflictScore:  Number(conflictScore.toFixed(3)),
+    referenceBlendQuality:   blendQuality,
+    blendedConfidence:       Number(blendedConfidence.toFixed(3)),
+    eyeReferenceUsed,
+    antlerBaseReferenceUsed,
+    eyeToBaseReferenceUsed,
+    skullWidthReferenceUsed,
+    noseReferenceUsed,
+    earReferenceUsed,
+    referencesSummary,
+    rangeTightened,
+    rangeWidened,
   }
 }
 

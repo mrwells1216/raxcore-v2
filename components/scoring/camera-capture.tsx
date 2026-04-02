@@ -109,8 +109,8 @@ export function CameraCapture({ onCapture }: CameraCaptureProps) {
     // Draw video frame to canvas
     ctx.drawImage(video, 0, 0)
 
-    // Get data URL
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+    // Get data URL with moderate quality (will be preprocessed further before upload)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
     setCapturedPhoto(dataUrl)
     stopCamera()
   }, [stopCamera])

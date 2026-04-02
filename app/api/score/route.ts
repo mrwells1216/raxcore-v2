@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server'
+import { hasRequiredServerEnv } from '@/lib/env'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
-import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary } from '@/lib/types'
+import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 import { 
   createBuck, 
   addBuckImages, 
+  uploadBuckImage,
+  getBuckImageBucketName,
   createPrediction, 
   updateBuckStatus,
   getActiveModelVersion,
@@ -43,6 +46,20 @@ function getClientKey(request: Request): string {
 }
 
 export async function POST(request: Request) {
+  // Verify env vars before any scoring logic using shared validator
+  const envCheck = hasRequiredServerEnv()
+  if (!envCheck.ok) {
+    console.error('[score] Missing required environment variables:', envCheck.missing)
+    return NextResponse.json(
+      {
+        error: 'Server configuration error: missing environment variables',
+        missing: envCheck.missing,
+        fix: 'Set these variables in the Vercel/v0 project environment settings. Do not rely on .env file rewrites during dev restarts.',
+      },
+      { status: 500 }
+    )
+  }
+
   const requestId = generateRequestId()
   const clientKey = getClientKey(request)
   const requestStartTime = Date.now()
@@ -76,6 +93,26 @@ export async function POST(request: Request) {
     const intakeQualityRaw = formData.get('intake_quality') as string | null
     const userId = formData.get('user_id') as string | null
     
+    // Phase 54: Abnormal/Irregular Points
+    const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
+    const nonTypicalTraitsPresent = formData.get('non_typical_traits_present') as YesNoUnsure | null
+    const estimatedIrregularCountRaw = formData.get('estimated_irregular_points_count') as string | null
+    const abnormalPointNotes = formData.get('abnormal_point_notes') as string | null
+    const abnormalTagsRaw = formData.get('abnormal_point_tags') as string | null
+    
+    // Parse abnormal point count
+    const estimatedIrregularPointsCount = estimatedIrregularCountRaw ? Number(estimatedIrregularCountRaw) : undefined
+    
+    // Parse abnormal point tags
+    let abnormalPointTags: AbnormalPointTag[] | undefined
+    if (abnormalTagsRaw) {
+      try {
+        abnormalPointTags = JSON.parse(abnormalTagsRaw)
+      } catch {
+        // Ignore parse errors
+      }
+    }
+    
     // Parse intake quality summary if provided
     let intakeQuality: IntakeQualitySummary | null = null
     if (intakeQualityRaw) {
@@ -86,37 +123,41 @@ export async function POST(request: Request) {
       }
     }
 
+    // Debug: Log parsed form values
+    console.log('[v0] Parsed form data - state:', state, 'rackType:', rackType)
+    
     if (!state || !rackType) {
+      console.error('[v0] Validation failed - state:', state, 'rackType:', rackType)
       return NextResponse.json({ error: 'State and rack type are required' }, { status: 400 })
     }
 
     const harvestYear = harvestYearRaw ? Number(harvestYearRaw) : null
     const mainFramePoints = mainFrameRaw ? Number(mainFrameRaw) : null
 
-    // Collect images from form data
+    // Collect images from form data — data URLs are held separately and uploaded
+    // to Supabase Storage after the buck is created so we have a real https:// URL
+    // to pass to OpenAI. Using data: URLs directly causes "URL scheme must be http
+    // or https" errors from the OpenAI API.
     const pendingImages: { dataUrl?: string; url?: string; angle: AngleType }[] = []
-    const images: ImageAnalysisInput[] = []
 
     for (let i = 0; i < 10; i++) {
       const dataUrl = formData.get(`image_data_${i}`) as string | null
       const url = formData.get(`image_url_${i}`) as string | null
       const angle = formData.get(`angle_${i}`) as AngleType | null
       if (!angle) continue
-      
+
       if (dataUrl) {
         pendingImages.push({ dataUrl, angle })
-        images.push({ imageUrl: dataUrl, angleType: angle, width: 1920, height: 1080 })
       } else if (url) {
         pendingImages.push({ url, angle })
-        images.push({ imageUrl: url, angleType: angle, width: 1920, height: 1080 })
       }
     }
 
-    if (images.length === 0) {
+    if (pendingImages.length === 0) {
       return NextResponse.json({ error: 'At least one image is required' }, { status: 400 })
     }
     
-    imageCount = images.length
+    imageCount = pendingImages.length
 
     // Phase 38: Per-user plan limit enforcement (runs before any DB writes or AI calls)
     const sessionId = formData.get('session_id') as string | null
@@ -183,16 +224,21 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-    // Create usage tracking record
-    await createUsageRecord({
-      request_id: requestId,
-      endpoint: '/api/score',
-      method: 'POST',
-      client_ip: clientKey.replace('ip:', ''),
-      images_submitted: imageCount,
-      user_agent: request.headers.get('user-agent') || undefined,
-    })
-    usageRecordCreated = true
+    // Create usage tracking record (non-blocking - scoring continues if this fails)
+    try {
+      await createUsageRecord({
+        request_id: requestId,
+        endpoint: '/api/score',
+        method: 'POST',
+        client_ip: clientKey.replace('ip:', ''),
+        images_submitted: imageCount,
+        user_agent: request.headers.get('user-agent') || undefined,
+      })
+      usageRecordCreated = true
+    } catch (usageErr) {
+      console.error('[score] Non-blocking usage record create failed:', usageErr)
+      // Continue scoring - usage logging is not critical
+    }
 
     // Check if vision scoring is enabled
     if (!productionConfig.vision_scoring_enabled) {
@@ -206,25 +252,84 @@ export async function POST(request: Request) {
     // Generate internal buck session ID (distinct from the form session_id)
     const buckSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 
-    // Create buck record in Supabase
-    const buck = await createBuck({
-      sessionId: buckSessionId,
-      nickname: nickname || undefined,
-      location: location || state,
-      harvestDate: harvestDate || undefined,
-      notes: notes || undefined
+  // Create buck record in Supabase (pass all fields from wizard)
+  const buck = await createBuck({
+    state: state,
+    rackType: rackType,
+    userId: userId || undefined,
+    harvestMethod: harvestMethod || undefined,
+    sourceType: sourceType || undefined,
+    earsFullyVisible: earsFullyVisible,
+    notes: notes || undefined,
+    // Phase 54: Abnormal/Irregular Points
+    irregularPointsPresent: irregularPointsPresent || undefined,
+    nonTypicalTraitsPresent: nonTypicalTraitsPresent || undefined,
+    estimatedIrregularPointsCount: estimatedIrregularPointsCount,
+    abnormalPointNotes: abnormalPointNotes || undefined,
+    abnormalPointTags: abnormalPointTags,
+  })
+
+    // Upload data URL images to Supabase Storage so we have real https:// URLs.
+    // OpenAI vision requires http/https — data: URL scheme is rejected by the API.
+    // We never silently fall back to data: when using OpenAI; instead we fail with
+    // an actionable error so the user knows exactly what to fix.
+    const isOpenAI = !!process.env.OPENAI_API_KEY
+    const bucket = getBuckImageBucketName()
+    const resolvedImages: ImageAnalysisInput[] = []
+    const storedImageUrls: string[] = []
+
+    console.log('[score] image upload phase', {
+      bucket,
+      imageCount: pendingImages.length,
+      provider: isOpenAI ? 'openai' : 'heuristic',
     })
 
-    // Store image URLs (using data URLs or external URLs for now)
-    const imageUrls = pendingImages.map(p => p.dataUrl || p.url || '')
-    await addBuckImages(buck.id, imageUrls)
+    for (let i = 0; i < pendingImages.length; i++) {
+      const p = pendingImages[i]
+      let imageUrl: string
+
+      if (p.dataUrl) {
+        try {
+          imageUrl = await uploadBuckImage(buck.id, p.dataUrl, i)
+          console.log(`[score] image ${i} uploaded to storage: ${imageUrl.substring(0, 80)}`)
+        } catch (uploadErr) {
+          const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+
+          if (isOpenAI) {
+            // Hard fail — OpenAI cannot accept data: URLs. Surface the exact error.
+            console.error(`[score] image ${i} upload failed and provider is OpenAI — cannot proceed with data: URL`, errMsg)
+            return NextResponse.json(
+              {
+                error: 'Image storage upload failed. OpenAI vision requires https:// image URLs.',
+                detail: errMsg,
+                bucket,
+                fix: `Create a Supabase Storage bucket named exactly "${bucket}" and set it to Public, or check that your service-role key has storage.write permissions.`,
+              },
+              { status: 500 }
+            )
+          }
+
+          // Non-OpenAI path (heuristic fallback already handles data: URLs)
+          console.warn(`[score] image ${i} upload failed, using data URL (non-OpenAI path):`, errMsg)
+          imageUrl = p.dataUrl
+        }
+      } else {
+        imageUrl = p.url || ''
+      }
+
+      storedImageUrls.push(imageUrl)
+      resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
+    }
+
+    // Store the resolved URLs
+    await addBuckImages(buck.id, storedImageUrls)
 
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
-      images,
+      images: resolvedImages,
       state,
       rackType,
       earsFullyVisible,
@@ -398,21 +503,30 @@ export async function POST(request: Request) {
     const costEstimate = await getActiveCostEstimate()
     const cost = costEstimate ? calculateCost(imageCount, 1, costEstimate) : { total_cost_mc: 0 }
     
+    // Non-blocking usage update - scoring response returns even if this fails
     if (usageRecordCreated) {
-      await completeUsageRecord(requestId, true, {
-        predictionId: prediction.id,
-        imagesProcessed: imageCount,
-        visionCalls: 1,
-        retryCount: scoringResult.runtimeMetadata?.totalAttempts ? scoringResult.runtimeMetadata.totalAttempts - 1 : 0,
-        usedFallback: scoringResult.scoringMethod === 'vision_with_fallback' || scoringResult.scoringMethod === 'heuristic',
-        processingTimeMs,
-        visionTimeMs: scoringResult.processingTimeMs,
-        modelVersionId: model?.id,
-        visionModel: scoringResult.visionModelUsed || undefined,
-      })
+      try {
+        await completeUsageRecord(requestId, true, {
+          predictionId: prediction.id,
+          imagesProcessed: imageCount,
+          visionCalls: 1,
+          retryCount: scoringResult.runtimeMetadata?.totalAttempts ? scoringResult.runtimeMetadata.totalAttempts - 1 : 0,
+          usedFallback: scoringResult.scoringMethod === 'vision_with_fallback' || scoringResult.scoringMethod === 'heuristic',
+          processingTimeMs,
+          visionTimeMs: scoringResult.processingTimeMs,
+          modelVersionId: model?.id,
+          visionModel: scoringResult.visionModelUsed || undefined,
+        })
+      } catch (usageErr) {
+        console.error('[score] Non-blocking usage record update failed:', usageErr)
+      }
       
-      // Record usage for rate limiting
-      await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
+      // Record usage for rate limiting (also non-blocking)
+      try {
+        await recordUsage(clientKey, 1, imageCount, cost.total_cost_mc)
+      } catch (rateErr) {
+        console.error('[score] Non-blocking rate limit update failed:', rateErr)
+      }
     }
 
     // Phase 39: Log score completed
@@ -442,6 +556,12 @@ export async function POST(request: Request) {
 
     // Return result
     return NextResponse.json({
+      // Include buck object for UI to access id and property_id
+      buck: {
+        id: buck.id,
+        session_id: buck.session_id,
+        property_id: buck.property_id ?? null,
+      },
       sessionId: buck.session_id,
       buckId: buck.id,
       estimatedScore: scoringResult.predictedGross,
@@ -473,6 +593,8 @@ export async function POST(request: Request) {
       confidenceReliability: scoringResult.confidenceReliability,
       // Phase 10: Extended learning data (for admin)
       extendedLearningSummary: scoringResult.extendedLearningSummary,
+      // Training correction layer output
+      trainingCorrectionResult: scoringResult.trainingCorrectionResult ?? null,
       // Phase 15: Intake quality
       intakeQuality: intakeQuality || null,
       // Phase 24: Runtime/fallback metadata
@@ -513,19 +635,24 @@ export async function POST(request: Request) {
     // Phase 30: Track failed request
     const processingTimeMs = Date.now() - requestStartTime
     if (usageRecordCreated) {
-      await completeUsageRecord(requestId, false, {
-        imagesProcessed: imageCount,
-        visionCalls: 0,
-        processingTimeMs,
-        errorType,
-        errorMessage: errorMessage.slice(0, 500), // Truncate long error messages
-      })
+      // Non-blocking error logging
+      try {
+        await completeUsageRecord(requestId, false, {
+          imagesProcessed: imageCount,
+          visionCalls: 0,
+          processingTimeMs,
+          errorType,
+          errorMessage: errorMessage.slice(0, 500), // Truncate long error messages
+        })
+      } catch (usageErr) {
+        console.error('[score] Non-blocking usage record error update failed:', usageErr)
+      }
       
       // Still record usage for rate limiting (prevents retry abuse)
       try {
         await recordUsage(clientKey, 1, imageCount, 0)
       } catch (usageError) {
-        console.error('Failed to record usage:', usageError)
+        console.error('[score] Non-blocking rate limit update failed:', usageError)
       }
     }
 
@@ -542,13 +669,16 @@ export async function POST(request: Request) {
     } else if (isNetwork) {
       userMessage = 'A network error occurred. Please check your connection and try again.'
       statusCode = 503
+    } else if (errorMessage.includes('harvest_date') || errorMessage.includes('schema cache')) {
+      userMessage = 'Scoring is temporarily unavailable due to a database configuration issue. Please try again shortly.'
+      statusCode = 503
     }
 
     return NextResponse.json({ 
       error: 'Scoring failed', 
       userMessage,
       requestId,
-      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      details: errorMessage, // Always include for debugging
       errorType,
     }, { status: statusCode })
   }

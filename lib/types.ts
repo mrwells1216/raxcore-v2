@@ -9,6 +9,27 @@ export type CaptureDevice = 'iphone' | 'android' | 'digital_camera' | 'photo_of_
 export type BuckStatus = 'pending' | 'processing' | 'completed' | 'failed'
 export type ScoreSource = 'official_scorer' | 'self_measured' | 'user_reported' | 'estimated'
 
+// Phase 54: Abnormal/Irregular Point Types
+export type AbnormalPointTag = 
+  | 'drop_tine'
+  | 'sticker_point'
+  | 'split_tine'
+  | 'extra_abnormal_growth'
+  | 'palmation_like_growth'
+  | 'kicker_point'
+  | 'inline_point'
+  | 'unknown_abnormality'
+
+export type YesNoUnsure = 'yes' | 'no' | 'unsure'
+
+export interface AbnormalPointsData {
+  irregular_points_present: YesNoUnsure
+  non_typical_traits_present: YesNoUnsure
+  estimated_irregular_points_count?: number
+  abnormal_point_notes?: string
+  abnormal_point_tags: AbnormalPointTag[]
+}
+
 export interface Buck {
   id: string
   user_id: string | null
@@ -22,6 +43,12 @@ export interface Buck {
   main_frame_points: number | null
   notes: string | null
   status: BuckStatus
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present: YesNoUnsure | null
+  non_typical_traits_present: YesNoUnsure | null
+  estimated_irregular_points_count: number | null
+  abnormal_point_notes: string | null
+  abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
 }
@@ -46,10 +73,67 @@ export interface LandmarksDetected {
   ears_visible: boolean
   eyes_visible: boolean
   antlers_visible: boolean
+
+  // Ear (secondary/bonus — not primary)
   ear_base_to_tip?: number
-  eye_to_eye?: number
   ear_tip_to_tip?: number
+  ear_base_spacing?: number
+
+  // Top-tier: eye references
+  eye_to_eye?: number
+  eye_width?: number
+  eye_height?: number
+  eye_box_detected?: boolean
+
+  // Top-tier: antler base / pedicle
+  pedicle_spacing?: number
+  eye_to_pedicle_distance?: number
+  pedicle_visible?: boolean
+
+  // Top-tier: skull / forehead width
+  skull_forehead_width?: number
+  skull_width_visible?: boolean
+
+  // Secondary: nose / muzzle
+  nose_bridge_length?: number
+  muzzle_width?: number
+
   quality_notes?: string[]
+}
+
+// ── Weighted reference consensus result (multi-reference model)
+export interface ReferenceConsensusResult {
+  /** Blended scaling factor from all contributing references */
+  blendedScalingFactor: number
+
+  /** Overall agreement score across references: 0 = conflict, 1 = perfect agreement */
+  referenceAgreementScore: number
+
+  /** Conflict score: 0 = no conflict, 1 = maximum conflict */
+  referenceConflictScore: number
+
+  /** Quality of the final blend: 'strong' | 'moderate' | 'weak' | 'fallback' */
+  referenceBlendQuality: 'strong' | 'moderate' | 'weak' | 'fallback'
+
+  /** Effective confidence after applying agreement/conflict modifiers */
+  blendedConfidence: number
+
+  /** Per-reference debug flags */
+  eyeReferenceUsed: boolean
+  antlerBaseReferenceUsed: boolean
+  eyeToBaseReferenceUsed: boolean
+  skullWidthReferenceUsed: boolean
+  noseReferenceUsed: boolean
+  earReferenceUsed: boolean
+
+  /** Human-readable summary of which references contributed */
+  referencesSummary: string[]
+
+  /** If multiple top-tier refs agreed — range was tightened */
+  rangeTightened: boolean
+
+  /** If refs conflicted — range was widened and confidence reduced */
+  rangeWidened: boolean
 }
 
 // Enhanced landmark representation (Phase 8)
@@ -271,6 +355,12 @@ export interface ScoringFormData {
   harvest_year?: number
   main_frame_points?: number
   notes?: string
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present?: YesNoUnsure
+  non_typical_traits_present?: YesNoUnsure
+  estimated_irregular_points_count?: number
+  abnormal_point_notes?: string
+  abnormal_point_tags?: AbnormalPointTag[]
 }
 
 export interface GroundTruthFormData {
@@ -4028,4 +4118,411 @@ export interface PredictionWithMultiView extends Prediction {
   multi_view_method?: MultiViewMethod
   multiViewSummary?: MultiViewSetSummary | null
   multiViewSolution?: MultiViewSolutionSummary | null
+}
+
+// ============================================================================
+// PHASE 53: TRAINING PACK GENERATION SYSTEM
+// ============================================================================
+
+/** Type of training pack for different use cases */
+export type TrainingPackType =
+  | 'baseline_supervision_pack'    // General supervision events
+  | 'reverse_pass_pack'            // Focused on reverse engineering outcomes
+  | 'structural_solver_pack'       // Focused on structural hypothesis outcomes
+  | 'hard_case_pack'               // Hard-case patterns only
+  | 'confidence_failure_pack'      // High-confidence misses
+  | 'segment_specific_pack'        // Segment-specific training
+  | 'candidate_finetune_pack'      // For candidate model fine-tuning
+  | 'benchmark_holdout_pack'       // Reserved for benchmark holdout
+
+/** Pack status lifecycle */
+export type TrainingPackStatus = 'draft' | 'ready' | 'exported' | 'archived'
+
+/** Split assignment for reproducibility */
+export type TrainingSplitType = 'train' | 'validation' | 'test' | 'benchmark_holdout'
+
+/** Auxiliary label types (machine-readable for training) */
+export type AuxiliaryLabelType =
+  // From supervision failure causes
+  | 'likely_scale_reference_failure'
+  | 'likely_beam_tip_misread'
+  | 'likely_tine_occlusion'
+  | 'likely_angle_distortion'
+  | 'likely_width_estimation_error'
+  | 'likely_mass_deduction_error'
+  | 'likely_confidence_overclaim'
+  | 'likely_confidence_underclaim'
+  | 'likely_multi_view_disagreement'
+  | 'likely_structural_topology_error'
+  | 'likely_input_quality_issue'
+  | 'likely_segment_calibration_miss'
+  // Composite/derived labels
+  | 'reverse_pass_changed_result'
+  | 'structural_solver_changed_result'
+  | 'hard_case_pattern_membership'
+  | 'benchmark_regression_signal'
+
+/** Auxiliary label source */
+export type AuxiliaryLabelSource = 'auto' | 'admin' | 'benchmark' | 'reverse' | 'structural'
+
+/** Auxiliary label status */
+export type AuxiliaryLabelStatus = 'pending' | 'confirmed' | 'rejected'
+
+/** Split configuration for deterministic assignment */
+export interface TrainingPackSplitConfig {
+  train: number
+  validation: number
+  test: number
+  benchmark_holdout: number
+}
+
+/** Filter configuration for selecting pack items */
+export interface TrainingPackFilterConfig {
+  // Date range
+  created_after?: string
+  created_before?: string
+  
+  // Quality filters
+  min_confidence_score?: number
+  max_confidence_score?: number
+  min_quality_score?: number
+  
+  // Segment filters
+  include_segments?: string[]
+  exclude_segments?: string[]
+  
+  // Source filters
+  include_supervision_types?: string[]
+  exclude_supervision_types?: string[]
+  
+  // Pattern filters
+  include_pattern_ids?: string[]
+  exclude_pattern_ids?: string[]
+  
+  // Score source filters
+  include_score_sources?: string[]
+  exclude_score_sources?: string[]
+  
+  // Verification requirements
+  require_verified_score?: boolean
+  require_reverse_run?: boolean
+  require_structural_run?: boolean
+  
+  // Limits
+  max_items?: number
+}
+
+/** Source summary for tracking provenance */
+export interface TrainingPackSourceSummary {
+  supervision_event_count: number
+  reverse_run_count: number
+  structural_run_count: number
+  hard_case_pattern_count: number
+  unique_buck_count: number
+  unique_prediction_count: number
+  segment_distribution: Record<string, number>
+  date_range: { from: string; to: string }
+}
+
+/** Export summary from last export */
+export interface TrainingPackExportSummary {
+  exported_at: string
+  exported_by?: string
+  format: 'json' | 'csv'
+  item_count: number
+  label_count: number
+  manifest_url?: string
+  checksum?: string
+}
+
+/** Main training pack entity */
+export interface TrainingPack {
+  id: string
+  name: string
+  description: string | null
+  pack_type: TrainingPackType
+  status: TrainingPackStatus
+  
+  // Configuration
+  filter_config_json: TrainingPackFilterConfig
+  source_summary_json: TrainingPackSourceSummary | null
+  export_summary_json: TrainingPackExportSummary | null
+  
+  // Optional variant linkage
+  variant_id: string | null
+  
+  // Split configuration
+  split_seed: number | null
+  split_config_json: TrainingPackSplitConfig
+  
+  // Counts (denormalized)
+  item_count: number
+  train_count: number
+  validation_count: number
+  test_count: number
+  holdout_count: number
+  
+  // Audit
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Input for creating a new training pack */
+export interface CreateTrainingPackInput {
+  name: string
+  description?: string
+  pack_type: TrainingPackType
+  filter_config_json?: TrainingPackFilterConfig
+  split_config_json?: TrainingPackSplitConfig
+  variant_id?: string
+  created_by?: string
+}
+
+/** Artifact summary cached on pack items */
+export interface TrainingPackArtifactSummary {
+  // Supervision
+  supervision_event_count: number
+  supervision_types: string[]
+  supervision_labels: string[]
+  
+  // Reverse pass
+  reverse_run_exists: boolean
+  reverse_hypothesis_type?: string
+  reverse_improvement_inches?: number
+  
+  // Structural solver
+  structural_run_exists: boolean
+  structural_topology_changed?: boolean
+  structural_change_reason?: string
+  
+  // Hard-case patterns
+  hard_case_pattern_ids: string[]
+  hard_case_severity?: number
+  
+  // Score context
+  predicted_gross?: number
+  actual_gross?: number
+  error_gross?: number
+}
+
+/** Training pack item (prediction with supervision artifacts) */
+export interface TrainingPackItem {
+  id: string
+  training_pack_id: string
+  prediction_id: string
+  buck_id: string | null
+  
+  // Split assignment
+  split_assignment: TrainingSplitType
+  
+  // Supervision linkage
+  supervision_event_ids: string[]
+  
+  // Artifact linkage
+  reverse_run_id: string | null
+  structural_hypothesis_run_id: string | null
+  
+  // Cached summary
+  artifact_summary_json: TrainingPackArtifactSummary
+  
+  // Quality metrics
+  confidence_score: number | null
+  item_quality_score: number | null
+  
+  // Audit
+  created_at: string
+}
+
+/** Input for adding items to a pack */
+export interface AddTrainingPackItemInput {
+  prediction_id: string
+  buck_id?: string
+  supervision_event_ids?: string[]
+  reverse_run_id?: string
+  structural_hypothesis_run_id?: string
+  confidence_score?: number
+  item_quality_score?: number
+}
+
+/** Auxiliary label for machine-readable export */
+export interface AuxiliaryLabel {
+  id: string
+  supervision_label_id: string | null
+  training_pack_item_id: string
+  
+  // Label details
+  auxiliary_label_type: AuxiliaryLabelType
+  confidence: number
+  source: AuxiliaryLabelSource
+  status: AuxiliaryLabelStatus
+  
+  // Evidence
+  evidence_json: Record<string, unknown>
+  
+  // Audit
+  created_at: string
+}
+
+/** Input for creating auxiliary labels */
+export interface CreateAuxiliaryLabelInput {
+  training_pack_item_id: string
+  supervision_label_id?: string
+  auxiliary_label_type: AuxiliaryLabelType
+  confidence?: number
+  source?: AuxiliaryLabelSource
+  evidence_json?: Record<string, unknown>
+}
+
+/** Pack generation job tracking */
+export interface TrainingPackJob {
+  id: string
+  training_pack_id: string
+  job_type: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  
+  // Progress
+  total_items: number
+  processed_items: number
+  
+  // Results
+  result_json: Record<string, unknown> | null
+  error_message: string | null
+  
+  // Timing
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+/** Export manifest storage */
+export interface TrainingPackExport {
+  id: string
+  training_pack_id: string
+  
+  // Export details
+  format: 'json' | 'csv'
+  scope: 'full' | 'filtered'
+  filter_json: Record<string, unknown> | null
+  
+  // Manifest storage
+  manifest_blob_url: string | null
+  manifest_summary_json: Record<string, unknown>
+  
+  // Counts at export time
+  exported_item_count: number
+  exported_label_count: number
+  
+  // Audit
+  exported_by: string | null
+  exported_at: string
+}
+
+/** JSON manifest item structure for export */
+export interface TrainingPackManifestItem {
+  item_id: string
+  buck_id: string | null
+  prediction_id: string
+  split: TrainingSplitType
+  
+  // Image summary
+  image_summary: {
+    count: number
+    angles: string[]
+    quality_tier: string
+  }
+  
+  // Score summary
+  score_summary: {
+    predicted_gross: number | null
+    predicted_net: number | null
+    official_score: number | null
+    error_gross: number | null
+  }
+  
+  // Supervision artifacts
+  supervision_artifacts: {
+    supervision_events: Array<{
+      event_id: string
+      type: string
+      confidence: number
+      labels: string[]
+      delta_gross?: number
+    }>
+    reverse_run: {
+      hypothesis_type: string
+      improvement: number
+      winning_hypothesis_rank: number
+    } | null
+    structural_run: {
+      topology_changed: boolean
+      change_reason: string | null
+      confidence: number
+    } | null
+  }
+  
+  // Auxiliary labels
+  auxiliary_labels: Array<{
+    label: AuxiliaryLabelType
+    confidence: number
+    source: AuxiliaryLabelSource
+    status: AuxiliaryLabelStatus
+  }>
+  
+  // Hard-case patterns
+  hard_case_patterns: Array<{
+    pattern_id: string
+    pattern_name: string
+    severity: number
+  }>
+  
+  // Phase 54: Abnormal/Irregular Points
+  abnormal_points: {
+    irregular_points_present: YesNoUnsure | null
+    non_typical_traits_present: YesNoUnsure | null
+    estimated_irregular_points_count: number | null
+    abnormal_point_notes: string | null
+    abnormal_point_tags: AbnormalPointTag[]
+  } | null
+}
+
+/** Statistics for a training pack */
+export interface TrainingPackStats {
+  total_items: number
+  splits: Record<TrainingSplitType, number>
+  
+  // Label distribution
+  label_distribution: Record<AuxiliaryLabelType, number>
+  confirmed_label_count: number
+  pending_label_count: number
+  
+  // Artifact coverage
+  items_with_supervision: number
+  items_with_reverse: number
+  items_with_structural: number
+  items_with_hard_case: number
+  
+  // Quality metrics
+  avg_confidence_score: number
+  avg_quality_score: number
+  
+  // Segment distribution
+  segment_distribution: Record<string, number>
+}
+
+/** Extended training pack with stats */
+export interface TrainingPackWithStats extends TrainingPack {
+  stats: TrainingPackStats
+}
+
+/** Training pack listing options */
+export interface ListTrainingPacksOptions {
+  pack_type?: TrainingPackType
+  status?: TrainingPackStatus
+  variant_id?: string
+  created_by?: string
+  limit?: number
+  offset?: number
+  order_by?: 'created_at' | 'updated_at' | 'item_count' | 'name'
+  order_dir?: 'asc' | 'desc'
 }

@@ -1,9 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase, isOptionalTableError } from '@/lib/supabase/admin'
 import type { 
   ScoringSubmission, 
   TrainingExample, 
   ScoringResult,
-  GroundTruthData 
+  GroundTruthData,
+  YesNoUnsure,
+  AbnormalPointTag
 } from '@/lib/types'
 
 // ============================================================================
@@ -11,42 +14,113 @@ import type {
 // ============================================================================
 
 export interface CreateBuckParams {
-  sessionId: string
-  nickname?: string
-  location?: string
-  harvestDate?: string
+  // Required fields (NOT NULL in schema)
+  state: string
+  rackType: 'typical' | 'non-typical'
+  // Optional fields
+  userId?: string
+  harvestMethod?: 'bow' | 'rifle' | 'muzzleloader' | 'crossbow' | 'other' | null
+  sourceType?: 'live_deer' | 'mount' | 'trail_cam' | 'harvest_photo' | 'other' | null
+  earsFullyVisible?: boolean
   notes?: string
+  // Phase 54: Abnormal/Irregular Points
+  irregularPointsPresent?: YesNoUnsure
+  nonTypicalTraitsPresent?: YesNoUnsure
+  estimatedIrregularPointsCount?: number
+  abnormalPointNotes?: string
+  abnormalPointTags?: AbnormalPointTag[]
 }
 
 export interface BuckRecord {
   id: string
-  session_id: string
-  nickname: string | null
-  location: string | null
-  harvest_date: string | null
+  session_id?: string | null
+  user_id: string | null
+  property_id?: string | null
+  state: string
+  rack_type: 'typical' | 'non-typical'
+  harvest_method: string | null
+  source_type: string | null
+  ears_fully_visible: boolean | null
   notes: string | null
   status: 'pending' | 'processing' | 'completed' | 'failed'
+  // Phase 54: Abnormal/Irregular Points
+  irregular_points_present: YesNoUnsure | null
+  non_typical_traits_present: YesNoUnsure | null
+  estimated_irregular_points_count: number | null
+  abnormal_point_notes: string | null
+  abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
+}
+
+// Normalize source_type values from UI to database-allowed values
+// DB allows: 'live_deer', 'mount', 'trail_cam', 'harvest_photo', 'other'
+const SOURCE_TYPE_MAP: Record<string, string> = {
+  'live_deer': 'live_deer',
+  'mount': 'mount',
+  'mounted_photo': 'mount',      // UI sends mounted_photo -> DB expects mount
+  'european_mount': 'mount',     // UI sends european_mount -> DB expects mount
+  'trail_cam': 'trail_cam',
+  'harvest_photo': 'harvest_photo',
+  'other': 'other',
+}
+
+const ALLOWED_SOURCE_TYPES = ['live_deer', 'mount', 'trail_cam', 'harvest_photo', 'other'] as const
+
+function normalizeSourceType(input: string | null | undefined): string | null {
+  if (!input) return null
+  const normalized = SOURCE_TYPE_MAP[input]
+  if (!normalized) {
+    console.warn(`[createBuck] Unknown source_type "${input}", defaulting to "other"`)
+    return 'other'
+  }
+  return normalized
 }
 
 export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> {
   const supabase = await createClient()
   
+  // Validate required fields before insert
+  const missingFields: string[] = []
+  if (!params.state) missingFields.push('state')
+  if (!params.rackType) missingFields.push('rack_type')
+  
+  if (missingFields.length > 0) {
+    throw new Error(`Missing required fields for buck creation: ${missingFields.join(', ')}`)
+  }
+  
+  // Normalize source_type to match database constraint
+  const normalizedSourceType = normalizeSourceType(params.sourceType)
+  
+  // Build payload matching exact database schema
+  const payload = {
+    user_id: params.userId || null,
+    state: params.state,
+    rack_type: params.rackType,
+    harvest_method: params.harvestMethod || null,
+    source_type: normalizedSourceType,
+    ears_fully_visible: params.earsFullyVisible ?? null,
+    notes: params.notes || null,
+    status: 'pending' as const,
+    // Phase 54: Abnormal/Irregular Points
+    irregular_points_present: params.irregularPointsPresent || null,
+    non_typical_traits_present: params.nonTypicalTraitsPresent || null,
+    estimated_irregular_points_count: params.estimatedIrregularPointsCount ?? null,
+    abnormal_point_notes: params.abnormalPointNotes || null,
+    abnormal_point_tags: params.abnormalPointTags?.length ? params.abnormalPointTags : null,
+  }
+  
   const { data, error } = await supabase
     .from('bucks')
-    .insert({
-      session_id: params.sessionId,
-      nickname: params.nickname || null,
-      location: params.location || null,
-      harvest_date: params.harvestDate || null,
-      notes: params.notes || null,
-      status: 'pending'
-    })
+    .insert(payload)
     .select()
     .single()
 
-  if (error) throw new Error(`Failed to create buck: ${error.message}`)
+  if (error) {
+    console.error('[createBuck] Insert failed:', error.message)
+    throw new Error(`Failed to create buck: ${error.message}`)
+  }
+  
   return data
 }
 
@@ -129,10 +203,113 @@ export async function listBucks(options?: {
 export interface BuckImageRecord {
   id: string
   buck_id: string
-  image_url: string
-  image_type: string
+  storage_path: string
+  public_url: string | null
+  image_url: string | null
+  image_type: string | null
   display_order: number
   created_at: string
+}
+
+// Canonical storage bucket name for buck images.
+// Must match the bucket created in scripts/001_create_schema.sql.
+// Override with BUCK_IMAGES_BUCKET env var if bucket name differs per environment.
+export const BUCK_IMAGES_BUCKET = process.env.BUCK_IMAGES_BUCKET ?? 'buck-images'
+
+/** Returns the configured bucket name. Useful for log/error messages. */
+export function getBuckImageBucketName(): string {
+  return BUCK_IMAGES_BUCKET
+}
+
+/**
+ * Test whether the storage bucket is accessible using the service-role client.
+ * Returns `{ ok: true }` or `{ ok: false, reason: string }`.
+ */
+export async function checkBuckImageBucketAccess(): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const supabase = await getServiceSupabase()
+    const { data, error } = await supabase.storage.getBucket(BUCK_IMAGES_BUCKET)
+    if (error) {
+      return { ok: false, reason: error.message }
+    }
+    if (!data) {
+      return { ok: false, reason: 'Bucket not returned by API' }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Upload a base64 data URL to Supabase Storage and return the public https:// URL.
+ * Used to convert data: payloads into real URLs before passing to OpenAI vision.
+ *
+ * Throws with an actionable message if the bucket is missing or upload fails.
+ * Never falls back silently — callers decide whether to degrade or fail hard.
+ */
+export async function uploadBuckImage(
+  buckId: string,
+  dataUrl: string,
+  index: number
+): Promise<string> {
+  const bucket = getBuckImageBucketName()
+  const supabase = await getServiceSupabase()
+
+  console.log('[uploadBuckImage] starting upload', {
+    bucket,
+    buckId,
+    index,
+  })
+
+  // Parse data URL: data:image/jpeg;base64,<data>
+  const match = dataUrl.match(/^data:([a-zA-Z0-9+/]+\/[a-zA-Z0-9+/]+);base64,(.+)$/)
+  if (!match) {
+    throw new Error(`[uploadBuckImage] Invalid data URL format at index ${index}`)
+  }
+  const mimeType = match[1]
+  const base64Data = match[2]
+  const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg'
+
+  const timestamp = Date.now()
+  const path = `bucks/${buckId}/image_${index}_${timestamp}.${ext}`
+
+  console.log('[uploadBuckImage] uploading', { bucket, path, mimeType, sizeChars: base64Data.length })
+
+  const buffer = Buffer.from(base64Data, 'base64')
+
+  const { error: uploadError } = await supabase.storage
+    .from(bucket)
+    .upload(path, buffer, {
+      contentType: mimeType,
+      upsert: false,
+    })
+
+  if (uploadError) {
+    const isBucketMissing =
+      uploadError.message.toLowerCase().includes('bucket not found') ||
+      uploadError.message.toLowerCase().includes('not found')
+
+    const detail = isBucketMissing
+      ? `Bucket "${bucket}" does not exist. Create it in Supabase Storage > New Bucket, name it exactly "${bucket}", and set it to Public.`
+      : uploadError.message
+
+    console.error('[uploadBuckImage] upload failed', { bucket, path, isBucketMissing, error: uploadError.message })
+
+    throw new Error(`[uploadBuckImage] Upload failed for image ${index}: ${detail}`)
+  }
+
+  const { data: urlData } = supabase.storage
+    .from(bucket)
+    .getPublicUrl(path)
+
+  if (!urlData?.publicUrl) {
+    throw new Error(`[uploadBuckImage] Could not get public URL for bucket "${bucket}" path "${path}"`)
+  }
+
+  console.log('[uploadBuckImage] success', { bucket, path, publicUrl: urlData.publicUrl })
+
+  return urlData.publicUrl
 }
 
 export async function addBuckImages(
@@ -141,19 +318,46 @@ export async function addBuckImages(
 ): Promise<BuckImageRecord[]> {
   const supabase = await createClient()
   
-  const images = imageUrls.map((url, index) => ({
-    buck_id: buckId,
-    image_url: url,
-    image_type: 'user_upload',
-    display_order: index
-  }))
+  // Validate we have URLs before attempting insert
+  if (!imageUrls.length) {
+    throw new Error('No images provided for buck')
+  }
+  
+  // Filter out empty URLs
+  const validUrls = imageUrls.filter(url => url && url.length > 0)
+  if (!validUrls.length) {
+    throw new Error('All provided image URLs are empty')
+  }
+  
+  const images = validUrls.map((url, index) => {
+    // Generate a storage_path for tracking purposes
+    // Format: bucks/{buckId}/image_{index}_{timestamp}
+    const timestamp = Date.now()
+    const storagePath = `bucks/${buckId}/image_${index}_${timestamp}`
+    
+    // Determine if this is a data URL, external URL, or storage URL
+    const isDataUrl = url.startsWith('data:')
+    const isStorageUrl = url.includes('supabase') && url.includes('storage')
+    
+    return {
+      buck_id: buckId,
+      storage_path: storagePath,
+      public_url: isDataUrl ? null : url,  // External/storage URLs go here
+      image_url: url,                       // Keep original for backward compat
+      image_type: 'user_upload',
+      display_order: index,
+    }
+  })
 
   const { data, error } = await supabase
     .from('buck_images')
     .insert(images)
     .select()
 
-  if (error) throw new Error(`Failed to add buck images: ${error.message}`)
+  if (error) {
+    console.error('[addBuckImages] Insert failed:', error.message)
+    throw new Error(`Failed to add buck images: ${error.message}`)
+  }
   return data
 }
 
@@ -203,24 +407,56 @@ export interface CreatePredictionParams {
   intakeQuality?: Record<string, unknown> | null
 }
 
+// Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
+function normalizeConfidence(confidence: unknown): number | null {
+  if (confidence === null || confidence === undefined) return null
+  if (typeof confidence === 'number') return confidence
+  if (typeof confidence === 'string') {
+    const lower = confidence.toLowerCase()
+    if (lower === 'low') return 0.3
+    if (lower === 'medium') return 0.6
+    if (lower === 'high') return 0.85
+    // Try parsing as number
+    const parsed = parseFloat(confidence)
+    if (!isNaN(parsed)) return parsed
+  }
+  return null
+}
+
+// Safely extract numeric value, returning null if not a valid number
+function safeNumeric(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number' && !isNaN(value)) return value
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value)
+    if (!isNaN(parsed)) return parsed
+  }
+  return null
+}
+
 export async function createPrediction(params: CreatePredictionParams): Promise<PredictionRecord> {
   const supabase = await createClient()
+  
+  // Normalize all numeric fields to handle string values from heuristic fallback
+  const normalizedConfidence = normalizeConfidence(params.result.confidence)
+  const scoreRangeLow = safeNumeric(params.result.scoreRange?.low)
+  const scoreRangeHigh = safeNumeric(params.result.scoreRange?.high)
   
   const { data, error } = await supabase
     .from('predictions')
     .insert({
       buck_id: params.buckId,
       model_version_id: params.modelVersionId || null,
-      estimated_score: params.result.estimatedScore,
-      score_range_low: params.result.scoreRange?.low,
-      score_range_high: params.result.scoreRange?.high,
-      confidence: params.result.confidence,
-      main_beam_left: params.result.mainBeamLeft,
-      main_beam_right: params.result.mainBeamRight,
-      inside_spread: params.result.insideSpread,
-      points_left: params.result.pointsLeft,
-      points_right: params.result.pointsRight,
-      mass_estimate: params.result.massEstimate,
+      estimated_score: safeNumeric(params.result.estimatedScore),
+      score_range_low: scoreRangeLow,
+      score_range_high: scoreRangeHigh,
+      confidence: normalizedConfidence,
+      main_beam_left: safeNumeric(params.result.mainBeamLeft),
+      main_beam_right: safeNumeric(params.result.mainBeamRight),
+      inside_spread: safeNumeric(params.result.insideSpread),
+      points_left: safeNumeric(params.result.pointsLeft),
+      points_right: safeNumeric(params.result.pointsRight),
+      mass_estimate: safeNumeric(params.result.massEstimate),
       tine_lengths: params.result.tineLengths || null,
       circumferences: params.result.circumferences || null,
       raw_ai_response: params.rawResponse || null,
@@ -394,35 +630,61 @@ export interface CreateTrainingExampleParams {
 export async function createTrainingExample(
   params: CreateTrainingExampleParams
 ): Promise<TrainingExampleRecord> {
-  const supabase = await createClient()
+  // Use service-role to bypass RLS on training_examples — this is an internal
+  // system write, not a user-facing action.
+  const supabase = await getServiceSupabase()
   
   const errorAmount = params.predictedScore != null 
     ? params.predictedScore - params.groundTruthScore 
     : null
 
+  // Core payload — only columns that exist in the base schema
+  const corePayload: Record<string, unknown> = {
+    buck_id: params.buckId || null,
+    image_urls: params.imageUrls,
+    ground_truth_score: params.groundTruthScore,
+    predicted_score: params.predictedScore ?? null,
+    error_amount: errorAmount,
+    main_beam_left: params.measurements?.mainBeamLeft ?? null,
+    main_beam_right: params.measurements?.mainBeamRight ?? null,
+    inside_spread: params.measurements?.insideSpread ?? null,
+    points_left: params.measurements?.pointsLeft ?? null,
+    points_right: params.measurements?.pointsRight ?? null,
+    tine_measurements: params.measurements?.tineMeasurements ?? null,
+    circumference_measurements: params.measurements?.circumferenceMeasurements ?? null,
+    verified_for_training: false,
+    source: params.source || 'user_submission',
+    notes: params.notes || null,
+  }
+
+  if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
+    console.log('[training] createTrainingExample payload', {
+      buckId: params.buckId,
+      predictedScore: params.predictedScore,
+      groundTruthScore: params.groundTruthScore,
+      errorAmount,
+      source: params.source,
+      payloadKeys: Object.keys(corePayload),
+    })
+  }
+
   const { data, error } = await supabase
     .from('training_examples')
-    .insert({
-      buck_id: params.buckId || null,
-      image_urls: params.imageUrls,
-      ground_truth_score: params.groundTruthScore,
-      predicted_score: params.predictedScore ?? null,
-      error_amount: errorAmount,
-      main_beam_left: params.measurements?.mainBeamLeft ?? null,
-      main_beam_right: params.measurements?.mainBeamRight ?? null,
-      inside_spread: params.measurements?.insideSpread ?? null,
-      points_left: params.measurements?.pointsLeft ?? null,
-      points_right: params.measurements?.pointsRight ?? null,
-      tine_measurements: params.measurements?.tineMeasurements ?? null,
-      circumference_measurements: params.measurements?.circumferenceMeasurements ?? null,
-      verified_for_training: false,
-      source: params.source || 'user_submission',
-      notes: params.notes || null
-    })
+    .insert(corePayload)
     .select()
     .single()
 
-  if (error) throw new Error(`Failed to create training example: ${error.message}`)
+  if (error) {
+    console.error('[training] createTrainingExample failed', {
+      buckId: params.buckId,
+      predictedScore: params.predictedScore,
+      groundTruthScore: params.groundTruthScore,
+      error: error.message,
+      code: error.code,
+    })
+    throw new Error(`Failed to create training example: ${error.message}`)
+  }
+
   return data
 }
 
@@ -793,7 +1055,10 @@ export async function getAllProperties(filters?: {
 
   const { data, error } = await query
   if (error) {
-    console.error('Error fetching properties:', error)
+  // Silently skip schema-cache misses (table may not exist yet); warn on real errors
+  if (!isOptionalTableError(error)) {
+      console.warn('[storage] getAllProperties failed:', error.message)
+    }
     return []
   }
   return data || []

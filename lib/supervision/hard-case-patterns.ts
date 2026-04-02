@@ -643,6 +643,79 @@ export async function promotePatternCandidate(params: {
 }
 
 // ============================================================================
+// PHASE 52 PATCH 2: HARD-CASE PATTERN UPDATE HOOK
+// ============================================================================
+
+/**
+ * Called when supervision events accumulate around a pattern.
+ * Tracks recurrence and severity to guide mitigation priority.
+ */
+export async function updatePatternFromAccumulatedEvents(
+  patternId: string,
+  timeWindow: number = 7 * 24 * 60 * 60 // 7 days in seconds
+): Promise<{ updated: boolean; newSeverity: number }> {
+  const supabase = await getServiceSupabase()
+  
+  // Get recent examples for this pattern
+  const cutoffTime = new Date(Date.now() - timeWindow * 1000).toISOString()
+  const { data: recentExamples, error } = await supabase
+    .from('hard_case_pattern_examples')
+    .select('error_gross, error_net')
+    .eq('pattern_id', patternId)
+    .gte('created_at', cutoffTime)
+  
+  if (error || !recentExamples || recentExamples.length === 0) {
+    return { updated: false, newSeverity: 0 }
+  }
+  
+  // Calculate aggregate severity from errors
+  const errors = recentExamples
+    .map(e => Math.abs(e.error_gross || 0))
+    .filter(e => e > 0)
+  
+  if (errors.length === 0) {
+    return { updated: false, newSeverity: 0 }
+  }
+  
+  const avgError = errors.reduce((a, b) => a + b, 0) / errors.length
+  const maxError = Math.max(...errors)
+  
+  // Scale severity: higher errors = higher severity
+  // Base on average error with bonus for max error
+  const newSeverity = Math.min(
+    1.0,
+    (avgError / 10) * 0.6 + (Math.min(maxError / 20, 1) * 0.4)
+  )
+  
+  // Get current pattern
+  const { data: pattern } = await supabase
+    .from('hard_case_patterns')
+    .select('associated_labels, mitigation_status')
+    .eq('id', patternId)
+    .single()
+  
+  if (!pattern) return { updated: false, newSeverity }
+  
+  // Update pattern severity and track recurrence
+  const { data: updated, error: updateError } = await supabase
+    .from('hard_case_patterns')
+    .update({
+      severity: newSeverity,
+      examples_count: recentExamples.length,
+    })
+    .eq('id', patternId)
+    .select()
+    .single()
+  
+  if (updateError || !updated) {
+    console.error('[Phase 52] Failed to update hard-case pattern:', updateError)
+    return { updated: false, newSeverity }
+  }
+  
+  return { updated: true, newSeverity }
+}
+
+// ============================================================================
 // STATS
 // ============================================================================
 

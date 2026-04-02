@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { Suspense } from 'react'
 import { CalibrationDashboard } from '@/components/admin/calibration-dashboard'
 import { Loader2 } from 'lucide-react'

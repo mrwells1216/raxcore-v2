@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { ValidationRunsTable } from '@/components/admin/validation-runs-table'
 import { CreateValidationRun } from '@/components/admin/create-validation-run'

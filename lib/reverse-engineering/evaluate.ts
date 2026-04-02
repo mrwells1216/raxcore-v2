@@ -141,6 +141,10 @@ export interface HypothesisEvaluation {
   flags: Record<string, unknown>
 }
 
+// Small constant penalty applied to the noop hypothesis so it doesn't trivially
+// win against real adjustments that only marginally improve geometry.
+const NOOP_EPSILON_PENALTY = 0.5
+
 /**
  * Evaluate a hypothesis by applying it and scoring geometry + change penalty
  */
@@ -150,6 +154,7 @@ export function evaluateHypothesis(input: {
   baseGross: number
   baseNet: number
   baseConfidence: number
+  isNoop?: boolean
   landmarks?: LandmarksDetected
   angleTypes?: AngleType[]
   earsFullyVisible?: boolean
@@ -178,8 +183,11 @@ export function evaluateHypothesis(input: {
   const confK = input.baseConfidence >= 85 ? 6 : input.baseConfidence >= 70 ? 4 : 2.5
   const changePenalty = (deltaGross * confK) + (l1 * 0.35)
 
+  // Noop gets a small epsilon penalty so real adjustments with equivalent geometry win
+  const noopPenalty = input.isNoop ? NOOP_EPSILON_PENALTY : 0
+
   // Total score: maximize geometry, minimize penalties
-  const totalScore = Number((geometryScore - plausibilityPenalty - changePenalty).toFixed(3))
+  const totalScore = Number((geometryScore - plausibilityPenalty - changePenalty - noopPenalty).toFixed(3))
 
   return {
     measurements: m,

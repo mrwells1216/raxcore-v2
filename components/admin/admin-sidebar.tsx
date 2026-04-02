@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
+import {
   LayoutDashboard, 
   Database, 
   TrendingUp, 
@@ -29,6 +29,7 @@ import {
   RotateCcw,
   Boxes,
   Eye,
+  Zap,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -57,6 +58,7 @@ const navigation = [
   { name: 'Reverse Eng', href: '/admin/reverse', icon: RotateCcw },
   { name: 'Structural', href: '/admin/structural', icon: Boxes },
   { name: 'Supervision', href: '/admin/supervision', icon: Eye },
+  { name: 'Training Packs', href: '/admin/training-packs', icon: Zap },
   { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]

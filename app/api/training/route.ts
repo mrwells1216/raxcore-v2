@@ -90,11 +90,38 @@ export async function POST(request: Request) {
       const images = await getBuckImages(buck_id)
       const imageUrls = images.map(img => img.image_url)
 
+      // Build a compact metadata snapshot so we can reconstruct the prediction
+      // context later for correction-profile analysis, without requiring new schema columns.
+      const predictionSnapshot = {
+        prediction_id: prediction.id ?? null,
+        predicted_gross: prediction.predicted_gross ?? prediction.estimated_score ?? null,
+        predicted_net: prediction.predicted_net ?? null,
+        confidence_percent: prediction.confidence_percent ?? null,
+        confidence_label: prediction.confidence_label ?? null,
+        scoring_method: prediction.scoring_method ?? null,
+        fallback_used: prediction.fallback_used ?? false,
+        images_used: prediction.images_used ?? null,
+        error_gross:
+          (prediction.predicted_gross ?? prediction.estimated_score) != null && official_score != null
+            ? Number(((prediction.predicted_gross ?? prediction.estimated_score) - official_score).toFixed(2))
+            : null,
+        error_net:
+          prediction.predicted_net != null && official_score != null
+            ? Number((prediction.predicted_net - official_score).toFixed(2))
+            : null,
+        submitted_at: new Date().toISOString(),
+      }
+
+      const enrichedNotes = [
+        scorer_notes || 'Submitted through training flow',
+        `[meta] ${JSON.stringify(predictionSnapshot)}`,
+      ].join('\n')
+
       trainingExample = await createTrainingExample({
         buckId: buck_id,
         imageUrls,
         groundTruthScore: official_score,
-        predictedScore: prediction.estimated_score ?? undefined,
+        predictedScore: prediction.predicted_gross ?? prediction.estimated_score ?? undefined,
         measurements: {
           mainBeamLeft: main_beam_left ?? undefined,
           mainBeamRight: main_beam_right ?? undefined,
@@ -123,7 +150,7 @@ export async function POST(request: Request) {
           }
         },
         source: 'user_submission',
-        notes: scorer_notes || 'Submitted through training flow'
+        notes: enrichedNotes,
       })
     }
 

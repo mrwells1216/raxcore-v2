@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Activity, Shield, Settings, CheckCircle, DollarSign } from 'lucide-react'

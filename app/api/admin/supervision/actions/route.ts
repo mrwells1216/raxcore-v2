@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getLearningActions, applyLearningAction, rejectLearningAction } from '@/lib/supervision/learning-actions'
+import { listLearningActions, reviewLearningAction, archiveLearningAction } from '@/lib/supervision/learning-actions'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status') || undefined
   const actionType = searchParams.get('actionType') || undefined
 
-  const actions = await getLearningActions({ 
+  const actions = await listLearningActions({ 
     limit, 
     status: status as 'pending' | 'approved' | 'applied' | 'rejected' | undefined,
     actionType: actionType as string | undefined,
@@ -60,12 +60,15 @@ export async function POST(request: NextRequest) {
   }
 
   if (operation === 'apply') {
-    const result = await applyLearningAction(actionId, user.id)
-    return NextResponse.json(result)
+    await reviewLearningAction(actionId, 'approved', user.id, body.reason)
+    return NextResponse.json({ success: true })
   } else if (operation === 'reject') {
-    const result = await rejectLearningAction(actionId, user.id, body.reason)
-    return NextResponse.json(result)
+    await reviewLearningAction(actionId, 'rejected', user.id, body.reason)
+    return NextResponse.json({ success: true })
+  } else if (operation === 'archive') {
+    await archiveLearningAction(actionId)
+    return NextResponse.json({ success: true })
   } else {
-    return NextResponse.json({ error: 'Invalid operation. Use "apply" or "reject"' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid operation. Use "apply", "reject", or "archive"' }, { status: 400 })
   }
 }

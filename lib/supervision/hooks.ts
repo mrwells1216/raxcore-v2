@@ -349,7 +349,153 @@ function inferLabelFromHypothesis(hypothesisType: string): FailureCauseLabel | n
   return null
 }
 
-function mapDisagreementTypeToLabel(disagreementType: string): FailureCauseLabel | null {
+// ============================================================================
+// PHASE 52 PATCH 2: INTERVAL MISS HOOK
+// ============================================================================
+
+export interface IntervalMissHookInput {
+  predictionId: string
+  buckId?: string
+  /** Predicted lower bound of interval */
+  predictedIntervalLow: number
+  /** Predicted upper bound of interval */
+  predictedIntervalHigh: number
+  /** Actual verified score */
+  actualScore: number
+  /** Current confidence tier from model */
+  confidenceTier: string
+  /** Trust tier from input quality */
+  trustTier?: string
+  /** Segment context if available */
+  segment?: string
+  /** Current confidence percent (0-100) */
+  confidencePercent?: number
+}
+
+/**
+ * Hook called when actual result falls outside predicted interval.
+ * Creates supervision event for interval calibration learning.
+ */
+export async function onIntervalMiss(
+  input: IntervalMissHookInput
+): Promise<{ created: boolean; eventId?: string }> {
+  const intervalWidth = input.predictedIntervalHigh - input.predictedIntervalLow
+  const deviationBelow = Math.max(0, input.predictedIntervalLow - input.actualScore)
+  const deviationAbove = Math.max(0, input.actualScore - input.predictedIntervalHigh)
+  const totalDeviation = deviationBelow + deviationAbove
+
+  // Only create event if there's a meaningful miss
+  if (totalDeviation < 0.25) {
+    return { created: false }
+  }
+
+  const missType = deviationBelow > 0 ? 'below_interval' : 'above_interval'
+
+  // Map to appropriate label
+  let label: FailureCauseLabel = 'confidence_overestimate'
+  if (missType === 'below_interval') {
+    label = 'confidence_underestimate'
+  }
+
+  const event = await createSupervisionEvent({
+    supervision_type: 'interval_miss',
+    source: 'confidence_system',
+    confidence: Math.min(0.9, 0.5 + (totalDeviation / intervalWidth) * 0.4),
+    prediction_id: input.predictionId,
+    buck_id: input.buckId,
+    metadata_json: {
+      predicted_interval_low: input.predictedIntervalLow,
+      predicted_interval_high: input.predictedIntervalHigh,
+      actual_score: input.actualScore,
+      deviation_magnitude: totalDeviation,
+      miss_type: missType,
+      interval_width: intervalWidth,
+      confidence_tier: input.confidenceTier,
+      trust_tier: input.trustTier ?? 'unknown',
+      segment: input.segment,
+      confidence_percent: input.confidencePercent,
+    },
+    labels: [{
+      label,
+      confidence: 0.8,
+      source: 'auto',
+    }],
+  })
+
+  return { created: true, eventId: event.id }
+}
+
+// ============================================================================
+// PHASE 52 PATCH 2: HIGH-CONFIDENCE MISS HOOK
+// ============================================================================
+
+export interface HighConfidenceMissHookInput {
+  predictionId: string
+  buckId?: string
+  /** Confidence tier (e.g., 'high', 'very_high') */
+  confidenceTier: string
+  /** Trust tier from input quality */
+  trustTier?: string
+  /** Magnitude of miss in inches */
+  missMagnitude: number
+  /** Whether it was an interval miss */
+  intervalMiss: boolean
+  /** Predicted value */
+  predicted: number
+  /** Actual verified value */
+  actual: number
+  /** Segment context */
+  segment?: string
+}
+
+/**
+ * Hook called when high-confidence predictions miss meaningfully.
+ * High-confidence misses are high-value learning signals.
+ */
+export async function onHighConfidenceMiss(
+  input: HighConfidenceMissHookInput
+): Promise<{ created: boolean; eventId?: string }> {
+  // Only for genuinely high confidence
+  if (!['high', 'very_high', 'extreme'].includes(input.confidenceTier)) {
+    return { created: false }
+  }
+
+  // Only for meaningful misses
+  if (input.missMagnitude < 1.0) {
+    return { created: false }
+  }
+
+  const event = await createSupervisionEvent({
+    supervision_type: 'confidence_overclaim',
+    source: 'confidence_system',
+    confidence: Math.min(1.0, 0.7 + (input.missMagnitude / 10) * 0.3),
+    prediction_id: input.predictionId,
+    buck_id: input.buckId,
+    metadata_json: {
+      confidence_tier: input.confidenceTier,
+      trust_tier: input.trustTier ?? 'unknown',
+      miss_magnitude: input.missMagnitude,
+      interval_miss: input.intervalMiss,
+      predicted: input.predicted,
+      actual: input.actual,
+      segment: input.segment,
+      high_confidence_miss_severity: input.missMagnitude > 5 ? 'severe' : 'moderate',
+    },
+    labels: [{
+      label: 'confidence_overestimate',
+      confidence: 0.85,
+      source: 'auto',
+    }],
+  })
+
+  return { created: true, eventId: event.id }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+function mapDisagreementTypeToFailureLabel(cause: string): FailureCauseLabel | null {
   const mapping: Record<string, FailureCauseLabel> = {
     'scale_reference_conflict': 'scale_reference_failure',
     'perspective_distortion': 'asymmetry_perspective_confound',
@@ -360,7 +506,7 @@ function mapDisagreementTypeToLabel(disagreementType: string): FailureCauseLabel
     'low_quality_input': 'lighting_quality_failure',
   }
   
-  return mapping[disagreementType] ?? null
+  return mapping[cause] ?? null
 }
 
 function inferLabelFromFamily(family: string): FailureCauseLabel | null {

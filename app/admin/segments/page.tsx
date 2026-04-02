@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * Phase 41: Admin — Segmented Calibration Panel
  *

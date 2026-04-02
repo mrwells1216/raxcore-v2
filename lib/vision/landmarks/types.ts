@@ -159,6 +159,14 @@ export interface FusedLandmarkPackage {
   estimated_eye_to_eye: number | null
   estimated_ear_tip_to_tip: number | null
   estimated_skull_width: number | null
+  // Extended top-tier reference estimates
+  estimated_pedicle_spacing: number | null
+  estimated_eye_to_pedicle: number | null
+  estimated_eye_box_width: number | null
+  estimated_eye_box_height: number | null
+  estimated_ear_base_spacing: number | null
+  estimated_nose_bridge_length: number | null
+  estimated_muzzle_width: number | null
   
   // Issues found during fusion
   fusion_conflicts: FusionConflict[]
@@ -207,7 +215,22 @@ export interface ReferenceFusionResult {
 }
 
 export interface ReferenceSourceSelection {
-  source_type: 'ear_strong' | 'ear_partial' | 'eye' | 'combined_ear_eye' | 'weak_fallback'
+  source_type:
+    // Top-tier
+    | 'eye_box'
+    | 'pedicle_spacing'
+    | 'eye_to_pedicle'
+    | 'skull_width'
+    // Secondary
+    | 'nose_bridge'
+    | 'muzzle_width'
+    | 'ear_base_spacing'
+    // Legacy / compat
+    | 'ear_strong'
+    | 'ear_partial'
+    | 'eye'
+    | 'combined_ear_eye'
+    | 'weak_fallback'
   image_indices: number[]
   confidence: number
   scaling_factor: number

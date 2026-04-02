@@ -143,7 +143,11 @@ export function calculateGrossNet(measurements: Measurements): { gross: number; 
 }
 
 /**
- * Generate hypothesis candidates based on baseline and error decomposition
+ * Generate hypothesis candidates based on baseline and error decomposition.
+ *
+ * Each hypothesis has a UNIQUE named type (scale_up / scale_down / spread_expand / …)
+ * so the UI can show a clear human-readable label for every candidate instead of
+ * repeating generic names like "scale" multiple times.
  */
 export function generateHypotheses(input: {
   base: Measurements
@@ -152,132 +156,257 @@ export function generateHypotheses(input: {
   settings?: Partial<typeof DEFAULT_REVERSE_SETTINGS>
 }): Array<{ type: HypothesisType; params: HypothesisParams }> {
   const settings = { ...DEFAULT_REVERSE_SETTINGS, ...(input.settings ?? {}) }
+  const weakRef = input.referenceQuality < 0.6
 
   const out: Array<{ type: HypothesisType; params: HypothesisParams }> = []
-  
-  // Always include baseline (no-op)
-  out.push({ type: 'noop', params: { notes: ['Baseline (no-op)'] } })
 
-  // Scale hypotheses - more options when reference is weak
-  const weakRef = input.referenceQuality < 0.6
-  const scaleFactors = weakRef ? settings.scaleFactorsWeak : settings.scaleFactorsStrong
-  for (const s of scaleFactors) {
-    if (s === 1.0) continue
-    out.push({ 
-      type: 'scale', 
-      params: { scale: s, notes: [`Scale factor ${s}`] } 
+  // ── 1. Baseline (no-op) — always first
+  out.push({ type: 'noop', params: { notes: ['Baseline — no changes'] } })
+
+  // ── 2. Scale hypotheses — large + small steps, unique types each direction
+  // Large step
+  out.push({
+    type: 'scale_up',
+    params: { scale: weakRef ? 1.05 : 1.015, notes: [] },
+  })
+  out.push({
+    type: 'scale_down',
+    params: { scale: weakRef ? 0.95 : 0.985, notes: [] },
+  })
+  // Small step (only add when weak reference warrants extra range)
+  if (weakRef) {
+    out.push({
+      type: 'scale_up',
+      params: { scale: 1.03, notes: ['small'] },
+    })
+    out.push({
+      type: 'scale_down',
+      params: { scale: 0.97, notes: ['small'] },
     })
   }
 
-  // Spread delta hypotheses
-  for (const d of settings.spreadDeltas) {
-    const baseSpread = input.base.inside_spread
-    if (baseSpread === null) continue
+  // ── 3. Spread adjustments
+  const baseSpread = input.base.inside_spread
+  if (baseSpread !== null) {
     out.push({
-      type: 'spread',
-      params: { 
-        overrides: { inside_spread: Number((baseSpread + d).toFixed(1)) }, 
-        notes: [`Spread delta ${d}"`] 
-      }
+      type: 'spread_expand',
+      params: {
+        overrides: { inside_spread: Number((baseSpread + 2).toFixed(1)) },
+        notes: ['+2"'],
+      },
+    })
+    out.push({
+      type: 'spread_reduce',
+      params: {
+        overrides: { inside_spread: Number((baseSpread - 2).toFixed(1)) },
+        notes: ['-2"'],
+      },
+    })
+    // Half-inch fine tweaks
+    out.push({
+      type: 'spread_expand',
+      params: {
+        overrides: { inside_spread: Number((baseSpread + 0.5).toFixed(1)) },
+        notes: ['+0.5"'],
+      },
+    })
+    out.push({
+      type: 'spread_reduce',
+      params: {
+        overrides: { inside_spread: Number((baseSpread - 0.5).toFixed(1)) },
+        notes: ['-0.5"'],
+      },
     })
   }
 
-  // Beam delta hypotheses
-  for (const d of settings.beamDeltas) {
-    const baseLeft = input.base.main_beam_left
-    const baseRight = input.base.main_beam_right
-    if (baseLeft === null || baseRight === null) continue
+  // ── 4. Beam length adjustments (both sides simultaneously)
+  const baseLeft = input.base.main_beam_left
+  const baseRight = input.base.main_beam_right
+  if (baseLeft !== null && baseRight !== null) {
     out.push({
-      type: 'beam',
+      type: 'beam_extend',
       params: {
         overrides: {
-          main_beam_left: Number((baseLeft + d).toFixed(1)),
-          main_beam_right: Number((baseRight + d).toFixed(1)),
+          main_beam_left:  Number((baseLeft  + 3).toFixed(1)),
+          main_beam_right: Number((baseRight + 3).toFixed(1)),
         },
-        notes: [`Beam delta ${d}" both sides`],
-      }
+        notes: ['+3"'],
+      },
     })
-  }
-
-  // Symmetry smoothing (for perspective-confounded asymmetry)
-  out.push({ 
-    type: 'combo', 
-    params: { symmetrize: { family: 'beam', strength: 0.6 }, notes: ['Symmetrize beams 0.6'] } 
-  })
-  out.push({ 
-    type: 'combo', 
-    params: { symmetrize: { family: 'tine', strength: 0.6 }, notes: ['Symmetrize tines 0.6'] } 
-  })
-
-  // Deduction tweaks
-  for (const d of settings.deductionDeltas) {
-    const baseDed = input.base.deductions
-    if (baseDed === null) continue
     out.push({
-      type: 'deduction',
+      type: 'beam_reduce',
       params: {
-        overrides: { deductions: Number((baseDed + d).toFixed(1)) },
-        notes: [`Deductions delta ${d}"`],
-      }
+        overrides: {
+          main_beam_left:  Number((baseLeft  - 3).toFixed(1)),
+          main_beam_right: Number((baseRight - 3).toFixed(1)),
+        },
+        notes: ['-3"'],
+      },
+    })
+    out.push({
+      type: 'beam_extend',
+      params: {
+        overrides: {
+          main_beam_left:  Number((baseLeft  + 1).toFixed(1)),
+          main_beam_right: Number((baseRight + 1).toFixed(1)),
+        },
+        notes: ['+1"'],
+      },
+    })
+    out.push({
+      type: 'beam_reduce',
+      params: {
+        overrides: {
+          main_beam_left:  Number((baseLeft  - 1).toFixed(1)),
+          main_beam_right: Number((baseRight - 1).toFixed(1)),
+        },
+        notes: ['-1"'],
+      },
     })
   }
 
-  // Swap sides (rare but catches left/right mis-association)
-  out.push({ 
-    type: 'swap_sides', 
-    params: { swapSides: true, notes: ['Swap left/right measurements'] } 
+  // ── 5. Symmetry smoothing (perspective-confounded asymmetry)
+  out.push({
+    type: 'symmetry_beam',
+    params: { symmetrize: { family: 'beam', strength: 0.6 }, notes: ['60%'] },
+  })
+  out.push({
+    type: 'symmetry_tine',
+    params: { symmetrize: { family: 'tine', strength: 0.6 }, notes: ['60%'] },
   })
 
-  // Combo: scale + symmetrize (for weak reference + asymmetry confound)
+  // ── 6. Mass (circumference) boost
+  out.push({
+    type: 'mass_boost',
+    params: { scale: 1.0, overrides: {
+      h1_left:  safeAdd(input.base.h1_left,  0.3),
+      h1_right: safeAdd(input.base.h1_right, 0.3),
+    }, notes: ['+0.3"'] },
+  })
+  out.push({
+    type: 'mass_reduce',
+    params: { overrides: {
+      h1_left:  safeAdd(input.base.h1_left,  -0.3),
+      h1_right: safeAdd(input.base.h1_right, -0.3),
+    }, notes: ['-0.3"'] },
+  })
+
+  // ── 7. Deduction adjustments
+  const baseDed = input.base.deductions
+  if (baseDed !== null) {
+    out.push({
+      type: 'deduction_reduce',
+      params: {
+        overrides: { deductions: Number(Math.max(0, baseDed - 2).toFixed(1)) },
+        notes: ['-2"'],
+      },
+    })
+    out.push({
+      type: 'deduction_increase',
+      params: {
+        overrides: { deductions: Number((baseDed + 2).toFixed(1)) },
+        notes: ['+2"'],
+      },
+    })
+  }
+
+  // ── 8. Swap sides (catches left/right mis-association)
+  out.push({
+    type: 'swap_sides',
+    params: { swapSides: true, notes: [] },
+  })
+
+  // ── 9. Combo: scale + symmetrize (weak reference path)
   if (weakRef) {
     out.push({
       type: 'combo',
       params: {
         scale: 0.97,
         symmetrize: { family: 'beam', strength: 0.4 },
-        notes: ['Scale 0.97 + symmetrize beams 0.4'],
-      }
+        notes: ['Scale -3% + symmetrize beams'],
+      },
     })
     out.push({
       type: 'combo',
       params: {
         scale: 1.03,
         symmetrize: { family: 'beam', strength: 0.4 },
-        notes: ['Scale 1.03 + symmetrize beams 0.4'],
-      }
+        notes: ['Scale +3% + symmetrize beams'],
+      },
     })
   }
 
-  // Cap to max candidates (keep diversity-first ordering)
+  // Cap to maxCandidates (diversity-first ordering preserved)
   return out.slice(0, settings.maxCandidates)
 }
 
+/** Safely add a delta to a nullable measurement value */
+function safeAdd(v: number | null | undefined, delta: number): number | null {
+  if (v === null || v === undefined) return null
+  return Number((v + delta).toFixed(1))
+}
+
 /**
- * Get hypothesis description for display
+ * Get a clear human-readable label for a hypothesis (used in UI and logs).
+ * Each named type gets its own distinct label — no repeated "scale" entries.
  */
 export function describeHypothesis(type: HypothesisType, params: HypothesisParams): string {
-  const notes = params.notes?.join('; ') || ''
-  
+  const tag = params.notes?.filter(n => n && n !== 'small').join(', ') ?? ''
+
   switch (type) {
-    case 'noop':
-      return 'Baseline (no changes)'
+    // ── Scale
+    case 'scale_up': {
+      const pct = params.scale ? Math.round((params.scale - 1) * 100) : 0
+      const size = params.notes?.includes('small') ? 'Fine' : 'Coarse'
+      return `Scale Up +${pct}% (${size})`
+    }
+    case 'scale_down': {
+      const pct = params.scale ? Math.round((1 - params.scale) * 100) : 0
+      const size = params.notes?.includes('small') ? 'Fine' : 'Coarse'
+      return `Scale Down -${pct}% (${size})`
+    }
     case 'scale':
-      return `Scale by ${params.scale?.toFixed(3) ?? '?'}`
-    case 'spread':
-      return `Adjust spread${notes ? `: ${notes}` : ''}`
-    case 'beam':
-      return `Adjust beams${notes ? `: ${notes}` : ''}`
-    case 'tine':
-      return `Adjust tines${notes ? `: ${notes}` : ''}`
-    case 'mass':
-      return `Adjust mass${notes ? `: ${notes}` : ''}`
-    case 'deduction':
-      return `Adjust deductions${notes ? `: ${notes}` : ''}`
-    case 'swap_sides':
-      return 'Swap left/right measurements'
-    case 'combo':
-      return notes || 'Combination adjustment'
-    default:
-      return type
+      if (params.scale === undefined) return 'Scale (unchanged)'
+      return params.scale >= 1
+        ? `Scale +${Math.round((params.scale - 1) * 100)}%`
+        : `Scale -${Math.round((1 - params.scale) * 100)}%`
+
+    // ── Spread
+    case 'spread_expand': return `Expand Spread ${tag}`
+    case 'spread_reduce': return `Reduce Spread ${tag}`
+    case 'spread':        return `Adjust Spread${tag ? ` ${tag}` : ''}`
+
+    // ── Beam
+    case 'beam_extend': return `Increase Beam Length ${tag}`
+    case 'beam_reduce': return `Reduce Beam Length ${tag}`
+    case 'beam':        return `Adjust Beam Length${tag ? ` ${tag}` : ''}`
+
+    // ── Tine
+    case 'tine_extend': return `Increase Tine Lengths ${tag}`
+    case 'tine_reduce': return `Reduce Tine Lengths ${tag}`
+    case 'tine':        return `Adjust Tines${tag ? ` ${tag}` : ''}`
+
+    // ── Mass / circumference
+    case 'mass_boost':  return `Increase Mass (Circumference) ${tag}`
+    case 'mass_reduce': return `Reduce Mass (Circumference) ${tag}`
+    case 'mass':        return `Adjust Mass${tag ? ` ${tag}` : ''}`
+
+    // ── Symmetry
+    case 'symmetry_beam': return `Symmetrize Beams ${tag}`
+    case 'symmetry_tine': return `Symmetrize Tines ${tag}`
+
+    // ── Deductions
+    case 'deduction_reduce':   return `Reduce Deductions ${tag}`
+    case 'deduction_increase': return `Increase Deductions ${tag}`
+    case 'deduction':          return `Adjust Deductions${tag ? ` ${tag}` : ''}`
+
+    // ── Special
+    case 'swap_sides': return 'Swap Left / Right Measurements'
+    case 'combo':      return params.notes?.join(' + ') || 'Combination Adjustment'
+
+    // ── Baseline
+    case 'noop': return 'Baseline (No Changes)'
+
+    default: return type
   }
 }

@@ -5,7 +5,7 @@
  */
 
 import { generateObject } from 'ai'
-import { gateway } from '@ai-sdk/gateway'
+import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
@@ -29,8 +29,45 @@ import {
 } from './fallback-handler'
 import { logEventFireForget } from '@/lib/monitoring/service'
 
-// Vision model to use - Gemini 2.0 Flash has strong vision capabilities
-const VISION_MODEL = 'google/gemini-2.0-flash-001'
+// OpenAI is the only provider for scoring vision calls.
+// Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
+// (specificationVersion "v2") which ai@6 requires.
+// openai('gpt-4o') is the standard chat path — supports vision inputs, spec v2.
+const OPENAI_VISION_MODEL = 'gpt-4o'
+
+function getVisionModel() {
+  const hasKey = !!process.env.OPENAI_API_KEY
+
+  console.log('[vision-scorer] provider check', {
+    selectedProvider: 'openai',
+    selectedModel: OPENAI_VISION_MODEL,
+    sdkMethod: 'generateObject',
+    providerPackage: '@ai-sdk/openai',
+    providerAdapter: 'openai.chat (spec v2)',
+    hasOpenAIKey: hasKey,
+    visionCapable: true,
+    isFallback: false,
+  })
+
+  if (!hasKey) {
+    throw new Error(
+      '[vision-scorer] Missing OPENAI_API_KEY — cannot score. ' +
+      'Set OPENAI_API_KEY in your server environment variables.'
+    )
+  }
+
+  // openai('gpt-4o') uses the chat completions path which supports vision
+  // inputs (image_url content parts) and implements LanguageModelV2 in
+  // @ai-sdk/openai v2.x — compatible with ai@6's generateObject.
+  return {
+    model: openai(OPENAI_VISION_MODEL),
+    provider: 'openai',
+    providerAdapter: 'openai.chat',
+    modelName: OPENAI_VISION_MODEL,
+  }
+}
+
+
 
 export interface VisionImageInput {
   imageUrl: string
@@ -78,13 +115,60 @@ const VisionMeasurementsSchema = z.object({
   deductions: z.number().min(0).max(20).describe('Estimated deductions for asymmetry'),
 })
 
+// Per-reference observation sub-schema (Steps 1–2 of multi-reference consensus)
+const ReferenceObservationSchema = z.object({
+  visibility: z.boolean().describe('Whether this reference is clearly visible'),
+  quality: z.number().min(0).max(1).describe('Detection quality (0–1): sharpness, occlusion, angle clarity'),
+  distortion: z.number().min(0).max(1).describe('Perspective/lens distortion on this reference (0–1)'),
+})
+
 const VisionLandmarksSchema = z.object({
   ears_visible: z.boolean().describe('Whether both ears are visible in the image(s)'),
   eyes_visible: z.boolean().describe('Whether both eyes are visible in the image(s)'),
   antlers_visible: z.boolean().describe('Whether both antlers are fully visible'),
-  ear_base_to_tip_estimated: z.number().optional().describe('Estimated ear length if visible'),
+  ear_base_to_tip_estimated: z.number().optional().describe('Estimated ear base-to-tip length in inches if visible'),
   scaling_reference_used: z.string().describe('Primary anatomical reference used for scaling'),
   quality_notes: z.array(z.string()).describe('Notes about image quality affecting estimates'),
+
+  // Multi-reference consensus data (Step 1 of weighted reference system)
+  // Top-tier references — these should dominate scaling:
+  eye_box: ReferenceObservationSchema.optional().describe(
+    'Eye socket / orbital box — top-tier reference. Best detected from front-angle images.'
+  ),
+  pedicle_spacing: ReferenceObservationSchema.optional().describe(
+    'Antler base (pedicle) center-to-center spacing — top-tier reference. Front angle only.'
+  ),
+  eye_to_pedicle: ReferenceObservationSchema.optional().describe(
+    'Eye center to nearest pedicle base distance — top-tier structural proportion.'
+  ),
+  skull_width: ReferenceObservationSchema.optional().describe(
+    'Forehead width between orbital ridges — top-tier reference. Front angle.'
+  ),
+
+  // Secondary references
+  nose_bridge: ReferenceObservationSchema.optional().describe(
+    'Nose bridge length from brow to tip — secondary reference.'
+  ),
+  muzzle_width: ReferenceObservationSchema.optional().describe(
+    'Muzzle width at widest point — secondary reference. Front angle.'
+  ),
+  ear_base_spacing: ReferenceObservationSchema.optional().describe(
+    'Ear base center-to-center spacing — secondary reference. Less reliable than pedicle.'
+  ),
+
+  // Bonus (only populate when ears confirmed visible)
+  ear_base_to_tip: ReferenceObservationSchema.optional().describe(
+    'Ear base-to-tip length — bonus reference. Only populate when ears are fully visible.'
+  ),
+
+  // Detected pixel-space measurements for top-tier references (optional, used by consensus engine)
+  eye_width_px_inches: z.number().optional().describe('Estimated eye box width in the same inch-space as measurements'),
+  pedicle_spacing_px_inches: z.number().optional().describe('Estimated pedicle spacing in inch-space'),
+  eye_to_pedicle_px_inches: z.number().optional().describe('Estimated eye-to-pedicle distance in inch-space'),
+  skull_forehead_width_px_inches: z.number().optional().describe('Estimated skull forehead width in inch-space'),
+  nose_bridge_px_inches: z.number().optional().describe('Estimated nose bridge length in inch-space'),
+  muzzle_width_px_inches: z.number().optional().describe('Estimated muzzle width in inch-space'),
+  ear_base_spacing_px_inches: z.number().optional().describe('Estimated ear base spacing in inch-space'),
 })
 
 const VisionOutputSchema = z.object({
@@ -114,7 +198,7 @@ function buildVisionPrompt(input: VisionScoringInput): string {
     `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})`
   ).join('\n')
 
-  return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records. 
+  return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
 
@@ -129,68 +213,125 @@ CONTEXT:
 IMAGES PROVIDED:
 ${angleDescriptions}
 
-ANATOMICAL SCALING REFERENCES (use these to convert pixel measurements to inches):
-- Whitetail deer ear base-to-tip length: ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP} inches (average)
-- Whitetail deer eye-to-eye distance: ${ANATOMICAL_REFERENCES.EYE_TO_EYE} inches (average)
-- Whitetail deer ear tip-to-tip (alert): ${ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT} inches (average)
-- Whitetail deer ear tip-to-tip (relaxed): ${ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_RELAXED} inches (average)
+═══════════════════════════════════════════════════════════════
+MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS
+═══════════════════════════════════════════════════════════════
+You MUST use MULTIPLE anatomical references to derive scale, not just ears.
+For EACH reference below, report: visibility (true/false), quality (0–1),
+and distortion (0–1). Then use detected sizes to set *_px_inches fields.
 
-MEASUREMENT GUIDELINES:
-1. INSIDE SPREAD: Measure the widest point between main beams at a right angle to the skull centerline. Most mature bucks are 16-22 inches.
+REFERENCE PRIORITY — use top-tier references first:
 
-2. MAIN BEAMS: Measure along the outer curve from the burr to the tip. Typical mature bucks are 22-28 inches per side.
+TOP-TIER (highest accuracy — use these to anchor all measurements):
+  1. Eye box (orbital socket)          — known width: ${ANATOMICAL_REFERENCES.EYE_BOX_WIDTH}" | Best angle: front
+  2. Pedicle spacing (antler bases)    — known c-to-c: ${ANATOMICAL_REFERENCES.PEDICLE_SPACING}"  | Best angle: front
+  3. Eye-to-pedicle distance           — known: ${ANATOMICAL_REFERENCES.EYE_TO_PEDICLE}"         | Best angle: front/45°
+  4. Skull forehead width              — known: ${ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH}"    | Best angle: front
 
-3. TINE LENGTHS (G1-G5): Measure from the top of the main beam to the tine tip along the outer edge:
-   - G1 (brow tine): Usually 3-6 inches
-   - G2: Usually the longest tine, 8-12 inches on mature bucks
-   - G3: Often second longest, 7-11 inches
-   - G4: Shorter, 4-9 inches
-   - G5: If present, usually 2-5 inches
+SECONDARY (use to corroborate if top-tier is unclear):
+  5. Nose bridge length                — known: ${ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH}"      | Best angle: front/45°
+  6. Muzzle width                      — known: ${ANATOMICAL_REFERENCES.MUZZLE_WIDTH}"            | Best angle: front
+  7. Ear base spacing                  — known c-to-c: ${ANATOMICAL_REFERENCES.EAR_BASE_SPACING}"  | Best angle: front
 
-4. CIRCUMFERENCES (H1-H4): Measure at the smallest point between tines:
-   - H1: Between burr and G1, typically 4-5.5 inches
-   - H2: Between G1 and G2, typically 4-5 inches
-   - H3: Between G2 and G3, typically 4-4.5 inches
-   - H4: Between G3 and G4 (or halfway to beam tip), typically 3.5-4.5 inches
+BONUS (only if ears confirmed fully visible — less reliable, do NOT let this override top-tier):
+  8. Ear base-to-tip                   — known: ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}"         | Front/45° only
 
-5. ABNORMAL POINTS: Any point not in the normal typical pattern (extra tines, drop tines, etc.)
+IMPORTANT RULES:
+- DO NOT rely primarily on ears for scaling.
+- Eye box + pedicle spacing + eye-to-pedicle MUST dominate scaling.
+- Nose bridge is secondary; ears are a bonus check only.
+- If you can see the eye socket clearly, you MUST populate eye_box.
+- If pedicle bases are visible from front, you MUST populate pedicle_spacing.
+- For distortion: side/oblique angles distort perspective heavily (0.3–0.7).
+  Front angle = low distortion (0.05–0.2). Trail cam / fisheye = higher.
+- If a reference is NOT visible, still include it with visibility: false.
+- Set *_px_inches fields to your best inch-equivalent estimate of each
+  reference's detected size in the image's scale (same inch space as your
+  other measurements). Leave as undefined if not detected.
 
-6. DEDUCTIONS: Estimate asymmetry deductions by comparing left/right differences.
+═══════════════════════════════════════════════════════════════
+MEASUREMENT GUIDELINES
+═══════════════════════════════════════════════════════════════
+1. INSIDE SPREAD: Widest point between main beams. Mature bucks: 16–22".
+
+2. MAIN BEAMS: Outer curve from burr to tip. Mature bucks: 22–28" per side.
+
+3. TINE LENGTHS (G1–G5): Base of tine at main beam to tine tip:
+   - G1 (brow): 3–6"  |  G2: 8–12"  |  G3: 7–11"  |  G4: 4–9"  |  G5 if present: 2–5"
+
+4. CIRCUMFERENCES (H1–H4): Smallest point between tines:
+   - H1: 4–5.5"  |  H2: 4–5"  |  H3: 4–4.5"  |  H4: 3.5–4.5"
+
+5. ABNORMAL POINTS: Any point outside the normal typical pattern.
+
+6. DEDUCTIONS: Estimate asymmetry from left/right differences.
 
 ANGLE-SPECIFIC GUIDANCE:
-- FRONT angles: Best for inside spread and ear/eye references
-- SIDE angles (left/right): Best for main beam length and tine measurements
-- 45-degree angles: Good for overall verification
+- FRONT: Best for spread, eye box, pedicle, skull width, ear/eye refs.
+- SIDE (left/right): Best for main beam length and tine lengths.
+- 45-degree: Good for overall cross-check.
 
 SCORING CALCULATION:
 - Gross = Sum of all measurements including abnormal points
-- Net (Typical) = Gross - abnormal points - deductions
-- Net (Non-typical) = Gross - deductions (abnormals count as score)
+- Net (Typical) = Gross − abnormal points − deductions
+- Net (Non-typical) = Gross − deductions (abnormals count positively)
 
-Be conservative with estimates - it's better to slightly underestimate than overestimate.
-Consider image quality, angle limitations, and perspective distortion in your confidence level.
+Be conservative — slightly under rather than over. Account for perspective
+distortion, occlusion, and image quality in your confidence level.
 
 Provide your analysis as structured JSON matching the required schema.`
 }
 
 /**
- * Prepare image content for the vision model
- * Handles both data URLs and regular URLs
+ * Prepare image content for the vision model.
+ *
+ * Transport rules:
+ *  - https:// URL  → URL object  (preferred, works with all providers)
+ *  - data:         → string      (only supported by gateway, NOT OpenAI)
+ *
+ * For OpenAI: throws if any image is a data: URL, because the OpenAI API
+ * requires http/https scheme and returns "URL scheme must be http or https".
  */
-function prepareImageContent(images: VisionImageInput[]): Array<{ type: 'image'; image: URL | string }> {
+function prepareImageContent(
+  images: VisionImageInput[],
+  provider: string
+): Array<{ type: 'image'; image: URL | string }> {
+  const transportTypes = images.map(img => {
+    if (img.imageUrl.startsWith('https://')) return 'https_url'
+    if (img.imageUrl.startsWith('http://'))  return 'http_url'
+    if (img.imageUrl.startsWith('data:'))    return 'data_url'
+    return 'unknown'
+  })
+
+  const allHttps = transportTypes.every(t => t === 'https_url')
+  const hasDataUrl = transportTypes.some(t => t === 'data_url')
+
+  console.log('[vision-scorer] image transport check', {
+    provider,
+    imageCount: images.length,
+    transportTypes,
+    allHttps,
+    hasDataUrl,
+  })
+
+  // OpenAI requires https:// — reject data: URLs before they reach the API
+  if (provider === 'openai' && hasDataUrl) {
+    const badIndices = transportTypes
+      .map((t, i) => (t === 'data_url' ? i : -1))
+      .filter(i => i >= 0)
+    throw new Error(
+      `[vision-scorer] OpenAI vision requires https:// image URLs. ` +
+      `data: URLs found at indices [${badIndices.join(', ')}]. ` +
+      `Ensure images are uploaded to storage before scoring.`
+    )
+  }
+
   return images.map(img => {
-    // Data URLs are passed as strings directly
-    if (img.imageUrl.startsWith('data:image/')) {
-      return {
-        type: 'image' as const,
-        image: img.imageUrl,
-      }
+    if (img.imageUrl.startsWith('data:')) {
+      // Non-OpenAI providers (gateway) accept data URL strings directly
+      return { type: 'image' as const, image: img.imageUrl }
     }
-    // Regular URLs need to be URL objects
-    return {
-      type: 'image' as const,
-      image: new URL(img.imageUrl),
-    }
+    return { type: 'image' as const, image: new URL(img.imageUrl) }
   })
 }
 
@@ -236,6 +377,30 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   const startTime = Date.now()
   const visionErrors: VisionRuntimeError[] = []
 
+  // Get the vision model configuration — throws clearly if OPENAI_API_KEY is missing
+  let visionConfig: ReturnType<typeof getVisionModel>
+  try {
+    visionConfig = getVisionModel()
+  } catch (configErr) {
+    const msg = configErr instanceof Error ? configErr.message : String(configErr)
+    console.error('[vision-scorer] Configuration error — cannot score:', msg)
+    return {
+      success: false,
+      error: msg,
+      userMessage: 'Scoring is unavailable: missing API key configuration. Contact support.',
+      fallbackReason: 'missing_api_key',
+      runtimeMetadata: null,
+      imageValidation: null,
+      visionErrors: [{ type: 'config_error' as const, message: msg, retryable: false }],
+      fallbackMetadata: createFallbackMetadata(
+        makeFallbackDecision({ type: 'config_error' as const, message: msg, retryable: false }, null, null),
+        [{ type: 'config_error' as const, message: msg, retryable: false }],
+        null,
+        null
+      ),
+    }
+  }
+
   // Phase 39: Log vision call started
   logEventFireForget({
     traceId: input.traceId,
@@ -244,7 +409,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     route: '/api/score',
     status: 'info',
     imagesCount: input.images?.length ?? 0,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionConfig.provider}/${visionConfig.modelName}`,
   })
 
   // Phase 24: Comprehensive image validation
@@ -305,13 +470,27 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   // Use only valid images for vision call
   const validImages = imageValidation.validImageIndices.map(i => input.images[i])
 
+  // Use vision config from earlier
+  const { model: visionModel, provider: visionProvider, modelName: visionModelName, providerAdapter } = visionConfig
+
+  const imageContent = prepareImageContent(validImages, visionProvider)
+  console.log('[vision-scorer] pre-call', {
+    provider: visionProvider,
+    model: visionModelName,
+    providerAdapter,
+    sdkMethod: 'generateObject',
+    imageCount: validImages.length,
+    imageAngles: validImages.map(img => img.angleType),
+    imagePayloadAttached: imageContent.length > 0,
+    visionCapable: true,
+  })
+
   // Phase 24: Execute vision call with runtime hardening
   const visionCallResult = await executeWithRuntime(async () => {
     const prompt = buildVisionPrompt({ ...input, images: validImages })
-    const imageContent = prepareImageContent(validImages)
-    
+
     const { object: visionOutput } = await generateObject({
-      model: gateway(VISION_MODEL),
+      model: visionModel,
       schema: VisionOutputSchema,
       messages: [
         {
@@ -324,6 +503,13 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       ],
       // Note: AI SDK has its own retry logic, but we wrap it for timeout/monitoring
       maxRetries: 1,
+    })
+
+    console.log('[vision-scorer] post-call success', {
+      provider: visionProvider,
+      model: visionModelName,
+      visionSucceeded: true,
+      fallbackUsed: false,
     })
 
     return visionOutput
@@ -345,9 +531,15 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     
     const fallbackDecision = makeFallbackDecision(runtimeError, visionCallResult.metadata, imageValidation)
     
-    console.error('Vision scoring failed:', {
-      error: runtimeError.type,
-      message: runtimeError.message,
+    console.error('[vision-scorer] vision call failed — falling back to heuristic', {
+      provider: visionProvider,
+      model: visionModelName,
+      providerAdapter,
+      visionSucceeded: false,
+      fallbackUsed: true,
+      fallbackReason: runtimeError.type,
+      fallbackMessage: runtimeError.message,
+      retryable: runtimeError.retryable,
       attempts: visionCallResult.metadata.totalAttempts,
       timeMs: visionCallResult.metadata.totalTimeMs,
       timedOut: visionCallResult.metadata.timedOut,
@@ -365,9 +557,9 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       durationMs: visionCallResult.metadata.totalTimeMs,
       retryCount: visionCallResult.metadata.totalAttempts - 1,
       imagesCount: input.images?.length ?? 0,
-      modelUsed: VISION_MODEL,
+      modelUsed: `${visionProvider}/${visionModelName}`,
       fallbackUsed: true,
-      metadata: { timedOut: visionCallResult.metadata.timedOut },
+      metadata: { timedOut: visionCallResult.metadata.timedOut, provider: visionProvider },
     })
 
     return {
@@ -407,7 +599,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       errorType: 'malformed_response',
       errorMessage: outputValidation.issues.join('; '),
       durationMs: visionCallResult.metadata.totalTimeMs,
-      modelUsed: VISION_MODEL,
+      modelUsed: `${visionProvider}/${visionModelName}`,
       fallbackUsed: true,
     })
 
@@ -462,22 +654,25 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
     route: '/api/score',
     status: 'success',
     durationMs: processingTimeMs,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionProvider}/${visionModelName}`,
     retryCount: visionCallResult.metadata.totalAttempts - 1,
     imagesCount: validImages.length,
     metadata: {
       confidence: visionOutput.confidence_percent,
       grossScore: visionOutput.gross_score,
       outputIssues: outputValidation.issues.length,
+      provider: visionProvider,
     },
   })
+
+  console.log(`[vision-scorer] Vision scoring successful via ${visionProvider}`)
 
   // Success!
   return {
     success: true,
     output: visionOutput,
     processingTimeMs,
-    modelUsed: VISION_MODEL,
+    modelUsed: `${visionProvider}/${visionModelName}`,
     runtimeMetadata: visionCallResult.metadata,
     imageValidation,
   }
@@ -518,13 +713,50 @@ export function visionOutputToMeasurements(output: VisionOutput): Measurements {
  * Convert vision output to standard landmarks format
  */
 export function visionOutputToLandmarks(output: VisionOutput): LandmarksDetected {
+  const lm = output.landmarks
   return {
-    ears_visible: output.landmarks.ears_visible,
-    eyes_visible: output.landmarks.eyes_visible,
-    antlers_visible: output.landmarks.antlers_visible,
-    ear_base_to_tip: output.landmarks.ear_base_to_tip_estimated ?? ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP,
-    eye_to_eye: ANATOMICAL_REFERENCES.EYE_TO_EYE,
-    ear_tip_to_tip: ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT,
-    quality_notes: output.landmarks.quality_notes,
+    ears_visible:      lm.ears_visible,
+    eyes_visible:      lm.eyes_visible,
+    antlers_visible:   lm.antlers_visible,
+    ear_base_to_tip:   lm.ear_base_to_tip_estimated ?? ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP,
+    eye_to_eye:        ANATOMICAL_REFERENCES.EYE_TO_EYE,
+    ear_tip_to_tip:    ANATOMICAL_REFERENCES.EAR_TIP_TO_TIP_ALERT,
+    quality_notes:     lm.quality_notes,
+
+    // Top-tier reference pixel-space measurements (inch-equivalent)
+    eye_width:                lm.eye_width_px_inches,
+    eye_box_detected:         lm.eye_box?.visibility,
+    pedicle_spacing:          lm.pedicle_spacing_px_inches,
+    pedicle_visible:          lm.pedicle_spacing?.visibility,
+    eye_to_pedicle_distance:  lm.eye_to_pedicle_px_inches,
+    skull_forehead_width:     lm.skull_forehead_width_px_inches,
+    skull_width_visible:      lm.skull_width?.visibility,
+
+    // Secondary reference sizes
+    nose_bridge_length:       lm.nose_bridge_px_inches,
+    muzzle_width:             lm.muzzle_width_px_inches,
+    ear_base_spacing:         lm.ear_base_spacing_px_inches,
   }
+}
+
+/**
+ * Extract per-reference quality/distortion data from a VisionOutput's landmarks
+ * for use by the ReferenceConsensus engine.
+ */
+export function visionOutputToReferenceQualityData(
+  output: VisionOutput
+): Partial<Record<import('./reference-consensus').ReferenceLabel, { quality: number; distortion: number }>> {
+  const lm = output.landmarks
+  const result: Partial<Record<import('./reference-consensus').ReferenceLabel, { quality: number; distortion: number }>> = {}
+
+  if (lm.eye_box?.visibility)      result.eye_box         = { quality: lm.eye_box.quality,         distortion: lm.eye_box.distortion }
+  if (lm.pedicle_spacing?.visibility) result.pedicle_spacing = { quality: lm.pedicle_spacing.quality, distortion: lm.pedicle_spacing.distortion }
+  if (lm.eye_to_pedicle?.visibility)  result.eye_to_pedicle  = { quality: lm.eye_to_pedicle.quality,  distortion: lm.eye_to_pedicle.distortion }
+  if (lm.skull_width?.visibility)     result.skull_width     = { quality: lm.skull_width.quality,     distortion: lm.skull_width.distortion }
+  if (lm.nose_bridge?.visibility)     result.nose_bridge     = { quality: lm.nose_bridge.quality,     distortion: lm.nose_bridge.distortion }
+  if (lm.muzzle_width?.visibility)    result.muzzle_width    = { quality: lm.muzzle_width.quality,    distortion: lm.muzzle_width.distortion }
+  if (lm.ear_base_spacing?.visibility) result.ear_base_spacing = { quality: lm.ear_base_spacing.quality, distortion: lm.ear_base_spacing.distortion }
+  if (lm.ear_base_to_tip?.visibility) result.ear_base_to_tip = { quality: lm.ear_base_to_tip.quality,  distortion: lm.ear_base_to_tip.distortion }
+
+  return result
 }

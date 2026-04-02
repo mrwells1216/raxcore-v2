@@ -6,6 +6,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   DurableJob,
   JobStageHistory,
@@ -29,7 +30,7 @@ import type {
  * Create a new durable job
  */
 export async function createJob(params: CreateJobParams): Promise<DurableJob> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase
     .from('durable_jobs')
@@ -72,7 +73,7 @@ export async function createJob(params: CreateJobParams): Promise<DurableJob> {
  * Create multiple jobs in a batch
  */
 export async function createJobBatch(jobs: CreateJobParams[]): Promise<DurableJob[]> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const rows = jobs.map(params => ({
     job_type: params.jobType,
@@ -112,7 +113,7 @@ export async function claimNextJob(
   jobTypes?: JobType[],
   lockDurationSeconds = 300
 ): Promise<ClaimedJob | null> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase.rpc('claim_next_job', {
     p_worker_id: workerId,
@@ -141,7 +142,7 @@ export async function completeJob(
   jobId: string,
   result?: JobResult
 ): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase.rpc('complete_job', {
     p_job_id: jobId,
@@ -159,7 +160,7 @@ export async function failJob(
   error: Error | JobResult['error'],
   retryDelaySeconds = 60
 ): Promise<boolean> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const errorSummary = error instanceof Error
     ? { code: 'EXECUTION_ERROR', message: error.message, stack: error.stack }
@@ -180,7 +181,7 @@ export async function failJob(
  * Cancel a job
  */
 export async function cancelJob(jobId: string): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('durable_jobs')
@@ -206,7 +207,7 @@ export async function updateJobProgress(
   jobId: string,
   progress: JobProgress
 ): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('durable_jobs')
@@ -230,7 +231,7 @@ export async function recordStageHistory(
   errorMessage?: string,
   metadata?: Record<string, unknown>
 ): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('job_stage_history')
@@ -456,7 +457,7 @@ export async function getJobStats(): Promise<JobStats> {
  * Recover stale jobs that timed out
  */
 export async function recoverStaleJobs(staleThresholdMinutes = 10): Promise<number> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase.rpc('recover_stale_jobs', {
     p_stale_threshold_minutes: staleThresholdMinutes,
@@ -471,7 +472,7 @@ export async function recoverStaleJobs(staleThresholdMinutes = 10): Promise<numb
  * Clean up old completed jobs
  */
 export async function cleanupOldJobs(retentionDays = 30): Promise<number> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { data, error } = await supabase.rpc('cleanup_old_jobs', {
     p_retention_days: retentionDays,
@@ -526,7 +527,7 @@ export async function updateScheduledJobAfterRun(
   definitionId: string,
   nextRunAt: Date
 ): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('scheduled_job_definitions')
@@ -547,7 +548,7 @@ export async function toggleScheduledJob(
   definitionId: string,
   isEnabled: boolean
 ): Promise<void> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const { error } = await supabase
     .from('scheduled_job_definitions')

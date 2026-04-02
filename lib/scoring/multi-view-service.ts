@@ -202,6 +202,9 @@ export async function saveMultiViewResult(
   result: MultiViewResult
 ): Promise<MultiViewSetWithDetails> {
   const supabase = await createClient()
+  
+  // Phase 52: Import supervision hook for conflict detection
+  const { onConflictDetected } = await import('@/lib/supervision/hooks')
 
   // 1. Create the mv_set record
   const { data: mvSet, error: setError } = await supabase
@@ -334,6 +337,41 @@ export async function saveMultiViewResult(
 
   if (solutionError) {
     console.error('[multi-view-service] Error creating mv_solution:', solutionError)
+  }
+
+  // Phase 52: Conflict Engine Hook
+  // Create supervision event if meaningful multi-view disagreement was detected
+  if (result.conflictAnalysis && input.predictionId) {
+    try {
+      const conflictSummary = result.conflictAnalysis.conflictSummary
+      
+      // Only create event if there's meaningful disagreement
+      if (conflictSummary.totalDisagreements > 0 && conflictSummary.highDisagreementFamilies.length > 0) {
+        await onConflictDetected({
+          predictionId: input.predictionId,
+          buckId: input.buckId,
+          disagreementScore: Math.min(1, conflictSummary.totalDisagreements / 5), // Normalize to 0-1
+          highDisagreementFamilies: conflictSummary.highDisagreementFamilies,
+          dominantViews: result.solution.chosenPrimaryViews.map((viewIdx) => ({
+            family: 'spread', // Would extract actual family per view
+            viewIndex: viewIdx,
+          })),
+          rejectedViews: result.solution.rejectedViews.map(rv => ({
+            imageIndex: rv.index,
+            reason: rv.reason,
+          })),
+          disagreementClassifications: result.conflictAnalysis.disagreementClassifications.map(dc => ({
+            family: dc.family,
+            primaryType: dc.primaryType,
+            explanation: dc.explanation,
+            reverseEngineeringRecommended: dc.reverseEngineeringRecommended,
+          })),
+        })
+      }
+    } catch (hookError) {
+      // Log but don't fail the main operation
+      console.error('[Phase 52] Conflict engine supervision hook failed:', hookError)
+    }
   }
 
   return {

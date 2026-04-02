@@ -21,8 +21,11 @@ import {
   scoreWithVision, 
   visionOutputToMeasurements, 
   visionOutputToLandmarks,
+  visionOutputToReferenceQualityData,
   type VisionScoringResult 
 } from './vision-scorer'
+// Phase 54: Weighted multi-reference consensus engine
+import { computeReferenceConsensus, consensusToErrorBands, type ReferenceConsensusOutput } from './reference-consensus'
 import { normalizeMeasurements, type NormalizationResult } from './normalization'
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
@@ -124,6 +127,10 @@ export interface ScoringOutput {
   phase42Metadata?: Phase42Metadata | null
   // Phase 49.5: Cross-view conflict analysis metadata
   phase495Metadata?: import('@/lib/types').Phase495Metadata | null
+  // Phase 54: Weighted multi-reference consensus
+  referenceConsensusResult?: ReferenceConsensusOutput | null
+  // Training correction layer — structured output for UI and logging
+  trainingCorrectionResult?: TrainingCorrectionResult | null
 }
 
 // Learning summary exposed to UI
@@ -135,6 +142,37 @@ export interface LearningSummary {
   confidenceImpact: number
   matchQuality: 'none' | 'weak' | 'moderate' | 'strong'
   notes: string[]
+}
+
+/**
+ * Structured output from the training correction layer.
+ * Surfaced in the score API response and displayed in the UI.
+ */
+export interface TrainingCorrectionResult {
+  /** Whether any correction was actually applied (vs. returned 0) */
+  correctionApplied: boolean
+  /** Signed gross correction in inches (positive = AI was under-estimating) */
+  correctionAmount: number
+  /** Which feature buckets contributed to this correction */
+  correctionSourcesUsed: string[]
+  /** Number of training examples that matched this scenario */
+  correctionSampleSize: number
+  /** Qualitative strength of the correction */
+  correctionStrength: 'none' | 'low' | 'medium' | 'high'
+  /** True when the final score was adjusted by the learning layer */
+  learningAdjusted: boolean
+  /** Human-readable summary of the historical pattern driving the correction */
+  historicalPatternSummary: string
+  /** Number of similar examples found (may be 0) */
+  similarExampleCount: number
+  /** The estimated systematic bias in the raw AI output before correction */
+  estimatedBiasBeforeCorrection: number
+  /** The final bias adjustment actually applied to gross score */
+  finalBiasAdjustment: number
+  /** Consistency score among contributing training examples (0–1) */
+  exampleConsistency: number
+  /** The average similarity of contributing examples (0–1) */
+  averageSimilarity: number
 }
 
 interface LearnedAdjustment {
@@ -537,49 +575,123 @@ function calculateErrorBands(predictedGross: number, confidence: number) {
 }
 
 function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibration, confidence: number): Measurements {
-  const seed = [input.state, input.rackType, input.sourceType || 'na', input.captureDevice || 'na', String(input.mainFramePoints || 0), String(input.images.length)].join('|')
-  const isTypical = input.rackType === 'typical'
-  const framePts = input.mainFramePoints || (isTypical ? 10 : 11)
-  const giantStateBoost = HIGH_OUTPUT_STATES.includes(input.state as typeof HIGH_OUTPUT_STATES[number]) ? 1.4 : 0
-  const lowStatePenalty = LOW_OUTPUT_STATES.includes(input.state as typeof LOW_OUTPUT_STATES[number]) ? -1 : 0
-  const imageBoost = Math.min(2.25, input.images.length * 0.45)
-  const mountBoost = input.sourceType === 'mounted_photo' || input.sourceType === 'european_mount' ? 1.1 : 0
-  const qualityBoost = confidence >= 75 ? 1.4 : confidence >= 55 ? 0.6 : -0.5
-  const frameBoost = framePts >= 12 ? 2.2 : framePts >= 10 ? 0.8 : -0.6
-  const context = stateCalibration.prior_adjustment + giantStateBoost + lowStatePenalty + imageBoost + mountBoost + qualityBoost + frameBoost
+  const angles = input.images.map(img => img.angleType)
+  const hasFront = angles.includes('front')
+  const hasLeft  = angles.includes('left')
+  const hasRight = angles.includes('right')
+  const hasBack  = angles.includes('back')
+  const sideCount = (hasLeft ? 1 : 0) + (hasRight ? 1 : 0)
+  const viewCount = (hasFront ? 1 : 0) + sideCount + (hasBack ? 1 : 0)
 
-  const insideSpread = seeded(`${seed}:spread`, 16.2, 22.8) + context * 0.28
-  const mainBeamLeft = seeded(`${seed}:mbl`, 21.8, 27.6) + context * 0.34
-  const mainBeamRight = seeded(`${seed}:mbr`, 21.7, 27.3) + context * 0.34
-  const g2Base = seeded(`${seed}:g2`, 8.4, 11.7) + context * 0.15
-  const g3Base = seeded(`${seed}:g3`, 7.2, 10.4) + context * 0.14
-  const g4Base = seeded(`${seed}:g4`, 4.3, 8.1) + context * 0.1
-  const abnormal = isTypical ? 0 : seeded(`${seed}:ab`, 6.0, 16.5) + Math.max(0, context * 0.25)
+  // Angle coverage fingerprint included in seed — ensures different angle combos
+  // yield different seeded base values even when all other inputs are identical.
+  const angleFp = `${hasFront?'F':''}${hasLeft?'L':''}${hasRight?'R':''}${hasBack?'B':''}`
+  const seed = [
+    input.state,
+    input.rackType,
+    input.sourceType || 'na',
+    input.captureDevice || 'na',
+    String(input.mainFramePoints || 0),
+    String(input.images.length),
+    angleFp,
+  ].join('|')
+
+  const isTypical = input.rackType === 'typical'
+  const framePts  = input.mainFramePoints || (isTypical ? 10 : 11)
+
+  // ── State modifier (weak — should not dominate) ──────────────────────────
+  const giantStateBoost = HIGH_OUTPUT_STATES.includes(input.state as typeof HIGH_OUTPUT_STATES[number]) ? 1.0 : 0
+  const lowStatePenalty = LOW_OUTPUT_STATES.includes(input.state as typeof LOW_OUTPUT_STATES[number]) ? -1.2 : 0
+
+  // ── Source-type baseline shift ────────────────────────────────────────────
+  // Mounted/euro = reliable geometry. Harvest photo = good. Trail cam = noisy.
+  const sourceShift =
+    input.sourceType === 'mounted_photo' || input.sourceType === 'european_mount' ? 2.5 :
+    input.sourceType === 'harvest_photo' ? 1.0 :
+    input.sourceType === 'live_deer'     ? 0.5 :
+    input.sourceType === 'trail_cam'     ? -1.5 :
+    0
+
+  // ── View coverage signal — this is the primary differentiator ────────────
+  // More views + front = more confident beam/tine estimates → higher baseline
+  const viewShift =
+    viewCount >= 3 && hasFront ? 3.5 :
+    viewCount >= 3             ? 2.5 :
+    viewCount === 2 && hasFront ? 2.0 :
+    viewCount === 2             ? 1.0 :
+    hasFront                    ? 0.5 :
+    -1.5   // side-only single image — most uncertain
+
+  // Bonus for true bilateral coverage (both sides) — enables beam comparison
+  const bilateralBonus = (hasLeft && hasRight) ? 1.2 : 0
+
+  // ── Frame point signal ────────────────────────────────────────────────────
+  const frameShift = framePts >= 14 ? 4.0 : framePts >= 12 ? 2.8 : framePts >= 10 ? 0.8 : -1.2
+
+  // ── Image count modifier (diminishing) ───────────────────────────────────
+  const imageShift = Math.min(1.8, input.images.length * 0.35)
+
+  // ── Final composite context ───────────────────────────────────────────────
+  // State is now a weak modifier (max ±1.2) rather than a dominant driver.
+  // View coverage, source type, and frame points carry the bulk of the signal.
+  const context = (
+    stateCalibration.prior_adjustment * 0.5
+    + giantStateBoost
+    + lowStatePenalty
+    + sourceShift
+    + viewShift
+    + bilateralBonus
+    + frameShift
+    + imageShift
+  )
+
+  // ── Measurement ranges widen based on view coverage ──────────────────────
+  // Tighter range when we have good coverage; wider when coverage is weak.
+  const spreadRange  = viewCount >= 2 && hasFront ? [15.5, 24.5] : [14.0, 23.5]
+  const beamRange    = sideCount >= 1            ? [21.0, 29.0]  : [19.5, 27.5]
+  const g2Range      = hasFront || sideCount >= 1 ? [8.0, 12.5]  : [7.5, 11.5]
+  const g3Range      = hasFront || sideCount >= 1 ? [6.5, 11.0]  : [6.0, 10.5]
+  const g4Range      = sideCount >= 1            ? [4.0, 9.0]   : [3.5, 8.5]
+
+  const insideSpread = seeded(`${seed}:spread`, spreadRange[0], spreadRange[1]) + context * 0.32
+  const mainBeamLeft = seeded(`${seed}:mbl`,    beamRange[0],   beamRange[1])   + context * 0.38
+  const mainBeamRight= seeded(`${seed}:mbr`,    beamRange[0]-0.2, beamRange[1]-0.3) + context * 0.38
+  const g2Base       = seeded(`${seed}:g2`,     g2Range[0],     g2Range[1])     + context * 0.18
+  const g3Base       = seeded(`${seed}:g3`,     g3Range[0],     g3Range[1])     + context * 0.16
+  const g4Base       = seeded(`${seed}:g4`,     g4Range[0],     g4Range[1])     + context * 0.12
+  const abnormal     = isTypical ? 0 : seeded(`${seed}:ab`, 5.0, 18.0) + Math.max(0, context * 0.28)
+
+  // Mass (circumferences) — driven by mass cue from source type
+  const massShift = sourceShift * 0.06
+  const h1 = seeded(`${seed}:h1l`, 3.9, 5.4) + context * 0.06 + massShift
+  const h2 = seeded(`${seed}:h2l`, 3.7, 5.1) + context * 0.06 + massShift
+  const h3 = seeded(`${seed}:h3l`, 3.5, 4.9) + context * 0.06 + massShift
+  const h4 = seeded(`${seed}:h4l`, 3.3, 4.7) + context * 0.06 + massShift
 
   return {
-    inside_spread: Number(insideSpread.toFixed(1)),
-    main_beam_left: Number(mainBeamLeft.toFixed(1)),
+    inside_spread:   Number(insideSpread.toFixed(1)),
+    main_beam_left:  Number(mainBeamLeft.toFixed(1)),
     main_beam_right: Number(mainBeamRight.toFixed(1)),
-    g1_left: Number(seeded(`${seed}:g1l`, 3.6, 5.8).toFixed(1)),
-    g1_right: Number(seeded(`${seed}:g1r`, 3.6, 5.8).toFixed(1)),
-    g2_left: Number(g2Base.toFixed(1)),
-    g2_right: Number((g2Base - seeded(`${seed}:g2d`, 0.0, 0.8)).toFixed(1)),
-    g3_left: Number(g3Base.toFixed(1)),
-    g3_right: Number((g3Base - seeded(`${seed}:g3d`, 0.0, 0.7)).toFixed(1)),
-    g4_left: Number(g4Base.toFixed(1)),
-    g4_right: Number((g4Base - seeded(`${seed}:g4d`, 0.0, 0.7)).toFixed(1)),
-    g5_left: framePts >= 12 ? Number(seeded(`${seed}:g5l`, 1.2, 4.1).toFixed(1)) : null,
-    g5_right: framePts >= 12 ? Number(seeded(`${seed}:g5r`, 1.2, 4.0).toFixed(1)) : null,
-    h1_left: Number((seeded(`${seed}:h1l`, 4.0, 5.2) + context * 0.05).toFixed(1)),
-    h1_right: Number((seeded(`${seed}:h1r`, 4.0, 5.2) + context * 0.05).toFixed(1)),
-    h2_left: Number((seeded(`${seed}:h2l`, 3.8, 5.0) + context * 0.05).toFixed(1)),
-    h2_right: Number((seeded(`${seed}:h2r`, 3.8, 5.0) + context * 0.05).toFixed(1)),
-    h3_left: Number((seeded(`${seed}:h3l`, 3.6, 4.8) + context * 0.05).toFixed(1)),
-    h3_right: Number((seeded(`${seed}:h3r`, 3.6, 4.8) + context * 0.05).toFixed(1)),
-    h4_left: Number((seeded(`${seed}:h4l`, 3.4, 4.6) + context * 0.05).toFixed(1)),
-    h4_right: Number((seeded(`${seed}:h4r`, 3.4, 4.6) + context * 0.05).toFixed(1)),
+    g1_left:         Number(seeded(`${seed}:g1l`, 3.4, 6.2).toFixed(1)),
+    g1_right:        Number(seeded(`${seed}:g1r`, 3.4, 6.2).toFixed(1)),
+    g2_left:         Number(g2Base.toFixed(1)),
+    g2_right:        Number((g2Base - seeded(`${seed}:g2d`, 0.0, 1.0)).toFixed(1)),
+    g3_left:         Number(g3Base.toFixed(1)),
+    g3_right:        Number((g3Base - seeded(`${seed}:g3d`, 0.0, 0.9)).toFixed(1)),
+    g4_left:         Number(g4Base.toFixed(1)),
+    g4_right:        Number((g4Base - seeded(`${seed}:g4d`, 0.0, 0.9)).toFixed(1)),
+    g5_left:         framePts >= 12 ? Number(seeded(`${seed}:g5l`, 1.0, 4.5).toFixed(1)) : null,
+    g5_right:        framePts >= 12 ? Number(seeded(`${seed}:g5r`, 1.0, 4.4).toFixed(1)) : null,
+    h1_left:         Number(h1.toFixed(1)),
+    h1_right:        Number((h1 - seeded(`${seed}:h1d`, 0, 0.3)).toFixed(1)),
+    h2_left:         Number(h2.toFixed(1)),
+    h2_right:        Number((h2 - seeded(`${seed}:h2d`, 0, 0.3)).toFixed(1)),
+    h3_left:         Number(h3.toFixed(1)),
+    h3_right:        Number((h3 - seeded(`${seed}:h3d`, 0, 0.3)).toFixed(1)),
+    h4_left:         Number(h4.toFixed(1)),
+    h4_right:        Number((h4 - seeded(`${seed}:h4d`, 0, 0.3)).toFixed(1)),
     abnormal_points: Number(abnormal.toFixed(1)),
-    deductions: Number(seeded(`${seed}:ded`, 1.8, 5.2).toFixed(1)),
+    deductions:      Number(seeded(`${seed}:ded`, 1.5, 6.5).toFixed(1)),
   }
 }
 
@@ -812,6 +924,18 @@ async function buildVisionScoringOutput(
   
   // Phase 42d: Apply geometry refinements if needed (only for critical issues with weak reference)
   const geometryRefinedMeasurements = geometryResult.refinedMeasurements
+
+  // Phase 54: Weighted multi-reference consensus
+  const referenceQualityData = visionOutputToReferenceQualityData(visionOutput)
+  const referenceConsensusResult = computeReferenceConsensus({
+    visionGross:            visionOutput.gross_score,
+    visionConfidencePercent: visionOutput.confidence_percent,
+    landmarks:              rawLandmarks,
+    angleTypes:             angles,
+    earsFullyVisible:       input.earsFullyVisible,
+    referenceQualityData,
+    measurements:           consistentMeasurements,
+  })
 
   // STAGE 4: Confidence recalibration based on all factors
   // Phase 42: Include geometry consistency adjustment in confidence
@@ -1063,8 +1187,14 @@ async function buildVisionScoringOutput(
     mainFramePoints: input.mainFramePoints,
   })
 
-  // Use calibrated confidence for error bands
-  const { low, high } = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
+  // Phase 54: Use reference consensus for error bands instead of a single confidence value.
+  // The consensus engine already ran above; here we derive the final band from it.
+  // Blend: use the consensus-derived band as the base, then cap it via calibrated confidence.
+  const consensusBands = consensusToErrorBands(referenceConsensusResult)
+  // Also compute the legacy band so we can take the tighter of the two for conservative estimates
+  const legacyBands = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
+  const low  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
+  const high = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
 
   // Build confidence/trust metadata
   const confidenceTrustMetadata: ConfidenceTrustMetadata = {
@@ -1141,15 +1271,56 @@ async function buildVisionScoringOutput(
     explanations.push(`Self-check: ${selfCheckResult.overallStability} (${selfCheckResult.stabilityScore}% stability).`)
   }
 
+  // Phase 54: Inject reference consensus explanation lines
+  if (referenceConsensusResult.explanation.length > 0) {
+    explanations.push(...referenceConsensusResult.explanation)
+  }
+
   // Build scaling references
   const scalingReferencesUsed: string[] = [...visionOutput.anatomical_references_used]
   if (input.mainFramePoints) {
     scalingReferencesUsed.push(`User-provided frame hint (${input.mainFramePoints}-point)`)
   }
+  // Phase 54: Add dominant reference labels from consensus
+  if (referenceConsensusResult.dominantReferences.length > 0) {
+    scalingReferencesUsed.push(
+      `Consensus: ${referenceConsensusResult.dominantReferences.map(r => r.replace(/_/g, ' ')).join(', ')}`
+    )
+  }
   scalingReferencesUsed.push(`State calibration (${input.state})`)
 
   // Convert to simple learning summary for backward compatibility
   const simpleSummary = toSimpleLearningSummary(learningResult.summary)
+
+  // Build TrainingCorrectionResult — structured output for UI and downstream logging
+  const _correctionApplied = Math.abs(scaledGrossCorrection) >= 0.25
+  const _lSummary = learningResult.summary
+  const _correctionSources: string[] = _lSummary.strongestMatchingFeatures.slice(0, 4)
+  const _biasDirection = scaledGrossCorrection > 0.25
+    ? 'under-estimated'
+    : scaledGrossCorrection < -0.25
+    ? 'over-estimated'
+    : 'no consistent bias detected'
+  const _patternNote = _correctionApplied
+    ? `AI ${_biasDirection} by ~${Math.abs(scaledGrossCorrection).toFixed(1)}" in ${_lSummary.highlySimilarExamplesUsed ?? _lSummary.verifiedExamplesConsidered ?? 0} similar historical examples`
+    : `${_lSummary.notes[0] ?? 'Insufficient matching examples for correction'}`
+
+  const trainingCorrectionResult: TrainingCorrectionResult = {
+    correctionApplied: _correctionApplied,
+    correctionAmount: Number(scaledGrossCorrection.toFixed(2)),
+    correctionSourcesUsed: _correctionSources,
+    correctionSampleSize: _lSummary.highlySimilarExamplesUsed ?? 0,
+    correctionStrength: _lSummary.correctionStrength ?? 'none',
+    learningAdjusted: _correctionApplied,
+    historicalPatternSummary: _patternNote,
+    similarExampleCount: _lSummary.verifiedExamplesConsidered ?? 0,
+    estimatedBiasBeforeCorrection: Number(learningResult.grossCorrection.toFixed(2)),
+    finalBiasAdjustment: Number(scaledGrossCorrection.toFixed(2)),
+    exampleConsistency: _lSummary.exampleConsistency ?? 0,
+    averageSimilarity: typeof (_lSummary as { avgSimilarity?: number }).avgSimilarity === 'number'
+      ? ((_lSummary as { avgSimilarity?: number }).avgSimilarity as number)
+      : 0,
+  }
 
   // Phase 41: Fire-and-forget segment audit log (PATCH E: clean typed deltas, no unsafe cast)
   logPredictionSegments({
@@ -1243,7 +1414,12 @@ async function buildVisionScoringOutput(
       phase42_version: '1.0.0',
       processed_at: new Date().toISOString(),
     },
+    // Phase 54: Weighted multi-reference consensus output
+    referenceConsensusResult,
+    // Training correction layer output
+    trainingCorrectionResult,
   }
+}
 
 
 /**
@@ -1257,9 +1433,17 @@ function buildHeuristicScoringOutput(
   startTime: number,
   fallbackReason: string
 ): ScoringOutput {
+  const angles   = input.images.map(img => img.angleType)
+  const hasFront = angles.includes('front')
+  const hasLeft  = angles.includes('left')
+  const hasRight = angles.includes('right')
+  const sideCount = (hasLeft ? 1 : 0) + (hasRight ? 1 : 0)
+  const viewCount = (hasFront ? 1 : 0) + sideCount + (angles.includes('back') ? 1 : 0)
+  const hasMultiView = viewCount >= 2
+
   const landmarks: LandmarksDetected = {
-    ears_visible: input.earsFullyVisible ?? true,
-    eyes_visible: true,
+    ears_visible: input.earsFullyVisible ?? false,
+    eyes_visible: hasFront,         // front angle gives eye reference
     antlers_visible: true,
     ear_base_to_tip: ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP,
     eye_to_eye: ANATOMICAL_REFERENCES.EYE_TO_EYE,
@@ -1276,24 +1460,75 @@ function buildHeuristicScoringOutput(
     input.captureDevice,
   )
 
-  // Reduce confidence for heuristic method
-  const confidencePercent = Math.min(85, Math.round(baseConfidence * 0.85 + learned.confidenceBoost))
+  // Reduce confidence for heuristic method — multi-view gets a smaller penalty
+  // than single-view because it has more signal to work with.
+  const heuristicPenalty = hasMultiView ? 0.88 : 0.78
+  const confidencePercent = Math.min(82, Math.round(baseConfidence * heuristicPenalty + learned.confidenceBoost))
   explanations.unshift('Using heuristic estimation (vision analysis unavailable).')
+  if (hasMultiView) {
+    explanations.push(`Multi-view coverage (${viewCount} angles) improves fallback estimate.`)
+  } else {
+    explanations.push('Limited to single-view input — higher uncertainty applied.')
+  }
   explanations.push(...learned.notes)
 
   const measurements = generateMeasurements(input, stateCalibration, confidencePercent)
   let { gross, net } = calculateScores(measurements)
 
   gross = Number((gross + learned.grossBias).toFixed(1))
-  net = Number((net + learned.netBias).toFixed(1))
+  net   = Number((net   + learned.netBias).toFixed(1))
 
-  const { low, high } = calculateErrorBands(gross, confidencePercent)
+  // View-coverage-aware error bands:
+  // Good multi-view coverage → tighter band even in fallback.
+  // Single weak image → wide band to communicate real uncertainty.
+  const viewBandFactor =
+    viewCount >= 3 && hasFront ? 1.0 :
+    viewCount >= 2             ? 1.15 :
+    hasFront                   ? 1.25 :
+    1.40  // side-only or unknown angle single image
+  const { low: baseLow, high: baseHigh } = calculateErrorBands(gross, confidencePercent)
+  const bandMid = (baseLow + baseHigh) / 2
+  const halfBand = ((baseHigh - baseLow) / 2) * viewBandFactor
+  const low  = Math.max(0, bandMid - halfBand)
+  const high = bandMid + halfBand
+
+  // ── Dev log — one structured line per fallback run ────────────────────────
+  if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
+    console.log('[fallback] heuristic scoring', {
+      mode: 'fallback',
+      reason: fallbackReason,
+      state: input.state,
+      rackType: input.rackType,
+      sourceType: input.sourceType,
+      captureDevice: input.captureDevice,
+      imageCount: input.images.length,
+      earsVisible: input.earsFullyVisible,
+      mainFramePoints: input.mainFramePoints,
+      viewCoverage: { hasFront, hasLeft, hasRight, viewCount },
+      angleDiversity: Number(angleDiversity.toFixed(2)),
+      stateAdjustment: stateCalibration.prior_adjustment,
+      baselineChosen: `state=${input.state} source=${input.sourceType || 'na'} views=${viewCount}`,
+      adjustmentsApplied: {
+        heuristicPenalty,
+        learnedGrossBias: learned.grossBias,
+        learnedNetBias: learned.netBias,
+        learnedConfidenceBoost: learned.confidenceBoost,
+        viewBandFactor,
+      },
+      finalGross: gross,
+      finalNet: net,
+      confidencePercent,
+      errorBand: { low: Number(low.toFixed(1)), high: Number(high.toFixed(1)) },
+      confidenceReason: confidencePercent >= 65 ? 'medium' : 'low',
+    })
+  }
 
   const scalingReferencesUsed: string[] = []
   if (landmarks.ears_visible) scalingReferencesUsed.push(`Ear base-to-tip (${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}" reference)`)
   if (landmarks.eyes_visible) scalingReferencesUsed.push(`Eye-to-eye distance (${ANATOMICAL_REFERENCES.EYE_TO_EYE}" reference)`)
   if (input.mainFramePoints) scalingReferencesUsed.push(`Main frame hint (${input.mainFramePoints}-point frame)`)
   if (input.captureDevice) scalingReferencesUsed.push(`Capture context (${String(input.captureDevice).replaceAll('_', ' ')})`)
+  scalingReferencesUsed.push(`View coverage (${viewCount} angle${viewCount !== 1 ? 's' : ''}: ${angles.join(', ')})`)
   scalingReferencesUsed.push(`State guardrail (${input.state})`)
 
   return {
@@ -1314,10 +1549,9 @@ function buildHeuristicScoringOutput(
     visionModelUsed: null,
     scoringMethod: 'heuristic',
     visionConfidence: null,
-    // Phase 9 metadata (not applicable for heuristic)
     normalizationApplied: false,
     normalizationAdjustments: 0,
-    landmarkConsistencyScore: 0.5,
+    landmarkConsistencyScore: hasMultiView ? 0.6 : 0.4,
     confidenceReliability: confidencePercent >= 65 ? 'medium' : 'low',
   }
 }

@@ -105,6 +105,12 @@ export const SUPERVISION_TYPE_INFO: Record<SupervisionType, {
     priority: 'high',
     auto_confirm: false,
   },
+  abnormal_points_reported: {
+    label: 'Abnormal Points Reported',
+    description: 'User reported irregular/abnormal points on this buck',
+    priority: 'low',
+    auto_confirm: true,
+  },
 }
 
 // ============================================================================
@@ -222,6 +228,13 @@ export const FAILURE_CAUSE_INFO: Record<FailureCauseLabel, {
     category: 'geometry',
     severity: 0.7,
     mitigation_hint: 'Review structural hypothesis thresholds',
+  },
+  abnormal_points_unscored: {
+    label: 'Abnormal Points Unscored',
+    description: 'User reported abnormal/irregular points not captured in current scoring',
+    category: 'geometry',
+    severity: 0.4,
+    mitigation_hint: 'Future abnormal point scoring implementation needed',
   },
 }
 

@@ -5,6 +5,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 import type {
   UsageRecord,
   UsageRecordInput,
@@ -19,8 +20,8 @@ import type {
   HourlyUsageSummary,
   MonthlyUsageSummary,
   UsageReportSummary,
-  DEFAULT_PRODUCTION_CONFIG,
 } from '@/lib/types'
+import { DEFAULT_PRODUCTION_CONFIG } from '@/lib/types'
 
 // ============================================================================
 // CACHING
@@ -251,7 +252,8 @@ export function calculateCost(
 // ============================================================================
 
 export async function createUsageRecord(input: UsageRecordInput): Promise<UsageRecord | null> {
-  const supabase = await createClient()
+  // Use service role client for internal bookkeeping (bypasses RLS)
+  const supabase = await getServiceSupabase()
 
   const { data, error } = await supabase
     .from('usage_records')
@@ -282,15 +284,16 @@ export async function createUsageRecord(input: UsageRecordInput): Promise<UsageR
 export async function updateUsageRecord(
   requestId: string,
   updates: UsageRecordUpdate
-): Promise<UsageRecord | null> {
-  const supabase = await createClient()
-
+  ): Promise<UsageRecord | null> {
+  // Use service role client for internal bookkeeping
+  const supabase = await getServiceSupabase()
+  
   const { data, error } = await supabase
-    .from('usage_records')
-    .update(updates)
-    .eq('request_id', requestId)
-    .select()
-    .single()
+  .from('usage_records')
+  .update(updates)
+  .eq('request_id', requestId)
+  .select()
+  .maybeSingle() // Use maybeSingle to handle zero rows gracefully
 
   if (error) {
     console.error('Error updating usage record:', error)
@@ -384,7 +387,8 @@ async function getOrCreateRateLimitState(
   windowType: 'minute' | 'hour' | 'day' | 'month' | 'burst',
   burstSeconds = 10
 ): Promise<RateLimitState> {
-  const supabase = await createClient()
+  // Use service role client to bypass RLS for internal rate limit operations
+  const supabase = await getServiceSupabase()
   const { start, end } = getWindowBounds(windowType, burstSeconds)
 
   // Try to get existing state
@@ -439,7 +443,8 @@ async function incrementRateLimitState(
   costMc: number,
   burstSeconds = 10
 ): Promise<RateLimitState> {
-  const supabase = await createClient()
+  // Use service role client to bypass RLS for internal rate limit operations
+  const supabase = await getServiceSupabase()
   const { start } = getWindowBounds(windowType, burstSeconds)
 
   // Upsert with increment

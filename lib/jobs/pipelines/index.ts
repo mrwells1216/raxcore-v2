@@ -677,6 +677,15 @@ registerJobHandler('multi_view_stats_refresh', async () => {
 // INITIALIZATION
 // ============================================================================
 
+// ============================================================================
+// PHASE 53: TRAINING PACK GENERATION PIPELINES - REAL IMPLEMENTATION
+// ============================================================================
+
+import { registerTrainingPackPipelines } from './training-pack-generation'
+
+// Register all training pack generation pipelines
+registerTrainingPackPipelines()
+
 console.log('[Jobs] Pipeline registry initialized:')
 console.log('  - Scoring pipelines: STUB (scoring done via API)')
 console.log('  - Render pipelines: STUB (not implemented)')
@@ -684,4 +693,5 @@ console.log('  - Export pipelines: STUB (not implemented)')
 console.log('  - Sandbox evaluation: REAL')
 console.log('  - Reverse precision pass: REAL')
 console.log('  - Multi-view scoring: REAL')
+console.log('  - Training pack generation: REAL')
 console.log('  - Maintenance handlers: MIXED (some real, some stub)')

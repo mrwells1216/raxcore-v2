@@ -26,9 +26,11 @@ import { getScoringVariant } from './variant-registry'
 
 export interface CreateEvaluationRunParams {
   variantId: string
-  datasetType: 'export_pack' | 'benchmark_pack' | 'custom'
+  datasetType: 'export_pack' | 'benchmark_pack' | 'training_pack' | 'custom'
   exportPackId?: string
   benchmarkPackId?: string
+  trainingPackId?: string
+  trainingPackSubset?: 'full' | 'train' | 'validation' | 'test' | 'benchmark_holdout'
   config?: Record<string, unknown>
   notes?: string
   createdBy?: string
@@ -53,6 +55,9 @@ export async function createEvaluationRun(params: CreateEvaluationRunParams): Pr
   if (params.datasetType === 'benchmark_pack' && !params.benchmarkPackId) {
     throw new Error('benchmark_pack_id required for benchmark_pack dataset type')
   }
+  if (params.datasetType === 'training_pack' && !params.trainingPackId) {
+    throw new Error('training_pack_id required for training_pack dataset type')
+  }
 
   // Get example count from dataset
   let totalExamples = 0
@@ -68,6 +73,19 @@ export async function createEvaluationRun(params: CreateEvaluationRunParams): Pr
       .select('*', { count: 'exact', head: true })
       .eq('benchmark_pack_id', params.benchmarkPackId)
     totalExamples = count || 0
+  } else if (params.trainingPackId) {
+    // Count training pack items, optionally filtered by split
+    let query = supabase
+      .from('training_pack_items')
+      .select('*', { count: 'exact', head: true })
+      .eq('training_pack_id', params.trainingPackId)
+    
+    if (params.trainingPackSubset && params.trainingPackSubset !== 'full') {
+      query = query.eq('split_assignment', params.trainingPackSubset)
+    }
+    
+    const { count } = await query
+    totalExamples = count || 0
   }
 
   const { data, error } = await supabase
@@ -77,6 +95,8 @@ export async function createEvaluationRun(params: CreateEvaluationRunParams): Pr
       dataset_type: params.datasetType,
       export_pack_id: params.exportPackId || null,
       benchmark_pack_id: params.benchmarkPackId || null,
+      training_pack_id: params.trainingPackId || null,
+      training_pack_subset: params.trainingPackSubset || 'full',
       config: params.config || {},
       status: 'pending',
       total_examples: totalExamples,

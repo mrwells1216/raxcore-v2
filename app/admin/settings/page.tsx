@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getMyAdminNotificationPrefs } from '@/lib/notifications/service'
 import { AdminNotificationPrefs } from '@/components/admin/admin-notification-prefs'
 

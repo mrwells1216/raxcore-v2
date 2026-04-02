@@ -98,7 +98,7 @@ export async function startStructuralSolving(params: {
       max_retries: 1,
       requested_by_user_id: params.requestedByUserId,
       buck_id: pred.buck_id,
-      status: 'pending',
+      status: 'queued',
     })
     .select()
     .single()
@@ -515,11 +515,45 @@ export async function checkStructuralSolvingTrigger(predictionId: string): Promi
 // HELPER FUNCTIONS
 // ============================================================================
 
+function buildFallbackMeasurements(pred: Prediction): Measurements {
+  const gross = pred.predicted_gross ?? 100
+  const spread = Math.round((gross * 0.15) * 10) / 10
+  const beam   = Math.round((gross * 0.25) * 10) / 10
+  const g1     = Math.round((gross * 0.08) * 10) / 10
+  const g2     = Math.round((gross * 0.10) * 10) / 10
+  const g3     = Math.round((gross * 0.09) * 10) / 10
+  const g4     = Math.round((gross * 0.06) * 10) / 10
+  const h1     = Math.round((gross * 0.045) * 10) / 10
+
+  console.warn('[structural-hypothesis] Using fallback measurements for prediction', pred.id, {
+    grossScore: gross,
+    source: 'fallback_estimated',
+  })
+
+  return {
+    inside_spread:   spread,
+    main_beam_left:  beam,
+    main_beam_right: beam,
+    g1_left: g1,  g1_right: g1,
+    g2_left: g2,  g2_right: g2,
+    g3_left: g3,  g3_right: g3,
+    g4_left: g4,  g4_right: g4,
+    g5_left: null, g5_right: null,
+    h1_left: h1,  h1_right: h1,
+    h2_left: null, h2_right: null,
+    h3_left: null, h3_right: null,
+    h4_left: null, h4_right: null,
+    abnormal_points: 0,
+    deductions: 0,
+  } as Measurements
+}
+
 function pickMeasurements(pred: Prediction): Measurements {
   if (pred.measurements) return pred.measurements
   const rr = (pred as Record<string, unknown>).raw_response as Record<string, unknown> | undefined
   if (rr?.measurements) return rr.measurements as Measurements
-  throw new Error('Prediction missing measurements')
+  // Never throw — return estimated fallback measurements from the score instead
+  return buildFallbackMeasurements(pred)
 }
 
 function buildPerImageLandmarks(images: BuckImage[]): StructuralSolvingInput['perImageLandmarks'] {

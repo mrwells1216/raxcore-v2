@@ -5,12 +5,28 @@ export type ReverseRunStatus = 'queued' | 'running' | 'completed' | 'failed' | '
 
 export type HypothesisType =
   | 'noop'
-  | 'scale'
-  | 'spread'
-  | 'beam'
-  | 'tine'
-  | 'mass'
-  | 'deduction'
+  // Scale variants — named individually so UI can show distinct labels
+  | 'scale_up'
+  | 'scale_down'
+  | 'scale'          // kept for backwards compat with stored rows
+  // Measurement-specific adjustments
+  | 'spread_expand'
+  | 'spread_reduce'
+  | 'spread'         // kept for backwards compat
+  | 'beam_extend'
+  | 'beam_reduce'
+  | 'beam'           // kept for backwards compat
+  | 'tine_extend'
+  | 'tine_reduce'
+  | 'tine'           // kept for backwards compat
+  | 'mass_boost'
+  | 'mass_reduce'
+  | 'mass'           // kept for backwards compat
+  | 'symmetry_beam'
+  | 'symmetry_tine'
+  | 'deduction_reduce'
+  | 'deduction_increase'
+  | 'deduction'      // kept for backwards compat
   | 'swap_sides'
   | 'combo'
 

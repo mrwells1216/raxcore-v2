@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Target, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { describeHypothesis } from '@/lib/reverse-engineering/hypotheses'
+import type { HypothesisType, HypothesisParams } from '@/lib/reverse-engineering/types'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -17,14 +19,18 @@ interface PrecisionPassCardProps {
 
 export function PrecisionPassCard({ predictionId, className }: PrecisionPassCardProps) {
   const [runId, setRunId] = useState<string | null>(null)
+  const [initialStatus, setInitialStatus] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
+  // Stop polling once completed or failed — no need to keep hitting the API
+  const shouldPoll = runId && initialStatus !== 'completed' && initialStatus !== 'failed'
+
   const { data } = useSWR(
-    runId ? `/api/reverse/runs/${runId}` : null,
+    shouldPoll ? `/api/reverse/runs/${runId}` : runId ? `/api/reverse/runs/${runId}` : null,
     fetcher,
-    { refreshInterval: runId ? 1500 : 0 }
+    { refreshInterval: shouldPoll ? 1500 : 0, revalidateOnFocus: false }
   )
 
   const status = data?.run?.status as string | undefined
@@ -32,8 +38,9 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
   const decomposition = data?.decomposition as { causes?: Array<{ cause: string; weight: number }> } | undefined
   const candidates = (data?.candidates ?? []) as Array<{
     id: string
-    hypothesis_type: string
+    hypothesis_type: HypothesisType
     hypothesis_rank: number
+    params?: HypothesisParams
   }>
   const evaluations = (data?.evaluations ?? {}) as Record<string, {
     total_score: number
@@ -48,11 +55,19 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
     setIsStarting(true)
     setError(null)
     
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[v0] Starting precision pass for prediction:', predictionId)
+    }
+    
     try {
       const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, { 
         method: 'POST' 
       })
       const json = await res.json()
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[v0] Precision pass response:', { ok: res.ok, status: res.status, json })
+      }
       
       if (!res.ok) {
         throw new Error(json.error || 'Failed to start')
@@ -60,9 +75,13 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
       
       if (json.runId) {
         setRunId(json.runId)
+        // Seed initial status from route response — in dev, route returns 'completed' immediately
+        if (json.status) setInitialStatus(json.status)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start precision pass')
+      const errorMsg = e instanceof Error ? e.message : 'Failed to start precision pass'
+      console.error('[v0] Precision pass error:', errorMsg)
+      setError(errorMsg)
     } finally {
       setIsStarting(false)
     }
@@ -134,11 +153,14 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
                         ({Number(best.delta_gross) >= 0 ? '+' : ''}{String(best.delta_gross)}&quot;)
                       </span>
                     </div>
-                    {best.hypothesis_type !== 'noop' && (
-                      <div className="text-xs text-muted-foreground">
-                        Applied: {String(best.hypothesis_type).replace(/_/g, ' ')}
-                      </div>
-                    )}
+              {best.hypothesis_type !== 'noop' && (
+                <div className="text-xs text-muted-foreground">
+                  Applied: {describeHypothesis(
+                    best.hypothesis_type as HypothesisType,
+                    (best.params as HypothesisParams) ?? {}
+                  )}
+                </div>
+              )}
                   </div>
                 </div>
 
@@ -187,9 +209,9 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
                                   isBest ? 'bg-primary/10 border border-primary/20' : 'bg-muted/50'
                                 )}
                               >
-                                <span className="font-mono">
-                                  {c.hypothesis_type.replace(/_/g, ' ')}
-                                </span>
+              <span className="font-mono">
+                {describeHypothesis(c.hypothesis_type, c.params ?? {})}
+              </span>
                                 <span className="text-muted-foreground">
                                   {e?.total_score?.toFixed?.(1) ?? '—'} pts
                                 </span>

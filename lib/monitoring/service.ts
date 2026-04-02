@@ -1,5 +1,3 @@
-'use server'
-
 /**
  * Phase 39: Structured Runtime Event Logging + Observability
  *
@@ -11,6 +9,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { isOptionalTableError } from '@/lib/supabase/admin'
 
 // ============================================================
 // TYPES
@@ -155,7 +154,15 @@ export async function logEvent(input: RuntimeEventInput): Promise<void> {
       render_job_id: input.renderJobId ?? null,
       metadata: input.metadata ?? {},
     }
-    await supabase.from('runtime_events').insert(row)
+    const { error: evErr } = await supabase.from('runtime_events').insert(row)
+    if (evErr) {
+      // Silently skip when table doesn't exist yet (schema cache miss).
+      // All other errors are downgraded to a console.warn so monitoring
+      // never throws into the calling code path.
+      if (!isOptionalTableError(evErr)) {
+        console.warn('[monitoring] runtime_events insert failed:', evErr.message)
+      }
+    }
   } catch {
     // Monitoring must never break the app
   }
@@ -179,10 +186,13 @@ export function logEventFireForget(input: RuntimeEventInput): void {
  *   const stop = startTimer({ traceId, service: 'score', route: '/api/score', ... })
  *   const result = await doWork()
  *   stop({ status: 'success', buckId: result.id })
+ * 
+ * NOTE: This is NOT exported as a Server Action because it returns a closure.
+ * Import it directly for use in API routes / server components.
  */
 export function startTimer(
   base: Omit<RuntimeEventInput, 'status' | 'durationMs'>,
-) {
+): (overrides: Partial<RuntimeEventInput> & { status: EventStatus }) => void {
   const t0 = Date.now()
   return (overrides: Partial<RuntimeEventInput> & { status: EventStatus }) => {
     logEventFireForget({

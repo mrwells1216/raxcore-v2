@@ -139,6 +139,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Ensure full-page scroll works on iOS Safari */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

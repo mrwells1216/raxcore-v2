@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { AdminSidebar } from '@/components/admin/admin-sidebar'
 import { listJobs, getJobStats, getScheduledJobDefinitions } from '@/lib/jobs'
 import { JobsTable } from './jobs-table'

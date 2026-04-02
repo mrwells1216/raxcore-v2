@@ -129,23 +129,58 @@ function selectReferenceForFamily(
   // Sort by score descending
   imageScores.sort((a, b) => b.score - a.score)
   
-  // Determine source type based on available landmarks and signals
-  const hasStrongEar = earsFullyVisible === true || 
-    (fusedLandmarks.estimated_ear_base_to_tip !== null && 
-     fusedLandmarks.landmarks.left_ear_base && 
+  // Determine available reference signals
+  const hasEyeBox      = fusedLandmarks.estimated_eye_box_width !== null && fusedLandmarks.estimated_eye_box_height !== null
+  const hasPedicle     = fusedLandmarks.estimated_pedicle_spacing !== null
+  const hasEye2Pedicle = fusedLandmarks.estimated_eye_to_pedicle !== null
+  const hasSkullWidth  = fusedLandmarks.estimated_skull_width !== null
+  const hasNoseBridge  = fusedLandmarks.estimated_nose_bridge_length !== null
+  const hasMuzzle      = fusedLandmarks.estimated_muzzle_width !== null
+  const hasEarBaseSpacing = fusedLandmarks.estimated_ear_base_spacing !== null
+
+  const hasStrongEar = earsFullyVisible === true ||
+    (fusedLandmarks.estimated_ear_base_to_tip !== null &&
+     fusedLandmarks.landmarks.left_ear_base &&
      fusedLandmarks.landmarks.right_ear_base)
-  
-  const hasPartialEar = !hasStrongEar && 
+  const hasPartialEar = !hasStrongEar &&
     (fusedLandmarks.landmarks.left_ear_base || fusedLandmarks.landmarks.right_ear_base)
-  
-  const hasEye = fusedLandmarks.landmarks.left_eye_center && fusedLandmarks.landmarks.right_eye_center
-  
-  // Determine source type for primary
+  const hasEye = !!(fusedLandmarks.landmarks.left_eye_center && fusedLandmarks.landmarks.right_eye_center)
+
+  // Priority order for each family — top-tier first, legacy as fallback
+  const FAMILY_SOURCE_PRIORITY: Record<MeasurementFamily, ReferenceSourceSelection['source_type'][]> = {
+    spread:    ['pedicle_spacing', 'skull_width', 'eye_box', 'eye_to_pedicle', 'ear_base_spacing', 'combined_ear_eye', 'ear_strong', 'ear_partial', 'eye', 'weak_fallback'],
+    beam:      ['eye_to_pedicle', 'eye_box', 'pedicle_spacing', 'skull_width', 'combined_ear_eye', 'ear_strong', 'ear_partial', 'eye', 'weak_fallback'],
+    tine:      ['eye_to_pedicle', 'eye_box', 'nose_bridge', 'combined_ear_eye', 'ear_strong', 'eye', 'ear_partial', 'weak_fallback'],
+    mass:      ['skull_width', 'pedicle_spacing', 'ear_base_spacing', 'combined_ear_eye', 'ear_strong', 'eye', 'ear_partial', 'weak_fallback'],
+    asymmetry: ['eye_box', 'pedicle_spacing', 'skull_width', 'combined_ear_eye', 'ear_strong', 'eye', 'weak_fallback'],
+    deduction: ['eye_box', 'skull_width', 'combined_ear_eye', 'ear_strong', 'eye', 'ear_partial', 'weak_fallback'],
+  }
+
+  // Map signal booleans to source types
+  const signalAvailable: Record<ReferenceSourceSelection['source_type'], boolean> = {
+    eye_box:          hasEyeBox,
+    pedicle_spacing:  hasPedicle,
+    eye_to_pedicle:   hasEye2Pedicle,
+    skull_width:      hasSkullWidth,
+    nose_bridge:      hasNoseBridge,
+    muzzle_width:     hasMuzzle,
+    ear_base_spacing: hasEarBaseSpacing,
+    ear_strong:       !!hasStrongEar,
+    ear_partial:      !!hasPartialEar,
+    eye:              hasEye,
+    combined_ear_eye: !!(hasStrongEar && hasEye),
+    weak_fallback:    true,
+  }
+
+  // Select the highest-priority available source for this family
+  const priorityList = FAMILY_SOURCE_PRIORITY[family] ?? FAMILY_SOURCE_PRIORITY.beam
   let sourceType: ReferenceSourceSelection['source_type'] = 'weak_fallback'
-  if (hasStrongEar && hasEye) sourceType = 'combined_ear_eye'
-  else if (hasStrongEar) sourceType = 'ear_strong'
-  else if (hasPartialEar) sourceType = 'ear_partial'
-  else if (hasEye) sourceType = 'eye'
+  for (const candidate of priorityList) {
+    if (signalAvailable[candidate]) {
+      sourceType = candidate
+      break
+    }
+  }
   
   // Calculate scaling factor
   const scalingFactor = computeScalingFactor(sourceType, fusedLandmarks, visionEarLength, visionEyeDistance)
@@ -166,7 +201,7 @@ function selectReferenceForFamily(
   
   // Build backup selection (if different source type available)
   let backup: ReferenceSourceSelection | null = null
-  const backupSourceType = getBackupSourceType(sourceType, hasStrongEar, hasPartialEar, hasEye)
+  const backupSourceType = getBackupSourceType(sourceType, !!hasStrongEar, !!hasPartialEar, hasEye, signalAvailable)
   
   if (backupSourceType && backupSourceType !== sourceType) {
     const backupScaling = computeScalingFactor(backupSourceType, fusedLandmarks, visionEarLength, visionEyeDistance)
@@ -193,36 +228,59 @@ function computeScalingFactor(
   visionEyeDistance?: number
 ): number {
   switch (sourceType) {
+    // ── Top-tier
+    case 'eye_box': {
+      const boxW = fusedLandmarks.estimated_eye_box_width ?? ANATOMICAL_REFERENCES.EYE_BOX_WIDTH
+      const boxH = fusedLandmarks.estimated_eye_box_height ?? ANATOMICAL_REFERENCES.EYE_BOX_HEIGHT
+      return ((ANATOMICAL_REFERENCES.EYE_BOX_WIDTH / boxW) + (ANATOMICAL_REFERENCES.EYE_BOX_HEIGHT / boxH)) / 2
+    }
+    case 'pedicle_spacing': {
+      const pd = fusedLandmarks.estimated_pedicle_spacing ?? ANATOMICAL_REFERENCES.PEDICLE_SPACING
+      return ANATOMICAL_REFERENCES.PEDICLE_SPACING / pd
+    }
+    case 'eye_to_pedicle': {
+      const e2p = fusedLandmarks.estimated_eye_to_pedicle ?? ANATOMICAL_REFERENCES.EYE_TO_PEDICLE
+      return ANATOMICAL_REFERENCES.EYE_TO_PEDICLE / e2p
+    }
+    case 'skull_width': {
+      const sw = fusedLandmarks.estimated_skull_width ?? ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH
+      return ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH / sw
+    }
+    // ── Secondary
+    case 'nose_bridge': {
+      const nb = fusedLandmarks.estimated_nose_bridge_length ?? ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH
+      return ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH / nb
+    }
+    case 'muzzle_width': {
+      const mw = fusedLandmarks.estimated_muzzle_width ?? ANATOMICAL_REFERENCES.MUZZLE_WIDTH
+      return ANATOMICAL_REFERENCES.MUZZLE_WIDTH / mw
+    }
+    case 'ear_base_spacing': {
+      const ebs = fusedLandmarks.estimated_ear_base_spacing ?? ANATOMICAL_REFERENCES.EAR_BASE_SPACING
+      return ANATOMICAL_REFERENCES.EAR_BASE_SPACING / ebs
+    }
+    // ── Legacy / compat
     case 'ear_strong':
     case 'ear_partial': {
-      const earLength = visionEarLength || 
-        fusedLandmarks.estimated_ear_base_to_tip || 
+      const earLength = visionEarLength ||
+        fusedLandmarks.estimated_ear_base_to_tip ||
         ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
       return ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP / earLength
     }
-    
     case 'eye': {
       const eyeDistance = visionEyeDistance ||
         fusedLandmarks.estimated_eye_to_eye ||
         ANATOMICAL_REFERENCES.EYE_TO_EYE
       return ANATOMICAL_REFERENCES.EYE_TO_EYE / eyeDistance
     }
-    
     case 'combined_ear_eye': {
-      const earLength = visionEarLength || 
-        fusedLandmarks.estimated_ear_base_to_tip || 
-        ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
-      const eyeDistance = visionEyeDistance ||
-        fusedLandmarks.estimated_eye_to_eye ||
-        ANATOMICAL_REFERENCES.EYE_TO_EYE
-      
-      const earScale = ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP / earLength
-      const eyeScale = ANATOMICAL_REFERENCES.EYE_TO_EYE / eyeDistance
-      
-      // Weighted blend favoring ears (more reliable)
-      return earScale * 0.65 + eyeScale * 0.35
+      const earLength   = visionEarLength   || fusedLandmarks.estimated_ear_base_to_tip || ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP
+      const eyeDistance = visionEyeDistance || fusedLandmarks.estimated_eye_to_eye      || ANATOMICAL_REFERENCES.EYE_TO_EYE
+      const earScale    = ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP / earLength
+      const eyeScale    = ANATOMICAL_REFERENCES.EYE_TO_EYE      / eyeDistance
+      // Eye gets more weight now as a top-tier reference
+      return eyeScale * 0.55 + earScale * 0.45
     }
-    
     case 'weak_fallback':
     default:
       return 1.0
@@ -272,24 +330,28 @@ function getBackupSourceType(
   primary: ReferenceSourceSelection['source_type'],
   hasStrongEar: boolean,
   hasPartialEar: boolean,
-  hasEye: boolean
+  hasEye: boolean,
+  signalAvailable?: Record<ReferenceSourceSelection['source_type'], boolean>
 ): ReferenceSourceSelection['source_type'] | null {
-  // If primary is combined, backup could be ear-only or eye-only
-  if (primary === 'combined_ear_eye') {
-    return hasStrongEar ? 'ear_strong' : 'eye'
+  // For top-tier sources, fall back to the next best top-tier then legacy
+  const topTierFallbackChain: ReferenceSourceSelection['source_type'][] = [
+    'eye_box', 'pedicle_spacing', 'eye_to_pedicle', 'skull_width',
+    'combined_ear_eye', 'ear_strong', 'eye', 'ear_partial', 'ear_base_spacing',
+    'nose_bridge', 'muzzle_width',
+  ]
+  if (signalAvailable) {
+    for (const candidate of topTierFallbackChain) {
+      if (candidate !== primary && signalAvailable[candidate]) {
+        return candidate
+      }
+    }
+    return null
   }
-  
-  // If primary is ear, backup could be eye
-  if (primary === 'ear_strong' || primary === 'ear_partial') {
-    return hasEye ? 'eye' : null
-  }
-  
-  // If primary is eye, backup could be ear
-  if (primary === 'eye') {
-    return hasStrongEar ? 'ear_strong' : hasPartialEar ? 'ear_partial' : null
-  }
-  
-  // Weak fallback has no backup
+
+  // Legacy path (no signalAvailable map provided)
+  if (primary === 'combined_ear_eye') return hasStrongEar ? 'ear_strong' : 'eye'
+  if (primary === 'ear_strong' || primary === 'ear_partial') return hasEye ? 'eye' : null
+  if (primary === 'eye') return hasStrongEar ? 'ear_strong' : hasPartialEar ? 'ear_partial' : null
   return null
 }
 
