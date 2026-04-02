@@ -88,32 +88,34 @@ export interface VisionScoringInput {
   traceId?: string
 }
 
-// Zod schema for structured vision output
-const VisionMeasurementsSchema = z.object({
-  inside_spread: z.number().min(10).max(35).describe('Inside spread measurement in inches'),
-  main_beam_left: z.number().min(15).max(35).describe('Left main beam length in inches'),
-  main_beam_right: z.number().min(15).max(35).describe('Right main beam length in inches'),
-  g1_left: z.number().min(1).max(12).describe('Left G1 (brow tine) length in inches'),
-  g1_right: z.number().min(1).max(12).describe('Right G1 (brow tine) length in inches'),
-  g2_left: z.number().min(3).max(18).describe('Left G2 tine length in inches'),
-  g2_right: z.number().min(3).max(18).describe('Right G2 tine length in inches'),
-  g3_left: z.number().min(2).max(16).describe('Left G3 tine length in inches'),
-  g3_right: z.number().min(2).max(16).describe('Right G3 tine length in inches'),
-  g4_left: z.number().min(0).max(14).describe('Left G4 tine length in inches'),
-  g4_right: z.number().min(0).max(14).describe('Right G4 tine length in inches'),
-  g5_left: z.number().min(0).max(10).nullable().describe('Left G5 tine length if present'),
-  g5_right: z.number().min(0).max(10).nullable().describe('Right G5 tine length if present'),
-  h1_left: z.number().min(3).max(8).describe('Left H1 circumference in inches'),
-  h1_right: z.number().min(3).max(8).describe('Right H1 circumference in inches'),
-  h2_left: z.number().min(3).max(7).describe('Left H2 circumference in inches'),
-  h2_right: z.number().min(3).max(7).describe('Right H2 circumference in inches'),
-  h3_left: z.number().min(2.5).max(7).describe('Left H3 circumference in inches'),
-  h3_right: z.number().min(2.5).max(7).describe('Right H3 circumference in inches'),
-  h4_left: z.number().min(2).max(6).describe('Left H4 circumference in inches'),
-  h4_right: z.number().min(2).max(6).describe('Right H4 circumference in inches'),
-  abnormal_points: z.number().min(0).max(50).describe('Total abnormal points in inches'),
-  deductions: z.number().min(0).max(20).describe('Estimated deductions for asymmetry'),
-})
+// ============================================================================
+// RELAXED ZOD SCHEMAS WITH COERCION FOR VISION OUTPUT PARSING
+// These schemas use z.preprocess to handle string/null values from the model
+// ============================================================================
+
+// Helper: coerce string/null to number with default
+const coerceNumber = (defaultVal: number) =>
+  z.preprocess((val) => {
+    if (val === null || val === undefined) return defaultVal
+    if (typeof val === 'number') return val
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val)
+      return isNaN(parsed) ? defaultVal : parsed
+    }
+    return defaultVal
+  }, z.number())
+
+// Helper: optional coerced number (nullable)
+const coerceOptionalNumber = () =>
+  z.preprocess((val) => {
+    if (val === null || val === undefined) return null
+    if (typeof val === 'number') return val
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val)
+      return isNaN(parsed) ? null : parsed
+    }
+    return null
+  }, z.number().nullable())
 
 // Helper: coerce to boolean with default
 const coerceBool = (defaultVal: boolean) =>
@@ -124,6 +126,33 @@ const coerceBool = (defaultVal: boolean) =>
     return defaultVal
   }, z.boolean())
 
+// Zod schema for structured vision output - RELAXED with coercion
+const VisionMeasurementsSchema = z.object({
+  inside_spread: coerceNumber(17).describe('Inside spread measurement in inches'),
+  main_beam_left: coerceNumber(22).describe('Left main beam length in inches'),
+  main_beam_right: coerceNumber(22).describe('Right main beam length in inches'),
+  g1_left: coerceNumber(4).describe('Left G1 (brow tine) length in inches'),
+  g1_right: coerceNumber(4).describe('Right G1 (brow tine) length in inches'),
+  g2_left: coerceNumber(8).describe('Left G2 tine length in inches'),
+  g2_right: coerceNumber(8).describe('Right G2 tine length in inches'),
+  g3_left: coerceNumber(6).describe('Left G3 tine length in inches'),
+  g3_right: coerceNumber(6).describe('Right G3 tine length in inches'),
+  g4_left: coerceNumber(0).describe('Left G4 tine length in inches'),
+  g4_right: coerceNumber(0).describe('Right G4 tine length in inches'),
+  g5_left: coerceOptionalNumber().describe('Left G5 tine length if present'),
+  g5_right: coerceOptionalNumber().describe('Right G5 tine length if present'),
+  h1_left: coerceNumber(4.25).describe('Left H1 circumference in inches'),
+  h1_right: coerceNumber(4.25).describe('Right H1 circumference in inches'),
+  h2_left: coerceNumber(4).describe('Left H2 circumference in inches'),
+  h2_right: coerceNumber(4).describe('Right H2 circumference in inches'),
+  h3_left: coerceNumber(3.75).describe('Left H3 circumference in inches'),
+  h3_right: coerceNumber(3.75).describe('Right H3 circumference in inches'),
+  h4_left: coerceNumber(3.5).describe('Left H4 circumference in inches'),
+  h4_right: coerceNumber(3.5).describe('Right H4 circumference in inches'),
+  abnormal_points: coerceNumber(0).describe('Total abnormal points in inches'),
+  deductions: coerceNumber(3).describe('Estimated deductions for asymmetry'),
+})
+
 // Per-reference observation sub-schema - RELAXED with coercion
 const ReferenceObservationSchema = z.object({
   visibility: coerceBool(false).describe('Whether this reference is clearly visible'),
@@ -131,18 +160,32 @@ const ReferenceObservationSchema = z.object({
   distortion: coerceNumber(0.3).describe('Perspective/lens distortion (0–1)'),
 }).partial()
 
+// Helper: optional number (not null, just undefined if missing)
+const optionalCoercedNumber = () =>
+  z.preprocess((val) => {
+    if (val === null || val === undefined) return undefined
+    if (typeof val === 'number') return val
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val)
+      return isNaN(parsed) ? undefined : parsed
+    }
+    return undefined
+  }, z.number().optional())
+
 // Landmarks schema - RELAXED with coercion and defaults
+// Note: core fields are required, optional fields use .optional()
 const VisionLandmarksSchema = z.object({
+  // Required fields with coercion
   ears_visible: coerceBool(false).describe('Whether both ears are visible'),
   eyes_visible: coerceBool(false).describe('Whether both eyes are visible'),
   antlers_visible: coerceBool(true).describe('Whether both antlers are fully visible'),
-  ear_base_to_tip_estimated: coerceOptionalNumber().describe('Estimated ear base-to-tip length if visible'),
+  ear_base_to_tip_estimated: optionalCoercedNumber().describe('Estimated ear base-to-tip length if visible'),
   scaling_reference_used: z.preprocess(
     (val) => (typeof val === 'string' && val) ? val : 'unknown',
     z.string()
   ).describe('Primary anatomical reference used for scaling'),
   quality_notes: z.preprocess(
-    (val) => Array.isArray(val) ? val.filter((v) => typeof v === 'string') : [],
+    (val) => Array.isArray(val) ? val.filter((v): v is string => typeof v === 'string') : [],
     z.array(z.string())
   ).describe('Notes about image quality'),
 
@@ -157,14 +200,14 @@ const VisionLandmarksSchema = z.object({
   ear_base_to_tip: ReferenceObservationSchema.optional(),
 
   // Pixel-space measurements - optional with coercion
-  eye_width_px_inches: coerceOptionalNumber(),
-  pedicle_spacing_px_inches: coerceOptionalNumber(),
-  eye_to_pedicle_px_inches: coerceOptionalNumber(),
-  skull_forehead_width_px_inches: coerceOptionalNumber(),
-  nose_bridge_px_inches: coerceOptionalNumber(),
-  muzzle_width_px_inches: coerceOptionalNumber(),
-  ear_base_spacing_px_inches: coerceOptionalNumber(),
-}).partial()
+  eye_width_px_inches: optionalCoercedNumber(),
+  pedicle_spacing_px_inches: optionalCoercedNumber(),
+  eye_to_pedicle_px_inches: optionalCoercedNumber(),
+  skull_forehead_width_px_inches: optionalCoercedNumber(),
+  nose_bridge_px_inches: optionalCoercedNumber(),
+  muzzle_width_px_inches: optionalCoercedNumber(),
+  ear_base_spacing_px_inches: optionalCoercedNumber(),
+})
 
 // Helper: coerce angle enum values with fallback
 const coerceAngleEnum = () =>
@@ -203,11 +246,11 @@ const VisionOutputSchema = z.object({
     best_for_tines: coerceAngleEnum(),
   }).partial().default({}).describe('Which angles were most useful'),
   explanation: z.preprocess(
-    (val) => Array.isArray(val) ? val.filter((v) => typeof v === 'string') : [],
+    (val) => Array.isArray(val) ? val.filter((v): v is string => typeof v === 'string') : [],
     z.array(z.string())
   ).describe('Detailed explanation of estimates'),
   anatomical_references_used: z.preprocess(
-    (val) => Array.isArray(val) ? val.filter((v) => typeof v === 'string') : [],
+    (val) => Array.isArray(val) ? val.filter((v): v is string => typeof v === 'string') : [],
     z.array(z.string())
   ).describe('List of anatomical references used'),
 })
@@ -304,6 +347,137 @@ Be conservative — slightly under rather than over. Account for perspective
 distortion, occlusion, and image quality in your confidence level.
 
 Provide your analysis as structured JSON matching the required schema.`
+}
+
+/**
+ * Normalize a raw vision response to fix common parsing issues.
+ * This is a fallback layer that coerces types and fills in defaults
+ * when the model returns partial or malformed data.
+ */
+function normalizeVisionResponse(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') {
+    console.warn('[vision-scorer] normalizeVisionResponse: raw is not an object')
+    return raw
+  }
+
+  const obj = raw as Record<string, unknown>
+  
+  // Helper to coerce a value to number
+  const toNum = (val: unknown, defaultVal: number): number => {
+    if (typeof val === 'number' && !isNaN(val)) return val
+    if (typeof val === 'string') {
+      const parsed = parseFloat(val)
+      if (!isNaN(parsed)) return parsed
+    }
+    return defaultVal
+  }
+
+  // Helper to coerce to boolean
+  const toBool = (val: unknown, defaultVal: boolean): boolean => {
+    if (typeof val === 'boolean') return val
+    if (typeof val === 'string') return val.toLowerCase() === 'true'
+    return defaultVal
+  }
+
+  // Normalize measurements
+  const rawMeasurements = obj.measurements as Record<string, unknown> | undefined
+  const measurements = {
+    inside_spread: toNum(rawMeasurements?.inside_spread, 17),
+    main_beam_left: toNum(rawMeasurements?.main_beam_left, 22),
+    main_beam_right: toNum(rawMeasurements?.main_beam_right, 22),
+    g1_left: toNum(rawMeasurements?.g1_left, 4),
+    g1_right: toNum(rawMeasurements?.g1_right, 4),
+    g2_left: toNum(rawMeasurements?.g2_left, 8),
+    g2_right: toNum(rawMeasurements?.g2_right, 8),
+    g3_left: toNum(rawMeasurements?.g3_left, 6),
+    g3_right: toNum(rawMeasurements?.g3_right, 6),
+    g4_left: toNum(rawMeasurements?.g4_left, 0),
+    g4_right: toNum(rawMeasurements?.g4_right, 0),
+    g5_left: rawMeasurements?.g5_left != null ? toNum(rawMeasurements.g5_left, 0) : null,
+    g5_right: rawMeasurements?.g5_right != null ? toNum(rawMeasurements.g5_right, 0) : null,
+    h1_left: toNum(rawMeasurements?.h1_left, 4.25),
+    h1_right: toNum(rawMeasurements?.h1_right, 4.25),
+    h2_left: toNum(rawMeasurements?.h2_left, 4),
+    h2_right: toNum(rawMeasurements?.h2_right, 4),
+    h3_left: toNum(rawMeasurements?.h3_left, 3.75),
+    h3_right: toNum(rawMeasurements?.h3_right, 3.75),
+    h4_left: toNum(rawMeasurements?.h4_left, 3.5),
+    h4_right: toNum(rawMeasurements?.h4_right, 3.5),
+    abnormal_points: toNum(rawMeasurements?.abnormal_points, 0),
+    deductions: toNum(rawMeasurements?.deductions, 3),
+  }
+
+  // Normalize landmarks
+  const rawLandmarks = obj.landmarks as Record<string, unknown> | undefined
+  const landmarks = {
+    ears_visible: toBool(rawLandmarks?.ears_visible, false),
+    eyes_visible: toBool(rawLandmarks?.eyes_visible, false),
+    antlers_visible: toBool(rawLandmarks?.antlers_visible, true),
+    ear_base_to_tip_estimated: rawLandmarks?.ear_base_to_tip_estimated != null 
+      ? toNum(rawLandmarks.ear_base_to_tip_estimated, 7.5) 
+      : undefined,
+    scaling_reference_used: typeof rawLandmarks?.scaling_reference_used === 'string' 
+      ? rawLandmarks.scaling_reference_used 
+      : 'unknown',
+    quality_notes: Array.isArray(rawLandmarks?.quality_notes) 
+      ? rawLandmarks.quality_notes.filter((n): n is string => typeof n === 'string')
+      : [],
+    // Pass through optional reference observations
+    eye_box: rawLandmarks?.eye_box,
+    pedicle_spacing: rawLandmarks?.pedicle_spacing,
+    eye_to_pedicle: rawLandmarks?.eye_to_pedicle,
+    skull_width: rawLandmarks?.skull_width,
+    nose_bridge: rawLandmarks?.nose_bridge,
+    muzzle_width: rawLandmarks?.muzzle_width,
+    ear_base_spacing: rawLandmarks?.ear_base_spacing,
+    ear_base_to_tip: rawLandmarks?.ear_base_to_tip,
+    // Pixel measurements
+    eye_width_px_inches: rawLandmarks?.eye_width_px_inches,
+    pedicle_spacing_px_inches: rawLandmarks?.pedicle_spacing_px_inches,
+    eye_to_pedicle_px_inches: rawLandmarks?.eye_to_pedicle_px_inches,
+    skull_forehead_width_px_inches: rawLandmarks?.skull_forehead_width_px_inches,
+    nose_bridge_px_inches: rawLandmarks?.nose_bridge_px_inches,
+    muzzle_width_px_inches: rawLandmarks?.muzzle_width_px_inches,
+    ear_base_spacing_px_inches: rawLandmarks?.ear_base_spacing_px_inches,
+  }
+
+  // Normalize angle_quality
+  const rawAngleQuality = obj.angle_quality as Record<string, unknown> | undefined
+  const validAngles = ['front', 'left', 'right', 'back', 'other', 'none']
+  const toAngle = (val: unknown): string => {
+    if (typeof val === 'string' && validAngles.includes(val)) return val
+    return 'none'
+  }
+  const angle_quality = {
+    best_for_spread: toAngle(rawAngleQuality?.best_for_spread),
+    best_for_beams: toAngle(rawAngleQuality?.best_for_beams),
+    best_for_tines: toAngle(rawAngleQuality?.best_for_tines),
+  }
+
+  // Normalize rack_type_detected
+  let rack_type_detected = 'typical'
+  if (obj.rack_type_detected === 'non-typical') {
+    rack_type_detected = 'non-typical'
+  } else if (typeof obj.rack_type_detected === 'string' && obj.rack_type_detected.toLowerCase().includes('non')) {
+    rack_type_detected = 'non-typical'
+  }
+
+  return {
+    measurements,
+    landmarks,
+    gross_score: toNum(obj.gross_score, 120),
+    net_score: toNum(obj.net_score, 115),
+    confidence_percent: Math.min(95, Math.max(10, toNum(obj.confidence_percent, 50))),
+    main_frame_points: Math.min(20, Math.max(6, toNum(obj.main_frame_points, 10))),
+    rack_type_detected,
+    angle_quality,
+    explanation: Array.isArray(obj.explanation) 
+      ? obj.explanation.filter((e): e is string => typeof e === 'string')
+      : [],
+    anatomical_references_used: Array.isArray(obj.anatomical_references_used)
+      ? obj.anatomical_references_used.filter((r): r is string => typeof r === 'string')
+      : [],
+  }
 }
 
 /**
@@ -510,10 +684,11 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
   })
 
   // Phase 24: Execute vision call with runtime hardening
+  // Enhanced with detailed logging for debugging validation failures
   const visionCallResult = await executeWithRuntime(async () => {
     const prompt = buildVisionPrompt({ ...input, images: validImages })
 
-    const { object: visionOutput } = await generateObject({
+    const { object: rawOutput } = await generateObject({
       model: visionModel,
       schema: VisionOutputSchema,
       messages: [
@@ -529,6 +704,56 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       maxRetries: 1,
     })
 
+    // Log raw model response BEFORE any post-processing
+    console.log('[vision-scorer] raw model response received', {
+      provider: visionProvider,
+      model: visionModelName,
+      hasOutput: !!rawOutput,
+      outputType: typeof rawOutput,
+      hasGrossScore: rawOutput && typeof rawOutput === 'object' && 'gross_score' in rawOutput,
+      hasMeasurements: rawOutput && typeof rawOutput === 'object' && 'measurements' in rawOutput,
+      hasLandmarks: rawOutput && typeof rawOutput === 'object' && 'landmarks' in rawOutput,
+    })
+
+    // Attempt manual safeParse to get detailed validation errors
+    const parseResult = VisionOutputSchema.safeParse(rawOutput)
+    
+    if (!parseResult.success) {
+      // Log detailed Zod validation errors
+      console.error('[vision-scorer] Zod validation FAILED - detailed errors:', {
+        provider: visionProvider,
+        model: visionModelName,
+        errorCount: parseResult.error.errors.length,
+        errors: parseResult.error.errors.map(err => ({
+          path: err.path.join('.'),
+          code: err.code,
+          message: err.message,
+          received: err.code === 'invalid_type' ? (err as unknown as Record<string, unknown>).received : undefined,
+          expected: err.code === 'invalid_type' ? (err as unknown as Record<string, unknown>).expected : undefined,
+        })),
+        rawOutputSample: JSON.stringify(rawOutput).slice(0, 2000),
+      })
+      
+      // Attempt to normalize and coerce the raw output to fix common issues
+      const normalizedOutput = normalizeVisionResponse(rawOutput)
+      const retryParse = VisionOutputSchema.safeParse(normalizedOutput)
+      
+      if (retryParse.success) {
+        console.log('[vision-scorer] normalization rescued the response', {
+          provider: visionProvider,
+          model: visionModelName,
+        })
+        return retryParse.data
+      } else {
+        console.error('[vision-scorer] normalization could not rescue response', {
+          remainingErrors: retryParse.error.errors.length,
+          errors: retryParse.error.errors.slice(0, 5).map(e => `${e.path.join('.')}: ${e.message}`),
+        })
+        // Still throw to trigger retry/fallback
+        throw new Error(`Zod validation failed: ${parseResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ')}`)
+      }
+    }
+
     console.log('[vision-scorer] post-call success', {
       provider: visionProvider,
       model: visionModelName,
@@ -536,7 +761,7 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
       fallbackUsed: false,
     })
 
-    return visionOutput
+    return parseResult.data
   }, VISION_RUNTIME_CONFIG)
 
   // Collect any errors from the runtime
@@ -766,6 +991,7 @@ export function visionOutputToLandmarks(output: VisionOutput): LandmarksDetected
 /**
  * Extract per-reference quality/distortion data from a VisionOutput's landmarks
  * for use by the ReferenceConsensus engine.
+ * Since ReferenceObservationSchema is now partial, we provide defaults for quality/distortion.
  */
 export function visionOutputToReferenceQualityData(
   output: VisionOutput
@@ -773,14 +999,35 @@ export function visionOutputToReferenceQualityData(
   const lm = output.landmarks
   const result: Partial<Record<import('./reference-consensus').ReferenceLabel, { quality: number; distortion: number }>> = {}
 
-  if (lm.eye_box?.visibility)      result.eye_box         = { quality: lm.eye_box.quality,         distortion: lm.eye_box.distortion }
-  if (lm.pedicle_spacing?.visibility) result.pedicle_spacing = { quality: lm.pedicle_spacing.quality, distortion: lm.pedicle_spacing.distortion }
-  if (lm.eye_to_pedicle?.visibility)  result.eye_to_pedicle  = { quality: lm.eye_to_pedicle.quality,  distortion: lm.eye_to_pedicle.distortion }
-  if (lm.skull_width?.visibility)     result.skull_width     = { quality: lm.skull_width.quality,     distortion: lm.skull_width.distortion }
-  if (lm.nose_bridge?.visibility)     result.nose_bridge     = { quality: lm.nose_bridge.quality,     distortion: lm.nose_bridge.distortion }
-  if (lm.muzzle_width?.visibility)    result.muzzle_width    = { quality: lm.muzzle_width.quality,    distortion: lm.muzzle_width.distortion }
-  if (lm.ear_base_spacing?.visibility) result.ear_base_spacing = { quality: lm.ear_base_spacing.quality, distortion: lm.ear_base_spacing.distortion }
-  if (lm.ear_base_to_tip?.visibility) result.ear_base_to_tip = { quality: lm.ear_base_to_tip.quality,  distortion: lm.ear_base_to_tip.distortion }
+  // Helper to safely extract quality/distortion with defaults
+  const getQD = (ref: { visibility?: boolean; quality?: number; distortion?: number } | undefined) => {
+    if (!ref?.visibility) return null
+    return { quality: ref.quality ?? 0.5, distortion: ref.distortion ?? 0.3 }
+  }
+
+  const eye_box_qd = getQD(lm.eye_box)
+  if (eye_box_qd) result.eye_box = eye_box_qd
+  
+  const pedicle_qd = getQD(lm.pedicle_spacing)
+  if (pedicle_qd) result.pedicle_spacing = pedicle_qd
+  
+  const eye_to_pedicle_qd = getQD(lm.eye_to_pedicle)
+  if (eye_to_pedicle_qd) result.eye_to_pedicle = eye_to_pedicle_qd
+  
+  const skull_qd = getQD(lm.skull_width)
+  if (skull_qd) result.skull_width = skull_qd
+  
+  const nose_qd = getQD(lm.nose_bridge)
+  if (nose_qd) result.nose_bridge = nose_qd
+  
+  const muzzle_qd = getQD(lm.muzzle_width)
+  if (muzzle_qd) result.muzzle_width = muzzle_qd
+  
+  const ear_spacing_qd = getQD(lm.ear_base_spacing)
+  if (ear_spacing_qd) result.ear_base_spacing = ear_spacing_qd
+  
+  const ear_tip_qd = getQD(lm.ear_base_to_tip)
+  if (ear_tip_qd) result.ear_base_to_tip = ear_tip_qd
 
   return result
 }

@@ -1550,6 +1550,7 @@ export type VisionRuntimeErrorType =
   | 'quota_exceeded'
   | 'model_unavailable'
   | 'content_policy'
+  | 'config_error'
   | 'unknown'
 
 export type FallbackReason =
