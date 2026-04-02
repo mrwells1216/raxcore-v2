@@ -89,12 +89,18 @@ export function StructuralHypothesisCard({ predictionId }: StructuralHypothesisC
   )
 
   const run = runData?.run
+  const isUnauthorized = (runData as { error?: string })?.error === 'unauthorized'
   const isLoading = !runData && !error
   const hasRun = !!run
   const isRunning = run?.status === 'running' || run?.status === 'pending'
   const isCompleted = run?.status === 'completed'
   const hasFailed = run?.status === 'failed'
   const hasImprovement = (run?.gross_delta ?? 0) > 0.5 || (run?.net_delta ?? 0) > 0.5
+  
+  // Don't render anything if user is not authenticated - structural analysis requires login
+  if (isUnauthorized) {
+    return null
+  }
 
   const handleStartSolving = async () => {
     setIsStarting(true)

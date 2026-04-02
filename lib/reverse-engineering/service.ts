@@ -68,11 +68,29 @@ function buildFallbackMeasurements(pred: Prediction): Measurements {
 
 function pickMeasurements(pred: Prediction): Measurements {
   // 1. Prefer canonical measurements JSON on the prediction row
-  if (pred.measurements) return pred.measurements
+  if (pred.measurements) {
+    console.log('[precision-pass] Using canonical measurements from prediction.measurements')
+    return pred.measurements
+  }
+  
+  // Cast to unknown first to safely access dynamic properties
+  const predRecord = pred as unknown as Record<string, unknown>
+  
   // 2. Fall back to raw_response.measurements if vision stored them there
-  const rr = (pred as Record<string, unknown>).raw_response as Record<string, unknown> | undefined
-  if (rr?.measurements) return rr.measurements as Measurements
-  // 3. Last resort: build estimated fallback measurements from the score
+  const rr = predRecord.raw_response as Record<string, unknown> | undefined
+  if (rr?.measurements) {
+    console.log('[precision-pass] Using measurements from raw_response.measurements')
+    return rr.measurements as Measurements
+  }
+  
+  // 3. Check raw_ai_response.measurements (where score route actually stores them)
+  const rar = predRecord.raw_ai_response as Record<string, unknown> | undefined
+  if (rar?.measurements) {
+    console.log('[precision-pass] Using measurements from raw_ai_response.measurements')
+    return rar.measurements as Measurements
+  }
+  
+  // 4. Last resort: build estimated fallback measurements from the score
   //    Never throw — precision pass must always be able to run.
   return buildFallbackMeasurements(pred)
 }
