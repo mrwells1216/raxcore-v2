@@ -22,6 +22,7 @@ import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { BCScoreSheet } from './bc-score-sheet'
 import { ScoreSheetEditor } from './score-sheet-editor'
+import { AntlerImageCarousel } from './antler-image-carousel'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
@@ -209,8 +210,20 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     }
   }
 
+  // Extract image URLs - handle both string[] (API response) and BuckImage[] (type def)
+  const imageUrls: string[] = Array.isArray(result.images) 
+    ? result.images.map((img: string | { public_url?: string | null; image_url?: string }) => 
+        typeof img === 'string' ? img : (img.public_url ?? img.image_url ?? '')
+      ).filter(Boolean)
+    : []
+
   return (
     <div className="max-w-2xl mx-auto space-y-4">
+      {/* Antler Image Carousel - at the very top */}
+      {imageUrls.length > 0 && (
+        <AntlerImageCarousel images={imageUrls} />
+      )}
+
       {/* Hero Score Card */}
       <Card className="overflow-hidden border-2">
         <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-6">

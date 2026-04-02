@@ -1,0 +1,149 @@
+'use client'
+
+import { useState, useCallback, useEffect } from 'react'
+import Image from 'next/image'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  type CarouselApi,
+} from '@/components/ui/carousel'
+
+interface AntlerImageCarouselProps {
+  /** Array of image URLs to display */
+  images: string[]
+  /** Optional className for the container */
+  className?: string
+}
+
+/**
+ * A swipeable/spinnable image carousel for antler photos.
+ * - Single image: displays as a large standalone image (no carousel controls)
+ * - Multiple images: horizontal carousel with swipe, arrows, and position indicators
+ */
+export function AntlerImageCarousel({ images, className }: AntlerImageCarouselProps) {
+  const [api, setApi] = useState<CarouselApi>()
+  const [current, setCurrent] = useState(0)
+  const [count, setCount] = useState(0)
+
+  // Track carousel state
+  useEffect(() => {
+    if (!api) return
+
+    setCount(api.scrollSnapList().length)
+    setCurrent(api.selectedScrollSnap())
+
+    api.on('select', () => {
+      setCurrent(api.selectedScrollSnap())
+    })
+  }, [api])
+
+  const scrollPrev = useCallback(() => {
+    api?.scrollPrev()
+  }, [api])
+
+  const scrollNext = useCallback(() => {
+    api?.scrollNext()
+  }, [api])
+
+  // Don't render anything if no images
+  if (!images || images.length === 0) {
+    return null
+  }
+
+  // Single image - render without carousel controls
+  if (images.length === 1) {
+    return (
+      <div className={cn('w-full mb-4', className)}>
+        <div className="relative aspect-[4/3] w-full rounded-xl overflow-hidden bg-muted">
+          <Image
+            src={images[0]}
+            alt="Antler photo"
+            fill
+            className="object-contain"
+            sizes="(max-width: 768px) 100vw, 800px"
+            priority
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Multiple images - render carousel
+  return (
+    <div className={cn('w-full mb-4', className)}>
+      <Carousel
+        setApi={setApi}
+        opts={{
+          align: 'center',
+          loop: true,
+        }}
+        className="w-full"
+      >
+        <CarouselContent className="-ml-2 md:-ml-4">
+          {images.map((url, index) => (
+            <CarouselItem key={index} className="pl-2 md:pl-4 basis-full">
+              <div className="relative aspect-[4/3] w-full rounded-xl overflow-hidden bg-muted">
+                <Image
+                  src={url}
+                  alt={`Antler photo ${index + 1} of ${images.length}`}
+                  fill
+                  className="object-contain"
+                  sizes="(max-width: 768px) 100vw, 800px"
+                  priority={index === 0}
+                />
+              </div>
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+
+        {/* Desktop arrow controls - positioned inside the image area */}
+        <Button
+          variant="secondary"
+          size="icon"
+          className="absolute left-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
+          onClick={scrollPrev}
+          aria-label="Previous image"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
+          onClick={scrollNext}
+          aria-label="Next image"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+      </Carousel>
+
+      {/* Position indicator */}
+      <div className="flex items-center justify-center gap-2 mt-3">
+        {/* Dot indicators */}
+        <div className="flex gap-1.5">
+          {images.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => api?.scrollTo(index)}
+              className={cn(
+                'w-2 h-2 rounded-full transition-all duration-200',
+                current === index
+                  ? 'bg-primary w-4'
+                  : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
+              )}
+              aria-label={`Go to image ${index + 1}`}
+            />
+          ))}
+        </div>
+        {/* Numeric indicator */}
+        <span className="text-sm text-muted-foreground ml-2">
+          {current + 1} / {count}
+        </span>
+      </div>
+    </div>
+  )
+}
