@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress'
 import { ScoringForm } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
-import { AntlerImageCarousel } from './antler-image-carousel'
+import { EditableImageCarousel } from './editable-image-carousel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
@@ -264,9 +264,17 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
       {step === 1 && (
         <div className="space-y-4">
-          {/* Image carousel - reference while filling out form */}
+          {/* Editable image carousel - crop/rotate before scoring */}
           {gridImages.length > 0 && (
-            <AntlerImageCarousel images={gridImages.map(img => img.url)} />
+            <EditableImageCarousel 
+              images={gridImages} 
+              onImageEdit={(index, newUrl) => {
+                // Update the image URL in gridImages
+                setGridImages(prev => prev.map((img, i) => 
+                  i === index ? { ...img, url: newUrl, file: undefined } : img
+                ))
+              }}
+            />
           )}
           
           <Card>
