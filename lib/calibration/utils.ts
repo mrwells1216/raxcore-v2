@@ -59,10 +59,14 @@ let cachedActiveProfile: CalibrationProfile | null = null
 let cacheTimestamp = 0
 const CACHE_TTL_MS = 30000 // 30 seconds
 
+// Track if we've already warned about missing table
+let hasWarnedMissingTable = false
+
 /**
  * Get the currently active calibration profile.
  * Uses short-lived caching to reduce database calls during high-volume scoring.
  * Returns null if no active profile exists (defaults will be used).
+ * Gracefully handles missing calibration_profiles table (returns null, uses defaults).
  */
 export async function getActiveCalibrationProfile(): Promise<CalibrationProfile | null> {
   const now = Date.now()
@@ -81,9 +85,25 @@ export async function getActiveCalibrationProfile(): Promise<CalibrationProfile 
       .eq('is_active', true)
       .single()
     
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching active calibration profile:', error)
-      return cachedActiveProfile // Return stale cache on error
+    // Handle table not existing (42P01) or no rows (PGRST116) gracefully
+    if (error) {
+      const isTableMissing = error.code === '42P01' || error.message?.includes('does not exist')
+      const isNoRows = error.code === 'PGRST116'
+      
+      if (isTableMissing) {
+        if (!hasWarnedMissingTable) {
+          console.warn('[calibration] calibration_profiles table not found - using defaults')
+          hasWarnedMissingTable = true
+        }
+        cachedActiveProfile = null
+        cacheTimestamp = now
+        return null
+      }
+      
+      if (!isNoRows) {
+        console.error('Error fetching active calibration profile:', error)
+      }
+      return cachedActiveProfile // Return stale cache on other errors
     }
     
     cachedActiveProfile = data || null

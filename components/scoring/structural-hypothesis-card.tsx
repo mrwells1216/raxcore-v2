@@ -64,7 +64,18 @@ interface StructuralRunData {
   }>
 }
 
-const fetcher = (url: string) => fetch(url).then(res => res.json())
+// Fetcher that gracefully handles 401 (unauthenticated) responses
+const fetcher = async (url: string) => {
+  const res = await fetch(url)
+  // If unauthorized, return empty data instead of throwing
+  if (res.status === 401) {
+    return { run: null, error: 'unauthorized' }
+  }
+  if (!res.ok) {
+    return { run: null, error: res.statusText }
+  }
+  return res.json()
+}
 
 export function StructuralHypothesisCard({ predictionId }: StructuralHypothesisCardProps) {
   const [isOpen, setIsOpen] = useState(false)

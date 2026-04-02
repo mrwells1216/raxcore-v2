@@ -144,17 +144,7 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
       ? result.scaling_references_used.filter(Boolean)
       : []
 
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[v0] Normalized scoring result:', {
-      grossScore, netScore, rangeLow, rangeHigh, confidencePercent, confidenceLabel, isFallback,
-      rawPredictedGross: p?.predicted_gross,
-      rawEstimatedScore: result.estimatedScore,
-      rawScoreRange: result.scoreRange,
-      rawConfidence: p?.confidence_percent ?? result.confidencePercent,
-      hasExplanation: confidenceExplanation.length > 0,
-      hasScalingRefs: scalingReferencesUsed.length > 0,
-    })
-  }
+  // Debug logging removed - scoring pipeline is working correctly
 
   return {
     grossScore,
