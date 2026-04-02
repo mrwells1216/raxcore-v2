@@ -81,7 +81,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>State *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
                       <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="Where was this buck?" /></SelectTrigger>
                     </FormControl>
@@ -101,7 +101,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Rack Type *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
                       <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="Typical or non-typical?" /></SelectTrigger>
                     </FormControl>
@@ -122,7 +122,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Main Frame Points</FormLabel>
-                <Select onValueChange={(value) => field.onChange(Number(value))} defaultValue={field.value ? String(field.value) : undefined}>
+                <Select onValueChange={(value) => field.onChange(Number(value))} value={field.value ? String(field.value) : ""}>
                   <FormControl>
                     <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="8-point, 10-point, 12-point..." /></SelectTrigger>
                   </FormControl>
@@ -154,7 +154,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Photo Source</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
                       <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What are these photos of?" /></SelectTrigger>
                     </FormControl>
@@ -173,7 +173,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Capture Device</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
                       <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What took these photos?" /></SelectTrigger>
                     </FormControl>
@@ -225,7 +225,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Harvest Method</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
                       <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="How was it taken?" /></SelectTrigger>
                     </FormControl>
@@ -306,7 +306,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Irregular Points Present?</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
                         <FormControl>
                           <SelectTrigger className="min-h-[48px]">
                             <SelectValue placeholder="Yes / No / Unsure" />
@@ -330,7 +330,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Non-Typical Traits?</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
                         <FormControl>
                           <SelectTrigger className="min-h-[48px]">
                             <SelectValue placeholder="Yes / No / Unsure" />
