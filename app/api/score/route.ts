@@ -32,6 +32,7 @@ import {
 } from '@/lib/billing/service'
 import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 import { logEventFireForget } from '@/lib/monitoring/service'
+import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -410,7 +411,14 @@ export async function POST(request: Request) {
       rawResponse: {
         ...scoringResult,
         state,
-        rackType
+        rackType,
+        // B&C-style score sheet for measurement comparison
+        scoreSheet: buildScoreSheet(scoringResult.measurements, {
+          scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
+          rackType: rackType as 'typical' | 'non-typical',
+          confidenceNotes: scoringResult.confidenceExplanation ?? [],
+          mainFramePoints: scoringResult.mainFramePoints ?? 10,
+        }),
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null
     })
@@ -601,6 +609,13 @@ export async function POST(request: Request) {
       fallbackMetadata: scoringResult.fallbackMetadata || null,
       runtimeMetadata: scoringResult.runtimeMetadata || null,
       imageValidationSummary: scoringResult.imageValidationSummary || null,
+      // B&C-style score sheet for measurement comparison
+      scoreSheet: buildScoreSheet(scoringResult.measurements, {
+        scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
+        rackType: rackType as 'typical' | 'non-typical',
+        confidenceNotes: scoringResult.confidenceExplanation ?? [],
+        mainFramePoints: scoringResult.mainFramePoints ?? 10,
+      }),
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

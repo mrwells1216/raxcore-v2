@@ -20,7 +20,9 @@ import { BuckLocationLink } from '@/components/map/buck-location-link'
 import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
+import { BCScoreSheet } from './bc-score-sheet'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
+import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -64,6 +66,8 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
   confidencePercent?: number | null
   confidence?: 'low' | 'medium' | 'high' | string | null
   fallbackMetadata?: { summary?: string; fallbackStrategy?: string } | null
+  // B&C-style score sheet for measurement breakdown
+  scoreSheet?: ScoreSheet | null
 }
 
 interface ScoringResultsProps {
@@ -377,7 +381,15 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         />
       )}
 
-      {/* Measurements Breakdown */}
+      {/* B&C Score Sheet - Detailed Measurement Breakdown */}
+      {result.scoreSheet && (
+        <BCScoreSheet 
+          scoreSheet={result.scoreSheet} 
+          defaultExpanded={false}
+        />
+      )}
+
+      {/* Measurements Breakdown (Legacy) */}
       <Collapsible open={showMeasurements} onOpenChange={setShowMeasurements}>
         <CollapsibleContent>
           <Card>
