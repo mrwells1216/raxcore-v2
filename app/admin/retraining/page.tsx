@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * Phase 43: Admin — Retraining Readiness & Export Packs
  *

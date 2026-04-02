@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { AppHeader } from '@/components/app-header'
 import { getMyNotificationPrefs } from '@/lib/notifications/service'
 import { NotificationPrefsForm } from './notification-prefs-form'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * Phase 53: Admin - Training Pack Detail
  *

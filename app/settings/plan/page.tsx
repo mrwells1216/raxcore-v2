@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 export const metadata = { title: 'Plan & Usage | RaxCore' }
 
 export default function PlanPage() {

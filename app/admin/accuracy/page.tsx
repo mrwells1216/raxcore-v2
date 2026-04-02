@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Target, TrendingUp, CheckCircle2, BarChart3, Layers, Ruler, RefreshCw, Activity, Gauge } from 'lucide-react'
 import { getAccuracyMetrics, getAccuracyBreakdown, getErrorDistribution, getMeasurementAccuracyBreakdown, getSecondPassAccuracyMetrics, getRuntimeHealthMetrics, getConfidenceCalibrationMetrics, getConfidenceCalibrationPoints } from '@/lib/validation/service'
