@@ -33,12 +33,12 @@ import type {
   CorrectedMeasurements, 
   HumanReviewSheet,
   ReviewStatus,
-} from '@/lib/review/service'
+} from '@/lib/review/types'
 import {
   calculateGrossScore,
   calculateNetScore,
   calculateSymmetryDeductions,
-} from '@/lib/review/service'
+} from '@/lib/review/client'
 
 interface ScoreSheetEditorProps {
   /** Prediction ID for creating/loading review */
