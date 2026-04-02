@@ -21,6 +21,8 @@ import { cn } from '@/lib/utils'
 
 interface StructuralHypothesisCardProps {
   predictionId: string
+  /** Set to true to enable the structural hypothesis feature. Defaults to false to avoid 401 noise during dev. */
+  enabled?: boolean
 }
 
 interface StructuralRunData {
@@ -77,16 +79,21 @@ const fetcher = async (url: string) => {
   return res.json()
 }
 
-export function StructuralHypothesisCard({ predictionId }: StructuralHypothesisCardProps) {
+export function StructuralHypothesisCard({ predictionId, enabled = false }: StructuralHypothesisCardProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
 
-  // Check for existing structural runs
+  // Check for existing structural runs - only fetch if enabled to avoid 401 noise in dev
   const { data: runData, error, mutate } = useSWR<{ run: StructuralRunData | null }>(
-    `/api/structural/predictions/${predictionId}/solve`,
+    enabled ? `/api/structural/predictions/${predictionId}/solve` : null,
     fetcher,
     { revalidateOnFocus: false }
   )
+  
+  // Don't render if feature is disabled
+  if (!enabled) {
+    return null
+  }
 
   const run = runData?.run
   const isUnauthorized = (runData as { error?: string })?.error === 'unauthorized'

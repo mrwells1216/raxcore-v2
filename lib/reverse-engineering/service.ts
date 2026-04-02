@@ -66,10 +66,28 @@ function buildFallbackMeasurements(pred: Prediction): Measurements {
   } as Measurements
 }
 
+function logMeasurementFields(m: Measurements, source: string): void {
+  console.log(`[precision-pass] Measurement source: ${source}`)
+  console.log(`[precision-pass] Fields consumed:`)
+  console.log(`  - inside_spread: ${m.inside_spread ?? 'missing'}`)
+  console.log(`  - main_beam_left: ${m.main_beam_left ?? 'missing'}, main_beam_right: ${m.main_beam_right ?? 'missing'}`)
+  console.log(`  - G1: L=${m.g1_left ?? 'missing'} R=${m.g1_right ?? 'missing'}`)
+  console.log(`  - G2: L=${m.g2_left ?? 'missing'} R=${m.g2_right ?? 'missing'}`)
+  console.log(`  - G3: L=${m.g3_left ?? 'missing'} R=${m.g3_right ?? 'missing'}`)
+  console.log(`  - G4: L=${m.g4_left ?? 'missing'} R=${m.g4_right ?? 'missing'}`)
+  console.log(`  - G5: L=${m.g5_left ?? 'missing'} R=${m.g5_right ?? 'missing'}`)
+  console.log(`  - H1: L=${m.h1_left ?? 'missing'} R=${m.h1_right ?? 'missing'}`)
+  console.log(`  - H2: L=${m.h2_left ?? 'missing'} R=${m.h2_right ?? 'missing'}`)
+  console.log(`  - H3: L=${m.h3_left ?? 'missing'} R=${m.h3_right ?? 'missing'}`)
+  console.log(`  - H4: L=${m.h4_left ?? 'missing'} R=${m.h4_right ?? 'missing'}`)
+  console.log(`  - abnormal_points: ${m.abnormal_points ?? 'missing'}`)
+  console.log(`  - deductions: ${m.deductions ?? 'missing'}`)
+}
+
 function pickMeasurements(pred: Prediction): Measurements {
   // 1. Prefer canonical measurements JSON on the prediction row
   if (pred.measurements) {
-    console.log('[precision-pass] Using canonical measurements from prediction.measurements')
+    logMeasurementFields(pred.measurements, 'prediction.measurements (canonical)')
     return pred.measurements
   }
   
@@ -79,20 +97,24 @@ function pickMeasurements(pred: Prediction): Measurements {
   // 2. Fall back to raw_response.measurements if vision stored them there
   const rr = predRecord.raw_response as Record<string, unknown> | undefined
   if (rr?.measurements) {
-    console.log('[precision-pass] Using measurements from raw_response.measurements')
-    return rr.measurements as Measurements
+    const m = rr.measurements as Measurements
+    logMeasurementFields(m, 'raw_response.measurements')
+    return m
   }
   
   // 3. Check raw_ai_response.measurements (where score route actually stores them)
   const rar = predRecord.raw_ai_response as Record<string, unknown> | undefined
   if (rar?.measurements) {
-    console.log('[precision-pass] Using measurements from raw_ai_response.measurements')
-    return rar.measurements as Measurements
+    const m = rar.measurements as Measurements
+    logMeasurementFields(m, 'raw_ai_response.measurements (AI vision)')
+    return m
   }
   
   // 4. Last resort: build estimated fallback measurements from the score
   //    Never throw — precision pass must always be able to run.
-  return buildFallbackMeasurements(pred)
+  const fallback = buildFallbackMeasurements(pred)
+  logMeasurementFields(fallback, 'FALLBACK (proportion-derived, NOT real AI data)')
+  return fallback
 }
 
 // Check for development: NODE_ENV=development OR Vercel preview (not production deployment)
