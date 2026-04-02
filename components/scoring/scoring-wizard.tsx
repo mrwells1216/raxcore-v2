@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress'
 import { ScoringForm } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
+import { AntlerImageCarousel } from './antler-image-carousel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
@@ -262,21 +263,28 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       )}
 
       {step === 1 && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>Buck Details</CardTitle>
-            <CardDescription>
-              Provide information to improve accuracy
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScoringForm 
-              onSubmit={handleFormSubmit}
-              onBack={() => setStep(0)}
-              isSubmitting={isAnalyzing}
-            />
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          {/* Image carousel - reference while filling out form */}
+          {gridImages.length > 0 && (
+            <AntlerImageCarousel images={gridImages.map(img => img.url)} />
+          )}
+          
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>Buck Details</CardTitle>
+              <CardDescription>
+                Provide information to improve accuracy
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScoringForm 
+                onSubmit={handleFormSubmit}
+                onBack={() => setStep(0)}
+                isSubmitting={isAnalyzing}
+              />
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {step === 2 && (
