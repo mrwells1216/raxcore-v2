@@ -34,6 +34,8 @@ import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
+import { getActiveCalibrationProfile } from '@/lib/calibration/get-active-profile'
+import { applyCalibration } from '@/lib/calibration/apply-calibration'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -367,6 +369,35 @@ export async function POST(request: Request) {
         )
       }
     }
+
+    // Apply calibration from training data
+    const calibrationProfile = await getActiveCalibrationProfile()
+
+    const calibratedScore = applyCalibration(
+      {
+        predictedGross: scoringResult.predictedGross ?? null,
+        predictedNet: scoringResult.predictedNet ?? null,
+        confidencePercent: scoringResult.confidencePercent ?? null,
+        errorMargin: scoringResult.errorMargin ?? null,
+      },
+      calibrationProfile
+    )
+
+    scoringResult.predictedGross = calibratedScore.predictedGross ?? scoringResult.predictedGross
+    scoringResult.predictedNet = calibratedScore.predictedNet ?? scoringResult.predictedNet
+    scoringResult.confidencePercent = calibratedScore.confidencePercent ?? scoringResult.confidencePercent
+    scoringResult.errorMargin = calibratedScore.errorMargin ?? scoringResult.errorMargin
+
+    ;(scoringResult as any).calibrationApplied = calibratedScore.calibrationApplied
+    ;(scoringResult as any).calibrationMeta = calibratedScore.calibrationMeta
+
+    console.log('[score] calibration applied', {
+      applied: calibratedScore.calibrationApplied,
+      meta: calibratedScore.calibrationMeta,
+      gross: scoringResult.predictedGross,
+      net: scoringResult.predictedNet,
+      confidence: scoringResult.confidencePercent,
+    })
 
     // Get active model version
     const model = await getActiveModelVersion()

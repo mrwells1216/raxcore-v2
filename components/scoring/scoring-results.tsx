@@ -413,6 +413,18 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             </div>
           </div>
 
+          {/* Calibration status */}
+          {result?.prediction?.raw_ai_response?.calibrationApplied && (
+            <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50 dark:bg-neutral-900">
+              Calibrated using reviewed training data
+              {result?.prediction?.raw_ai_response?.calibrationMeta?.sampleCount ? (
+                <span className="ml-1 text-muted-foreground">
+                  ({result.prediction.raw_ai_response.calibrationMeta.sampleCount} samples)
+                </span>
+              ) : null}
+            </div>
+          )}
+
           {/* Fallback notice */}
           {normalized.isFallback && normalized.fallbackMessage && (
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
