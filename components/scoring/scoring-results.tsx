@@ -177,26 +177,54 @@ function extractFieldProvenance(result: any): FieldProvenanceMap | null {
   // Case 1: reviewed sheet already stored with provenance
   if (result?.review?.sheet_json?.provenance) {
     console.log('[provenance] extracted', {
+      source: 'review.sheet_json.provenance',
       hasReview: true,
-      hasPrediction: false,
+      hasPrediction: !!result?.prediction,
+      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
     })
     return result.review.sheet_json.provenance as FieldProvenanceMap
   }
 
-  // Case 2: prediction has provenance (future-proof)
+  // Case 2: prediction has direct provenance
   if (result?.prediction?.provenance) {
     console.log('[provenance] extracted', {
+      source: 'prediction.provenance',
       hasReview: false,
       hasPrediction: true,
+      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
     })
     return result.prediction.provenance as FieldProvenanceMap
   }
 
-  // Case 3: nothing available yet
+  // Case 3: provenance stored inside prediction.raw_ai_response
+  if (result?.prediction?.raw_ai_response?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'prediction.raw_ai_response.provenance',
+      hasReview: false,
+      hasPrediction: true,
+      hasRawAiResponse: true,
+    })
+    return result.prediction.raw_ai_response.provenance as FieldProvenanceMap
+  }
+
+  // Case 4: top-level fallback shape
+  if (result?.rawAiResponse?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'result.rawAiResponse.provenance',
+      hasReview: false,
+      hasPrediction: !!result?.prediction,
+      hasRawAiResponse: true,
+    })
+    return result.rawAiResponse.provenance as FieldProvenanceMap
+  }
+
   console.log('[provenance] extracted', {
+    source: 'none',
     hasReview: false,
-    hasPrediction: false,
+    hasPrediction: !!result?.prediction,
+    hasRawAiResponse: !!result?.prediction?.raw_ai_response || !!result?.rawAiResponse,
   })
+
   return null
 }
 

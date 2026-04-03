@@ -33,6 +33,7 @@ import {
 import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
+import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -370,6 +371,33 @@ export async function POST(request: Request) {
     // Get active model version
     const model = await getActiveModelVersion()
 
+    const fieldProvenance = buildFieldProvenanceFromMeasurements({
+      measurements: scoringResult.measurements,
+      source:
+        scoringResult.scoringMethod === 'vision'
+          ? 'ai_raw'
+          : 'fallback',
+      grossScore: scoringResult.predictedGross ?? null,
+      netScore: scoringResult.predictedNet ?? null,
+      confidence:
+        scoringResult.confidencePercent >= 75
+          ? 'high'
+          : scoringResult.confidencePercent >= 50
+            ? 'medium'
+            : 'low',
+      confidenceScore: scoringResult.confidencePercent ?? null,
+    })
+
+    console.log('[score] field provenance created', {
+      source:
+        scoringResult.scoringMethod === 'vision'
+          ? 'ai_raw'
+          : 'fallback',
+      hasMeasurements: !!scoringResult.measurements,
+      grossScore: scoringResult.predictedGross ?? null,
+      netScore: scoringResult.predictedNet ?? null,
+    })
+
     // Store prediction
     const prediction = await createPrediction({
       buckId: buck.id,
@@ -412,6 +440,7 @@ export async function POST(request: Request) {
         ...scoringResult,
         state,
         rackType,
+        provenance: fieldProvenance,
         // B&C-style score sheet for measurement comparison
         scoreSheet: buildScoreSheet(scoringResult.measurements, {
           scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
