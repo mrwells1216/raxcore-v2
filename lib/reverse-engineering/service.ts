@@ -14,6 +14,8 @@ import { evaluateHypothesis } from './evaluate'
 import { buildErrorDecomposition } from './error-decomposition'
 import { onReversePassComplete } from '@/lib/supervision/hooks'
 import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
+import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
+import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 
 /**
  * Build a fallback Measurements object estimated from the prediction score.
@@ -406,6 +408,7 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
     // Step 3: Evaluate candidates
     const evalRows: unknown[] = []
     let best: { candidateId: string; score: number; summary: Record<string, unknown> } | null = null
+    let bestMeasurements: Measurements | null = null
 
     for (const c of (insertedCandidates ?? []) as HypothesisCandidateRow[]) {
       const res = evaluateHypothesis({
@@ -435,6 +438,7 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
       })
 
       if (!best || res.totalScore > best.score) {
+        bestMeasurements = res.measurements
         best = {
           candidateId: c.id,
           score: res.totalScore,
@@ -458,10 +462,35 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
 
     if (!best) throw new Error('No best hypothesis found')
 
+    const precisionPassProvenance = bestMeasurements
+      ? buildFieldProvenanceFromMeasurements({
+          measurements: bestMeasurements,
+          source: 'precision_pass',
+          grossScore: Number(best.summary.predicted_gross ?? baseGross),
+          netScore: Number(best.summary.predicted_net ?? baseNet),
+          confidence: 'medium',
+          confidenceScore: null,
+        })
+      : null
+
+    const precisionPassScoreSheet = bestMeasurements
+      ? buildScoreSheet(bestMeasurements, {
+          scalingReference: 'precision_pass_refinement',
+          rackType: ((buck as Buck)?.rack_type as 'typical' | 'non-typical') ?? 'typical',
+          confidenceNotes: ['Generated from winning precision-pass hypothesis'],
+          mainFramePoints: (pred as Prediction)?.main_frame_points ?? 10,
+        })
+      : null
+
     // Step 4: Finalize
     await supabase.from('reverse_runs').update({
       best_hypothesis_id: best.candidateId,
-      best_summary: best.summary,
+      best_summary: {
+        ...best.summary,
+        measurements: bestMeasurements,
+        provenance: precisionPassProvenance,
+        scoreSheet: precisionPassScoreSheet,
+      },
       status: 'completed',
       completed_at: new Date().toISOString(),
     }).eq('id', reverseRunId)
