@@ -42,6 +42,11 @@ import {
   toScoreSheetPayload, 
   createReviewedPayload,
 } from '@/lib/scoring/adapters/to-score-sheet-payload'
+import { 
+  ProvenanceBadge, 
+  TotalsProvenanceBadge 
+} from './provenance-badge'
+import type { ProvenanceSource } from '@/lib/rules-engine'
 
 // Local type - no dependency on old review system
 type ReviewStatus = 'draft' | 'final'
@@ -68,7 +73,7 @@ interface ScoreSheetEditorProps {
 }
 
 /**
- * Editable number input with AI comparison
+ * Editable number input with AI comparison and provenance badge
  */
 function MeasurementInput({
   label,
@@ -76,19 +81,35 @@ function MeasurementInput({
   value,
   onChange,
   disabled,
+  provenance = 'ai_raw',
+  isFallbackSource = false,
 }: {
   label: string
   aiValue: number | null
   value: number | null
   onChange: (value: number | null) => void
   disabled?: boolean
+  provenance?: ProvenanceSource
+  isFallbackSource?: boolean
 }) {
   const hasChanged = value !== aiValue && value !== null && aiValue !== null
   const diff = (value ?? 0) - (aiValue ?? 0)
   
+  // Determine current provenance based on whether the value was edited
+  const currentProvenance: ProvenanceSource = hasChanged ? 'human_review' : (isFallbackSource ? 'fallback' : provenance)
+  const confidence = isFallbackSource ? 'low' : (hasChanged ? 'high' : 'medium')
+  
   return (
-    <div className="grid grid-cols-[1fr_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50 last:border-0">
+    <div className="grid grid-cols-[1fr_auto_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50 last:border-0">
       <Label className="text-sm font-medium">{label}</Label>
+      <ProvenanceBadge 
+        provenance={currentProvenance} 
+        confidence={confidence}
+        wasEdited={hasChanged}
+        originalValue={aiValue}
+        currentValue={value}
+        size="sm"
+      />
       <div className="text-sm text-muted-foreground text-right tabular-nums">
         {aiValue !== null ? aiValue.toFixed(2) : '—'}
       </div>
@@ -244,12 +265,40 @@ export function ScoreSheetEditor({
         netScore: aiNetScore,
       })
       
-      // Convert corrected measurements to canonical payload
+      // Convert corrected measurements to canonical payload with provenance
       const reviewedPayload = createReviewedPayload(
         measurements,
         correctedGross,
         correctedNet,
-        { scoringSystem: rackType === 'typical' ? 'boone_and_crockett_typical' : 'boone_and_crockett_non_typical' }
+        { 
+          scoringSystem: rackType === 'typical' ? 'boone_and_crockett_typical' : 'boone_and_crockett_non_typical',
+          aiMeasurements: {
+            inside_spread: aiScoreSheet.spread.inside.value,
+            main_beam_left: aiScoreSheet.left.main_beam.value,
+            main_beam_right: aiScoreSheet.right.main_beam.value,
+            g1_left: aiScoreSheet.left.g1.value,
+            g1_right: aiScoreSheet.right.g1.value,
+            g2_left: aiScoreSheet.left.g2.value,
+            g2_right: aiScoreSheet.right.g2.value,
+            g3_left: aiScoreSheet.left.g3.value,
+            g3_right: aiScoreSheet.right.g3.value,
+            g4_left: aiScoreSheet.left.g4.value,
+            g4_right: aiScoreSheet.right.g4.value,
+            g5_left: aiScoreSheet.left.g5.value,
+            g5_right: aiScoreSheet.right.g5.value,
+            h1_left: aiScoreSheet.left.h1.value,
+            h1_right: aiScoreSheet.right.h1.value,
+            h2_left: aiScoreSheet.left.h2.value,
+            h2_right: aiScoreSheet.right.h2.value,
+            h3_left: aiScoreSheet.left.h3.value,
+            h3_right: aiScoreSheet.right.h3.value,
+            h4_left: aiScoreSheet.left.h4.value,
+            h4_right: aiScoreSheet.right.h4.value,
+          },
+          aiGross: aiGrossScore,
+          aiNet: aiNetScore,
+          isFallback,
+        }
       )
       
       // Save via unified route
@@ -582,16 +631,30 @@ export function ScoreSheetEditor({
 
           <Separator />
 
-          {/* Score summary */}
+          {/* Score summary with provenance */}
           <div className="grid grid-cols-2 gap-4 p-3 bg-muted/30 rounded-lg">
             <div>
-              <div className="text-sm text-muted-foreground">AI Scores</div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                AI Scores
+                <ProvenanceBadge 
+                  provenance={isFallback ? 'fallback' : 'ai_raw'} 
+                  confidence={isFallback ? 'low' : 'medium'}
+                  size="sm"
+                />
+              </div>
               <div className="text-lg font-bold tabular-nums">
                 {aiGrossScore.toFixed(1)} gross / {aiNetScore.toFixed(1)} net
               </div>
             </div>
             <div>
-              <div className="text-sm text-muted-foreground">Corrected Scores</div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                Corrected Scores
+                <TotalsProvenanceBadge
+                  grossProvenance={isFallback ? 'fallback' : 'ai_raw'}
+                  netProvenance={isFallback ? 'fallback' : 'ai_raw'}
+                  hasHumanEdits={grossDiff !== 0 || netDiff !== 0}
+                />
+              </div>
               <div className="text-lg font-bold tabular-nums">
                 {correctedGross.toFixed(1)} gross / {correctedNet.toFixed(1)} net
               </div>

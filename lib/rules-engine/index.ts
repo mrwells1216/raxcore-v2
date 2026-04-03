@@ -37,6 +37,19 @@ export type {
   HypothesisMutationType,
   MeasurementPatch,
   SheetMutationCandidate,
+  // Provenance types
+  ProvenanceSource,
+  ConfidenceBucket,
+  EditStatus,
+  MeasuredField,
+  FieldProvenanceMap,
+} from './types'
+
+// Provenance utilities
+export {
+  createMeasuredField,
+  confidenceToBucket,
+  markFieldEdited,
 } from './types'
 
 // Computation functions

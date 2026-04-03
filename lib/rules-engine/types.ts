@@ -11,6 +11,94 @@ export type Side = 'left' | 'right'
 
 export type MeasurementSource = 'ai' | 'reviewed' | 'precision_pass' | 'manual'
 
+/**
+ * Provenance source - where a measurement value came from
+ */
+export type ProvenanceSource = 'ai_raw' | 'precision_pass' | 'fallback' | 'human_review'
+
+/**
+ * Confidence bucket for measurement reliability
+ */
+export type ConfidenceBucket = 'high' | 'medium' | 'low'
+
+/**
+ * Edit status for tracking changes
+ */
+export type EditStatus = 'unchanged' | 'adjusted' | 'overridden'
+
+/**
+ * A measured field with full provenance metadata.
+ * Used for traceability and trust in the scoring pipeline.
+ */
+export interface MeasuredField {
+  /** The measurement value in inches (null if not available) */
+  value: number | null
+  /** Where this value came from */
+  provenance: ProvenanceSource
+  /** Reliability bucket */
+  confidence?: ConfidenceBucket
+  /** Numeric confidence 0-1 if available */
+  confidenceScore?: number | null
+  /** Original AI value before any adjustments */
+  originalValue?: number | null
+  /** Whether this field was edited by a human */
+  wasEdited?: boolean
+  /** Edit status for UI display */
+  editStatus?: EditStatus
+}
+
+/**
+ * Helper to create a MeasuredField from a raw value
+ */
+export function createMeasuredField(
+  value: number | null,
+  provenance: ProvenanceSource,
+  options?: {
+    confidence?: ConfidenceBucket
+    confidenceScore?: number | null
+    originalValue?: number | null
+  }
+): MeasuredField {
+  return {
+    value,
+    provenance,
+    confidence: options?.confidence ?? (provenance === 'fallback' ? 'low' : 'medium'),
+    confidenceScore: options?.confidenceScore ?? null,
+    originalValue: options?.originalValue ?? value,
+    wasEdited: false,
+    editStatus: 'unchanged',
+  }
+}
+
+/**
+ * Convert numeric confidence (0-1) to bucket
+ */
+export function confidenceToBucket(score: number | null | undefined): ConfidenceBucket {
+  if (score === null || score === undefined) return 'medium'
+  if (score >= 0.8) return 'high'
+  if (score >= 0.5) return 'medium'
+  return 'low'
+}
+
+/**
+ * Mark a field as edited by human review
+ */
+export function markFieldEdited(
+  field: MeasuredField,
+  newValue: number | null
+): MeasuredField {
+  const wasChanged = field.originalValue !== newValue
+  return {
+    ...field,
+    value: newValue,
+    provenance: wasChanged ? 'human_review' : field.provenance,
+    wasEdited: wasChanged,
+    editStatus: wasChanged 
+      ? (field.provenance === 'ai_raw' ? 'overridden' : 'adjusted')
+      : 'unchanged',
+  }
+}
+
 export type ScoringSystem = 
   | 'boone_and_crockett_typical'
   | 'boone_and_crockett_non_typical'
@@ -152,6 +240,23 @@ export interface ScoreSheetLandmarks {
 // ============================================================================
 
 /**
+ * Per-field provenance metadata for auditing
+ */
+export interface FieldProvenanceMap {
+  insideSpread?: MeasuredField
+  leftMainBeam?: MeasuredField
+  rightMainBeam?: MeasuredField
+  leftTines?: Record<number, MeasuredField>
+  rightTines?: Record<number, MeasuredField>
+  leftMasses?: Record<number, MeasuredField>
+  rightMasses?: Record<number, MeasuredField>
+  abnormalPoints?: MeasuredField
+  deductions?: MeasuredField
+  grossScore?: MeasuredField
+  netScore?: MeasuredField
+}
+
+/**
  * The canonical score sheet payload - the single source of truth
  * for all scoring data in the system.
  * 
@@ -174,6 +279,15 @@ export interface ScoreSheetPayload {
   createdAt?: string
   /** Timestamp of last modification */
   updatedAt?: string
+  /** 
+   * Per-field provenance metadata for auditing.
+   * Tracks where each measurement came from and whether it was edited.
+   */
+  provenance?: FieldProvenanceMap | null
+  /**
+   * Whether any fields have been edited by a human reviewer
+   */
+  hasHumanEdits?: boolean
 }
 
 // ============================================================================
