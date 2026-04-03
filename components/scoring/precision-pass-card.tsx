@@ -64,17 +64,40 @@ export function PrecisionPassCard({
 
   useEffect(() => {
     if (!runId || !isComplete || !best || !onPrecisionPassComplete) return
+
+    const normalizedScoreSheet =
+      (best as any)?.scoreSheet ??
+      (best as any)?.score_sheet ??
+      null
+
+    const normalizedProvenance =
+      (best as any)?.provenance ??
+      (best as any)?.field_provenance ??
+      null
+
+    const gross =
+      typeof best.predicted_gross === 'number'
+        ? best.predicted_gross
+        : Number(best.predicted_gross ?? null)
+
+    const net =
+      typeof best.predicted_net === 'number'
+        ? best.predicted_net
+        : Number(best.predicted_net ?? null)
+
+    console.log('[precision-pass] normalized payload', {
+      runId,
+      hasScoreSheet: !!normalizedScoreSheet,
+      hasProvenance: !!normalizedProvenance,
+      gross,
+      net,
+    })
+
     onPrecisionPassComplete({
-      grossScore:
-        typeof best.predicted_gross === 'number'
-          ? best.predicted_gross
-          : Number(best.predicted_gross ?? null),
-      netScore:
-        typeof best.predicted_net === 'number'
-          ? best.predicted_net
-          : Number(best.predicted_net ?? null),
-      scoreSheet: (best as any)?.scoreSheet ?? null,
-      provenance: (best as any)?.provenance ?? null,
+      grossScore: gross,
+      netScore: net,
+      scoreSheet: normalizedScoreSheet,
+      provenance: normalizedProvenance,
       runId,
     })
   }, [runId, isComplete, best, onPrecisionPassComplete])

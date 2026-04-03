@@ -462,6 +462,11 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
 
     if (!best) throw new Error('No best hypothesis found')
 
+    if (!bestMeasurements) {
+      console.warn('[precision-pass] no bestMeasurements found, falling back to base measurements')
+      bestMeasurements = measurements
+    }
+
     const precisionPassProvenance = bestMeasurements
       ? buildFieldProvenanceFromMeasurements({
           measurements: bestMeasurements,

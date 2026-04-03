@@ -472,12 +472,20 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         <ScoreSheetEditor
           predictionId={normalized.predictionId}
           buckId={result.buck.id}
-          aiScoreSheet={precisionPassOverride?.scoreSheet ?? result.scoreSheet}
+          aiScoreSheet={
+            precisionPassOverride?.scoreSheet
+              ? precisionPassOverride.scoreSheet
+              : result.scoreSheet
+          }
           aiGrossScore={precisionPassOverride?.grossScore ?? normalized.grossScore}
           aiNetScore={precisionPassOverride?.netScore ?? normalized.netScore}
           aiConfidence={normalized.confidencePercent}
           isFallback={normalized.isFallback}
-          aiFieldProvenance={precisionPassOverride?.provenance ?? extractFieldProvenance(result)}
+          aiFieldProvenance={
+            precisionPassOverride?.provenance
+              ? precisionPassOverride.provenance
+              : extractFieldProvenance(result)
+          }
         />
       )}
       {/* Measurements Breakdown (Legacy) */}
