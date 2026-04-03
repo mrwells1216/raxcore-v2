@@ -46,7 +46,11 @@ import {
   ProvenanceBadge, 
   TotalsProvenanceBadge 
 } from './provenance-badge'
-import type { ProvenanceSource } from '@/lib/rules-engine'
+import type { 
+  ProvenanceSource,
+  FieldProvenanceMap,
+  MeasuredField,
+} from '@/lib/rules-engine'
 
 // Local type - no dependency on old review system
 type ReviewStatus = 'draft' | 'final'
@@ -66,10 +70,65 @@ interface ScoreSheetEditorProps {
   aiConfidence: number
   /** Whether the score was a fallback (disables editing) */
   isFallback?: boolean
+  /**
+   * Optional prior field provenance map.
+   * Pass this when you have precision-pass provenance available.
+   */
+  aiFieldProvenance?: FieldProvenanceMap | null
   /** Callback when review is saved */
   onSave?: () => void
   /** Callback when review is finalized */
   onFinalize?: () => void
+}
+
+function getDisplayField(
+  savedField: MeasuredField | null | undefined,
+  currentValue: number | null,
+  aiValue: number | null,
+  isFallbackSource: boolean
+): MeasuredField {
+  const base: MeasuredField = savedField ?? {
+    value: aiValue,
+    provenance: isFallbackSource ? 'fallback' : 'ai_raw',
+    confidence: isFallbackSource ? 'low' : 'medium',
+    originalValue: aiValue,
+    wasEdited: false,
+    editStatus: 'unchanged',
+  }
+
+  const hasChanged = currentValue !== base.value
+
+  if (!hasChanged) {
+    return {
+      ...base,
+      value: currentValue,
+      wasEdited: false,
+      editStatus: 'unchanged',
+    }
+  }
+
+  return {
+    value: currentValue,
+    provenance: 'human_review',
+    confidence: 'high',
+    originalValue: base.originalValue ?? base.value ?? aiValue,
+    wasEdited: true,
+    editStatus:
+      base.provenance === 'precision_pass'
+        ? 'adjusted'
+        : base.provenance === 'human_review'
+          ? 'adjusted'
+          : 'overridden',
+  }
+}
+
+function getOverallTotalsProvenance(
+  fields: Array<MeasuredField | null | undefined>
+): ProvenanceSource {
+  if (fields.some((f) => f?.provenance === 'human_review')) return 'human_review'
+  if (fields.some((f) => f?.provenance === 'precision_pass')) return 'precision_pass'
+  if (fields.some((f) => f?.provenance === 'fallback')) return 'fallback'
+  return 'ai_raw'
 }
 
 /**
@@ -81,7 +140,7 @@ function MeasurementInput({
   value,
   onChange,
   disabled,
-  provenance = 'ai_raw',
+  field,
   isFallbackSource = false,
 }: {
   label: string
@@ -89,25 +148,22 @@ function MeasurementInput({
   value: number | null
   onChange: (value: number | null) => void
   disabled?: boolean
-  provenance?: ProvenanceSource
+  field?: MeasuredField | null
   isFallbackSource?: boolean
 }) {
-  const hasChanged = value !== aiValue && value !== null && aiValue !== null
+  const displayField = getDisplayField(field, value, aiValue, isFallbackSource)
   const diff = (value ?? 0) - (aiValue ?? 0)
-  
-  // Determine current provenance based on whether the value was edited
-  const currentProvenance: ProvenanceSource = hasChanged ? 'human_review' : (isFallbackSource ? 'fallback' : provenance)
-  const confidence = isFallbackSource ? 'low' : (hasChanged ? 'high' : 'medium')
-  
+  const hasChanged = displayField.wasEdited === true
+
   return (
     <div className="grid grid-cols-[1fr_auto_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50 last:border-0">
       <Label className="text-sm font-medium">{label}</Label>
-      <ProvenanceBadge 
-        provenance={currentProvenance} 
-        confidence={confidence}
-        wasEdited={hasChanged}
-        originalValue={aiValue}
-        currentValue={value}
+      <ProvenanceBadge
+        provenance={displayField.provenance}
+        confidence={displayField.confidence}
+        wasEdited={displayField.wasEdited}
+        originalValue={displayField.originalValue}
+        currentValue={displayField.value}
         size="sm"
       />
       <div className="text-sm text-muted-foreground text-right tabular-nums">
@@ -120,18 +176,14 @@ function MeasurementInput({
         max="50"
         value={value ?? ''}
         onChange={(e) => {
-          const val = e.target.value
-          onChange(val === '' ? null : parseFloat(val))
+          const raw = e.target.value
+          onChange(raw === '' ? null : Number(raw))
         }}
         disabled={disabled}
-        className={`h-8 text-sm tabular-nums ${hasChanged ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : ''}`}
+        className="h-9"
       />
-      <div className="text-xs tabular-nums text-right">
-        {hasChanged && (
-          <span className={diff > 0 ? 'text-green-600' : 'text-red-600'}>
-            {diff > 0 ? '+' : ''}{diff.toFixed(2)}
-          </span>
-        )}
+      <div className="text-xs tabular-nums text-right text-muted-foreground">
+        {hasChanged ? `${diff > 0 ? '+' : ''}${diff.toFixed(2)}` : '—'}
       </div>
     </div>
   )
