@@ -5,6 +5,9 @@
  * 
  * Allows human review and correction of AI-generated B&C measurements.
  * Displays AI values alongside editable corrected values.
+ * 
+ * UNIFIED: Uses /api/review/save-score-sheet route and reviewed_score_sheets table.
+ * No dependency on old human_review_sheets system.
  */
 
 import { useState, useCallback, useEffect } from 'react'
@@ -29,16 +32,19 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
-import type { 
-  CorrectedMeasurements, 
-  HumanReviewSheet,
-  ReviewStatus,
-} from '@/lib/review/types'
+import type { CorrectedMeasurements } from '@/lib/review/types'
 import {
   calculateGrossScore,
   calculateNetScore,
   calculateSymmetryDeductions,
 } from '@/lib/review/client'
+import { 
+  toScoreSheetPayload, 
+  createReviewedPayload,
+} from '@/lib/scoring/adapters/to-score-sheet-payload'
+
+// Local type - no dependency on old review system
+type ReviewStatus = 'draft' | 'final'
 
 interface ScoreSheetEditorProps {
   /** Prediction ID for creating/loading review */
@@ -55,12 +61,10 @@ interface ScoreSheetEditorProps {
   aiConfidence: number
   /** Whether the score was a fallback (disables editing) */
   isFallback?: boolean
-  /** Existing review sheet if editing */
-  existingReview?: HumanReviewSheet | null
   /** Callback when review is saved */
-  onSave?: (sheet: HumanReviewSheet) => void
+  onSave?: () => void
   /** Callback when review is finalized */
-  onFinalize?: (sheet: HumanReviewSheet) => void
+  onFinalize?: () => void
 }
 
 /**
@@ -72,14 +76,12 @@ function MeasurementInput({
   value,
   onChange,
   disabled,
-  note,
 }: {
   label: string
   aiValue: number | null
   value: number | null
   onChange: (value: number | null) => void
   disabled?: boolean
-  note?: string
 }) {
   const hasChanged = value !== aiValue && value !== null && aiValue !== null
   const diff = (value ?? 0) - (aiValue ?? 0)
@@ -122,16 +124,11 @@ export function ScoreSheetEditor({
   aiNetScore,
   aiConfidence,
   isFallback = false,
-  existingReview,
   onSave,
   onFinalize,
 }: ScoreSheetEditorProps) {
-  // Initialize measurements from existing review or AI values
+  // Initialize measurements from AI values
   const getInitialMeasurements = useCallback((): CorrectedMeasurements => {
-    if (existingReview) {
-      return existingReview.corrected_measurements
-    }
-    // Extract from AI score sheet
     return {
       inside_spread: aiScoreSheet.spread.inside.value,
       main_beam_left: aiScoreSheet.left.main_beam.value,
@@ -157,21 +154,17 @@ export function ScoreSheetEditor({
       abnormal_points: aiScoreSheet.abnormal_points.total_length.value,
       deductions: aiScoreSheet.deductions.symmetry_total.value,
     }
-  }, [aiScoreSheet, existingReview])
+  }, [aiScoreSheet])
 
   const [measurements, setMeasurements] = useState<CorrectedMeasurements>(getInitialMeasurements)
-  const [rackType, setRackType] = useState<'typical' | 'non-typical'>(
-    existingReview?.rack_type ?? aiScoreSheet.metadata.rack_type
-  )
-  const [mainFramePoints, setMainFramePoints] = useState<number>(
-    existingReview?.main_frame_points ?? aiScoreSheet.metadata.main_frame_points
-  )
-  const [reviewNotes, setReviewNotes] = useState<string>(existingReview?.review_notes ?? '')
-  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>(existingReview?.review_status ?? 'draft')
+  const [rackType, setRackType] = useState<'typical' | 'non-typical'>(aiScoreSheet.metadata.rack_type)
+  const [mainFramePoints, setMainFramePoints] = useState<number>(aiScoreSheet.metadata.main_frame_points)
+  const [reviewNotes, setReviewNotes] = useState<string>('')
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('draft')
   const [isExpanded, setIsExpanded] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [reviewSheetId, setReviewSheetId] = useState<string | null>(existingReview?.id ?? null)
+  const [hasSaved, setHasSaved] = useState(false)
 
   // Calculate scores based on corrected measurements
   const correctedGross = calculateGrossScore(measurements)
@@ -232,6 +225,10 @@ export function ScoreSheetEditor({
     setMainFramePoints(aiScoreSheet.metadata.main_frame_points)
   }, [aiScoreSheet])
 
+  /**
+   * Save reviewed sheet using the unified /api/review/save-score-sheet route.
+   * Converts to canonical ScoreSheetPayload format.
+   */
   const handleSave = useCallback(async (asFinal: boolean = false) => {
     setIsSaving(true)
     setSaveError(null)
@@ -239,42 +236,49 @@ export function ScoreSheetEditor({
     try {
       const newStatus: ReviewStatus = asFinal ? 'final' : 'draft'
       
-      if (!reviewSheetId) {
-        // Create new review sheet
-        const res = await fetch('/api/review/sheets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            buck_id: buckId,
-            prediction_id: predictionId,
-            ai_score_sheet: aiScoreSheet,
-            ai_gross_score: aiGrossScore,
-            ai_net_score: aiNetScore,
-            ai_confidence: aiConfidence,
-            rack_type: rackType,
-            main_frame_points: mainFramePoints,
-          }),
-        })
-        
-        if (res.status === 409) {
-          // Already exists, load it
-          const data = await res.json()
-          setReviewSheetId(data.existing_sheet_id)
-          // Fall through to update
-        } else if (!res.ok) {
-          throw new Error('Failed to create review sheet')
-        } else {
-          const data = await res.json()
-          setReviewSheetId(data.sheet.id)
-          
-          // Now update with corrections
-          await updateReviewSheet(data.sheet.id, newStatus)
-          return
-        }
+      // Convert AI sheet to canonical payload
+      const aiPayload = toScoreSheetPayload(aiScoreSheet, {
+        source: 'ai',
+        scoringSystem: rackType === 'typical' ? 'boone_and_crockett_typical' : 'boone_and_crockett_non_typical',
+        grossScore: aiGrossScore,
+        netScore: aiNetScore,
+      })
+      
+      // Convert corrected measurements to canonical payload
+      const reviewedPayload = createReviewedPayload(
+        measurements,
+        correctedGross,
+        correctedNet,
+        { scoringSystem: rackType === 'typical' ? 'boone_and_crockett_typical' : 'boone_and_crockett_non_typical' }
+      )
+      
+      // Save via unified route
+      const res = await fetch('/api/review/save-score-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          predictionId,
+          buckId,
+          reviewedSheet: reviewedPayload,
+          aiSheet: aiPayload,
+          notes: reviewNotes || null,
+          isTrainingTruth: asFinal,
+        }),
+      })
+      
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to save reviewed score sheet')
       }
       
-      // Update existing review sheet
-      await updateReviewSheet(reviewSheetId!, newStatus)
+      setReviewStatus(newStatus)
+      setHasSaved(true)
+      
+      if (asFinal && onFinalize) {
+        onFinalize()
+      } else if (onSave) {
+        onSave()
+      }
     } catch (error) {
       console.error('[score-sheet-editor] Save error:', error)
       setSaveError(error instanceof Error ? error.message : 'Failed to save review')
@@ -282,46 +286,19 @@ export function ScoreSheetEditor({
       setIsSaving(false)
     }
   }, [
-    reviewSheetId,
-    buckId,
     predictionId,
+    buckId,
     aiScoreSheet,
     aiGrossScore,
     aiNetScore,
-    aiConfidence,
     rackType,
-    mainFramePoints,
+    measurements,
+    correctedGross,
+    correctedNet,
+    reviewNotes,
+    onSave,
+    onFinalize,
   ])
-
-  const updateReviewSheet = async (sheetId: string, newStatus: ReviewStatus) => {
-    const res = await fetch(`/api/review/sheets/${sheetId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        corrected_measurements: measurements,
-        corrected_gross_score: correctedGross,
-        corrected_net_score: correctedNet,
-        review_status: newStatus,
-        review_notes: reviewNotes,
-        rack_type: rackType,
-        main_frame_points: mainFramePoints,
-        is_training_truth: newStatus === 'final',
-      }),
-    })
-    
-    if (!res.ok) {
-      throw new Error('Failed to update review sheet')
-    }
-    
-    const data = await res.json()
-    setReviewStatus(newStatus)
-    
-    if (newStatus === 'final' && onFinalize) {
-      onFinalize(data.sheet)
-    } else if (onSave) {
-      onSave(data.sheet)
-    }
-  }
 
   // Calculate score differences
   const grossDiff = correctedGross - aiGrossScore
@@ -358,8 +335,8 @@ export function ScoreSheetEditor({
               {reviewStatus === 'final' && (
                 <Badge variant="default" className="bg-green-600">Finalized</Badge>
               )}
-              {reviewStatus === 'draft' && reviewSheetId && (
-                <Badge variant="secondary">Draft</Badge>
+              {reviewStatus === 'draft' && hasSaved && (
+                <Badge variant="secondary">Draft Saved</Badge>
               )}
             </CardTitle>
             <CardDescription>
@@ -681,7 +658,7 @@ export function ScoreSheetEditor({
                 disabled={isSaving}
               >
                 <GraduationCap className="h-4 w-4 mr-1.5" />
-                Use for Training
+                Training Truth
               </Button>
             )}
           </div>
