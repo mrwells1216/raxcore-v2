@@ -25,6 +25,7 @@ import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
+import type { FieldProvenanceMap } from '@/lib/rules-engine'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -170,6 +171,33 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     learningSummary: result.learningSummary ?? null,
     trainingCorrectionResult: result.trainingCorrectionResult ?? null,
   }
+}
+
+function extractFieldProvenance(result: any): FieldProvenanceMap | null {
+  // Case 1: reviewed sheet already stored with provenance
+  if (result?.review?.sheet_json?.provenance) {
+    console.log('[provenance] extracted', {
+      hasReview: true,
+      hasPrediction: false,
+    })
+    return result.review.sheet_json.provenance as FieldProvenanceMap
+  }
+
+  // Case 2: prediction has provenance (future-proof)
+  if (result?.prediction?.provenance) {
+    console.log('[provenance] extracted', {
+      hasReview: false,
+      hasPrediction: true,
+    })
+    return result.prediction.provenance as FieldProvenanceMap
+  }
+
+  // Case 3: nothing available yet
+  console.log('[provenance] extracted', {
+    hasReview: false,
+    hasPrediction: false,
+  })
+  return null
 }
 
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
@@ -414,6 +442,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           aiNetScore={normalized.netScore}
           aiConfidence={normalized.confidencePercent}
           isFallback={normalized.isFallback}
+          aiFieldProvenance={extractFieldProvenance(result)}
         />
       )}
       {/* Measurements Breakdown (Legacy) */}
