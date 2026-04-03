@@ -35,6 +35,13 @@ export async function POST(req: Request) {
       )
     }
 
+    // Extract gross/net scores for easy querying
+    const originalGross = aiSheet?.measurements?.grossScore ?? null
+    const originalNet = aiSheet?.measurements?.netScore ?? null
+    const reviewedGross = reviewedSheet?.measurements?.grossScore ?? null
+    const reviewedNet = reviewedSheet?.measurements?.netScore ?? null
+    const reviewStatus = isTrainingTruth ? 'final' : 'draft'
+
     // Check if a reviewed sheet already exists for this prediction
     const { data: existing } = await db
       .from('reviewed_score_sheets')
@@ -53,6 +60,11 @@ export async function POST(req: Request) {
           notes: notes ?? null,
           is_training_truth: isTrainingTruth,
           scoring_system: reviewedSheet.scoringSystem ?? 'boone_and_crockett_typical',
+          original_gross: originalGross,
+          original_net: originalNet,
+          reviewed_gross: reviewedGross,
+          reviewed_net: reviewedNet,
+          review_status: reviewStatus,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
@@ -83,6 +95,11 @@ export async function POST(req: Request) {
         raw_ai_response: rawAiResponse ?? null,
         notes: notes ?? null,
         is_training_truth: isTrainingTruth,
+        original_gross: originalGross,
+        original_net: originalNet,
+        reviewed_gross: reviewedGross,
+        reviewed_net: reviewedNet,
+        review_status: reviewStatus,
       })
       .select()
       .single()
