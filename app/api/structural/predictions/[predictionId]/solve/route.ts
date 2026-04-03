@@ -16,9 +16,31 @@ export async function POST(
   const supabase = await createClient()
   const { data } = await supabase.auth.getUser()
   const user = data?.user
-  
-  if (!user) {
+
+  // Fetch prediction to check ownership
+  const { data: prediction } = await supabase
+    .from('predictions')
+    .select('user_id')
+    .eq('id', predictionId)
+    .maybeSingle()
+
+  const isDev =
+    process.env.NODE_ENV === 'development' ||
+    process.env.VERCEL_ENV === 'development'
+  const isOwner = user?.id === prediction?.user_id
+
+  if (!isOwner && !isDev) {
+    console.warn('[structural-solve] blocked by auth', {
+      predictionId,
+      userId: user?.id ?? null,
+    })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (isDev && !isOwner) {
+    console.log('[structural-solve] DEV BYPASS enabled', {
+      predictionId,
+    })
   }
 
   try {

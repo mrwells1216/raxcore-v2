@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
   RefreshCw, Plus, Check, Ruler, Box, Cpu, Calculator,
@@ -284,7 +285,16 @@ function extractFieldProvenance(result: any): FieldProvenanceMap | null {
   return null
 }
 
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
+
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
+  const { data: latestRun } = useSWR(
+    result?.prediction?.id
+      ? `/api/reverse/latest-run?predictionId=${result.prediction.id}`
+      : null,
+    fetcher
+  )
+
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showLearning, setShowLearning] = useState(false)
@@ -297,10 +307,16 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     scoreSheet: any | null
     provenance: FieldProvenanceMap | null
     runId: string | null
-  } | null>(() => extractPrecisionPassPayload(result))
+  } | null>(() => extractPrecisionPassPayload({
+    ...result,
+    latestPrecisionPassRun: latestRun ?? result.latestPrecisionPassRun,
+  }))
 
   useEffect(() => {
-    const persisted = extractPrecisionPassPayload(result)
+    const persisted = extractPrecisionPassPayload({
+      ...result,
+      latestPrecisionPassRun: latestRun ?? result.latestPrecisionPassRun,
+    })
     if (!persisted) return
     setPrecisionPassOverride((current) => {
       if (current?.runId === persisted.runId) return current
@@ -313,7 +329,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       })
       return persisted
     })
-  }, [result])
+  }, [result, latestRun])
 
   const normalized = normalizeResult(result)
   const { prediction } = result
