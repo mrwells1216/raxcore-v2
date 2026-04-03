@@ -1,13 +1,13 @@
 /**
  * Adapter: Convert legacy ScoreSheet to canonical ScoreSheetPayload
- * 
+ *
  * This is the bridge between the old scoring types and the new rules-engine types.
  * Client-safe - no server imports.
  */
 
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
-import type { 
-  ScoreSheetPayload, 
+import type {
+  ScoreSheetPayload,
   ScoreSheetMeasurements,
   SideBreakdown,
   TineMeasurement,
@@ -15,8 +15,9 @@ import type {
   ScoringSystem,
   FieldProvenanceMap,
   ProvenanceSource,
+  MeasuredField,
 } from '@/lib/rules-engine/types'
-import { createMeasuredField, confidenceToBucket } from '@/lib/rules-engine/types'
+import { createMeasuredField } from '@/lib/rules-engine/types'
 
 /**
  * Convert legacy ScoreSheet to canonical ScoreSheetPayload
@@ -178,91 +179,133 @@ export function correctedToPayloadMeasurements(
   }
 }
 
+type FlatAiMeasurements = {
+  inside_spread?: number | null
+  main_beam_left?: number | null
+  main_beam_right?: number | null
+  g1_left?: number | null
+  g1_right?: number | null
+  g2_left?: number | null
+  g2_right?: number | null
+  g3_left?: number | null
+  g3_right?: number | null
+  g4_left?: number | null
+  g4_right?: number | null
+  g5_left?: number | null
+  g5_right?: number | null
+  h1_left?: number | null
+  h1_right?: number | null
+  h2_left?: number | null
+  h2_right?: number | null
+  h3_left?: number | null
+  h3_right?: number | null
+  h4_left?: number | null
+  h4_right?: number | null
+  abnormal_points?: number | null
+  deductions?: number | null
+}
+
+type ReviewedPayloadOptions = {
+  scoringSystem?: ScoringSystem
+  aiMeasurements?: FlatAiMeasurements
+  aiGross?: number
+  aiNet?: number
+  isFallback?: boolean
+  /**
+   * Optional prior provenance map from the already-loaded score source.
+   * If present, precision-pass field provenance is preserved instead of being flattened back to ai_raw.
+   */
+  aiProvenance?: FieldProvenanceMap | null
+}
+
 /**
  * Create a reviewed ScoreSheetPayload from corrected measurements
- * Includes provenance tracking for each field
+ * Includes provenance tracking for each field.
  */
 export function createReviewedPayload(
   corrected: Parameters<typeof correctedToPayloadMeasurements>[0],
   grossScore: number,
   netScore: number,
-  options: {
-    scoringSystem?: ScoringSystem
-    /** Original AI measurements for diff comparison */
-    aiMeasurements?: {
-      inside_spread?: number | null
-      main_beam_left?: number | null
-      main_beam_right?: number | null
-      g1_left?: number | null
-      g1_right?: number | null
-      g2_left?: number | null
-      g2_right?: number | null
-      g3_left?: number | null
-      g3_right?: number | null
-      g4_left?: number | null
-      g4_right?: number | null
-      g5_left?: number | null
-      g5_right?: number | null
-      h1_left?: number | null
-      h1_right?: number | null
-      h2_left?: number | null
-      h2_right?: number | null
-      h3_left?: number | null
-      h3_right?: number | null
-      h4_left?: number | null
-      h4_right?: number | null
-    }
-    aiGross?: number
-    aiNet?: number
-    isFallback?: boolean
-  } = {}
+  options: ReviewedPayloadOptions = {}
 ): ScoreSheetPayload {
   const ai = options.aiMeasurements ?? {}
   const isFallback = options.isFallback ?? false
-  const baseProvenance: ProvenanceSource = isFallback ? 'fallback' : 'ai_raw'
-  
-  // Build provenance map by comparing corrected values to AI values
+  const fallbackBase: ProvenanceSource = isFallback ? 'fallback' : 'ai_raw'
+  const prior = options.aiProvenance ?? null
+
   const provenance: FieldProvenanceMap = {
-    insideSpread: createProvenanceField(corrected.inside_spread, ai.inside_spread, baseProvenance),
-    leftMainBeam: createProvenanceField(corrected.main_beam_left, ai.main_beam_left, baseProvenance),
-    rightMainBeam: createProvenanceField(corrected.main_beam_right, ai.main_beam_right, baseProvenance),
+    insideSpread: createProvenanceField(
+      corrected.inside_spread,
+      ai.inside_spread,
+      fallbackBase,
+      prior?.insideSpread
+    ),
+    leftMainBeam: createProvenanceField(
+      corrected.main_beam_left,
+      ai.main_beam_left,
+      fallbackBase,
+      prior?.leftMainBeam
+    ),
+    rightMainBeam: createProvenanceField(
+      corrected.main_beam_right,
+      ai.main_beam_right,
+      fallbackBase,
+      prior?.rightMainBeam
+    ),
     leftTines: {
-      1: createProvenanceField(corrected.g1_left, ai.g1_left, baseProvenance),
-      2: createProvenanceField(corrected.g2_left, ai.g2_left, baseProvenance),
-      3: createProvenanceField(corrected.g3_left, ai.g3_left, baseProvenance),
-      4: createProvenanceField(corrected.g4_left, ai.g4_left, baseProvenance),
-      5: createProvenanceField(corrected.g5_left, ai.g5_left, baseProvenance),
+      1: createProvenanceField(corrected.g1_left, ai.g1_left, fallbackBase, prior?.leftTines?.[1]),
+      2: createProvenanceField(corrected.g2_left, ai.g2_left, fallbackBase, prior?.leftTines?.[2]),
+      3: createProvenanceField(corrected.g3_left, ai.g3_left, fallbackBase, prior?.leftTines?.[3]),
+      4: createProvenanceField(corrected.g4_left, ai.g4_left, fallbackBase, prior?.leftTines?.[4]),
+      5: createProvenanceField(corrected.g5_left, ai.g5_left, fallbackBase, prior?.leftTines?.[5]),
     },
     rightTines: {
-      1: createProvenanceField(corrected.g1_right, ai.g1_right, baseProvenance),
-      2: createProvenanceField(corrected.g2_right, ai.g2_right, baseProvenance),
-      3: createProvenanceField(corrected.g3_right, ai.g3_right, baseProvenance),
-      4: createProvenanceField(corrected.g4_right, ai.g4_right, baseProvenance),
-      5: createProvenanceField(corrected.g5_right, ai.g5_right, baseProvenance),
+      1: createProvenanceField(corrected.g1_right, ai.g1_right, fallbackBase, prior?.rightTines?.[1]),
+      2: createProvenanceField(corrected.g2_right, ai.g2_right, fallbackBase, prior?.rightTines?.[2]),
+      3: createProvenanceField(corrected.g3_right, ai.g3_right, fallbackBase, prior?.rightTines?.[3]),
+      4: createProvenanceField(corrected.g4_right, ai.g4_right, fallbackBase, prior?.rightTines?.[4]),
+      5: createProvenanceField(corrected.g5_right, ai.g5_right, fallbackBase, prior?.rightTines?.[5]),
     },
     leftMasses: {
-      1: createProvenanceField(corrected.h1_left, ai.h1_left, baseProvenance),
-      2: createProvenanceField(corrected.h2_left, ai.h2_left, baseProvenance),
-      3: createProvenanceField(corrected.h3_left, ai.h3_left, baseProvenance),
-      4: createProvenanceField(corrected.h4_left, ai.h4_left, baseProvenance),
+      1: createProvenanceField(corrected.h1_left, ai.h1_left, fallbackBase, prior?.leftMasses?.[1]),
+      2: createProvenanceField(corrected.h2_left, ai.h2_left, fallbackBase, prior?.leftMasses?.[2]),
+      3: createProvenanceField(corrected.h3_left, ai.h3_left, fallbackBase, prior?.leftMasses?.[3]),
+      4: createProvenanceField(corrected.h4_left, ai.h4_left, fallbackBase, prior?.leftMasses?.[4]),
     },
     rightMasses: {
-      1: createProvenanceField(corrected.h1_right, ai.h1_right, baseProvenance),
-      2: createProvenanceField(corrected.h2_right, ai.h2_right, baseProvenance),
-      3: createProvenanceField(corrected.h3_right, ai.h3_right, baseProvenance),
-      4: createProvenanceField(corrected.h4_right, ai.h4_right, baseProvenance),
+      1: createProvenanceField(corrected.h1_right, ai.h1_right, fallbackBase, prior?.rightMasses?.[1]),
+      2: createProvenanceField(corrected.h2_right, ai.h2_right, fallbackBase, prior?.rightMasses?.[2]),
+      3: createProvenanceField(corrected.h3_right, ai.h3_right, fallbackBase, prior?.rightMasses?.[3]),
+      4: createProvenanceField(corrected.h4_right, ai.h4_right, fallbackBase, prior?.rightMasses?.[4]),
     },
-    grossScore: createProvenanceField(grossScore, options.aiGross ?? null, baseProvenance),
-    netScore: createProvenanceField(netScore, options.aiNet ?? null, baseProvenance),
+    abnormalPoints: createProvenanceField(
+      corrected.abnormal_points,
+      ai.abnormal_points,
+      fallbackBase,
+      prior?.abnormalPoints
+    ),
+    deductions: createProvenanceField(
+      corrected.deductions,
+      ai.deductions,
+      fallbackBase,
+      prior?.deductions
+    ),
+    grossScore: createProvenanceField(
+      grossScore,
+      options.aiGross ?? null,
+      fallbackBase,
+      prior?.grossScore
+    ),
+    netScore: createProvenanceField(
+      netScore,
+      options.aiNet ?? null,
+      fallbackBase,
+      prior?.netScore
+    ),
   }
-  
-  // Check if any fields were edited
-  const hasHumanEdits = Object.values(provenance).some(field => {
-    if (!field) return false
-    if ('wasEdited' in field) return field.wasEdited
-    // Check nested objects (tines, masses)
-    return Object.values(field).some(f => f && 'wasEdited' in f && f.wasEdited)
-  })
+
+  const hasHumanEdits = hasAnyHumanEdits(provenance)
+  logProvenanceCounts(provenance)
 
   return {
     version: 1,
@@ -275,26 +318,114 @@ export function createReviewedPayload(
   }
 }
 
-/**
- * Create a provenance field by comparing corrected to original
- */
 function createProvenanceField(
   correctedValue: number | null | undefined,
-  originalValue: number | null | undefined,
-  baseProvenance: ProvenanceSource
-): ReturnType<typeof createMeasuredField> {
-  const wasEdited = correctedValue !== originalValue && 
-                    correctedValue !== null && 
-                    correctedValue !== undefined &&
-                    originalValue !== null &&
-                    originalValue !== undefined
-  
-  return {
-    value: correctedValue ?? null,
-    provenance: wasEdited ? 'human_review' : baseProvenance,
-    confidence: baseProvenance === 'fallback' ? 'low' : (wasEdited ? 'high' : 'medium'),
-    originalValue: originalValue ?? null,
-    wasEdited,
-    editStatus: wasEdited ? 'overridden' : 'unchanged',
+  originalAiValue: number | null | undefined,
+  fallbackBase: ProvenanceSource,
+  priorField?: MeasuredField | null
+): MeasuredField {
+  const baseField = priorField ?? createMeasuredField(
+    originalAiValue ?? null,
+    fallbackBase,
+    {
+      confidence: fallbackBase === 'fallback' ? 'low' : 'medium',
+      originalValue: originalAiValue ?? null,
+    }
+  )
+
+  const currentValue = correctedValue ?? null
+  const comparisonValue = baseField.value ?? null
+  const wasEdited = currentValue !== comparisonValue
+
+  if (!wasEdited) {
+    return {
+      ...baseField,
+      value: currentValue,
+      wasEdited: false,
+      editStatus: 'unchanged',
+    }
   }
+
+  return {
+    value: currentValue,
+    provenance: 'human_review',
+    confidence: 'high',
+    confidenceScore: baseField.confidenceScore ?? null,
+    originalValue: baseField.originalValue ?? comparisonValue,
+    wasEdited: true,
+    editStatus:
+      baseField.provenance === 'precision_pass'
+        ? 'adjusted'
+        : baseField.provenance === 'human_review'
+          ? 'adjusted'
+          : 'overridden',
+  }
+}
+
+function hasAnyHumanEdits(provenance: FieldProvenanceMap): boolean {
+  const topLevelFields = [
+    provenance.insideSpread,
+    provenance.leftMainBeam,
+    provenance.rightMainBeam,
+    provenance.abnormalPoints,
+    provenance.deductions,
+    provenance.grossScore,
+    provenance.netScore,
+  ]
+
+  for (const field of topLevelFields) {
+    if (field?.wasEdited) return true
+  }
+
+  const groups = [
+    provenance.leftTines,
+    provenance.rightTines,
+    provenance.leftMasses,
+    provenance.rightMasses,
+  ]
+
+  for (const group of groups) {
+    if (!group) continue
+    for (const field of Object.values(group)) {
+      if (field?.wasEdited) return true
+    }
+  }
+
+  return false
+}
+
+function logProvenanceCounts(provenance: FieldProvenanceMap): void {
+  const counts: Record<ProvenanceSource, number> = {
+    ai_raw: 0,
+    precision_pass: 0,
+    fallback: 0,
+    human_review: 0,
+  }
+
+  const push = (field?: MeasuredField | null) => {
+    if (!field) return
+    counts[field.provenance] += 1
+  }
+
+  push(provenance.insideSpread)
+  push(provenance.leftMainBeam)
+  push(provenance.rightMainBeam)
+  push(provenance.abnormalPoints)
+  push(provenance.deductions)
+  push(provenance.grossScore)
+  push(provenance.netScore)
+
+  for (const group of [
+    provenance.leftTines,
+    provenance.rightTines,
+    provenance.leftMasses,
+    provenance.rightMasses,
+  ]) {
+    if (!group) continue
+    for (const field of Object.values(group)) {
+      push(field)
+    }
+  }
+
+  console.log('[reviewed-payload] provenance counts', counts)
 }
