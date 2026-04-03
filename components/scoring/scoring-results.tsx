@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
   RefreshCw, Plus, Check, Ruler, Box, Cpu, Calculator,
@@ -173,6 +173,62 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
   }
 }
 
+function extractPrecisionPassPayload(result: any): {
+  grossScore: number | null
+  netScore: number | null
+  scoreSheet: any | null
+  provenance: FieldProvenanceMap | null
+  runId: string | null
+} | null {
+  const run =
+    result?.latestPrecisionPassRun ??
+    result?.precisionPassRun ??
+    result?.reverseRun ??
+    null
+
+  const bestSummary = run?.best_summary ?? null
+  if (!bestSummary) return null
+
+  const grossRaw = bestSummary?.predicted_gross ?? null
+  const netRaw = bestSummary?.predicted_net ?? null
+
+  const grossScore =
+    typeof grossRaw === 'number' ? grossRaw : Number(grossRaw ?? null)
+
+  const netScore =
+    typeof netRaw === 'number' ? netRaw : Number(netRaw ?? null)
+
+  const scoreSheet =
+    bestSummary?.scoreSheet ??
+    bestSummary?.score_sheet ??
+    null
+
+  const provenance =
+    (bestSummary?.provenance as FieldProvenanceMap | null) ??
+    (bestSummary?.field_provenance as FieldProvenanceMap | null) ??
+    null
+
+  if (!scoreSheet && !provenance && grossScore == null && netScore == null) {
+    return null
+  }
+
+  console.log('[precision-pass] extracted persisted payload', {
+    runId: run?.id ?? null,
+    hasScoreSheet: !!scoreSheet,
+    hasProvenance: !!provenance,
+    grossScore,
+    netScore,
+  })
+
+  return {
+    grossScore,
+    netScore,
+    scoreSheet,
+    provenance,
+    runId: run?.id ?? null,
+  }
+}
+
 function extractFieldProvenance(result: any): FieldProvenanceMap | null {
   // Case 1: reviewed sheet already stored with provenance
   if (result?.review?.sheet_json?.provenance) {
@@ -241,7 +297,23 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     scoreSheet: any | null
     provenance: FieldProvenanceMap | null
     runId: string | null
-  } | null>(null)
+  } | null>(() => extractPrecisionPassPayload(result))
+
+  useEffect(() => {
+    const persisted = extractPrecisionPassPayload(result)
+    if (!persisted) return
+    setPrecisionPassOverride((current) => {
+      if (current?.runId === persisted.runId) return current
+      console.log('[precision-pass] hydrating persisted override', {
+        runId: persisted.runId,
+        grossScore: persisted.grossScore,
+        netScore: persisted.netScore,
+        hasScoreSheet: !!persisted.scoreSheet,
+        hasProvenance: !!persisted.provenance,
+      })
+      return persisted
+    })
+  }, [result])
 
   const normalized = normalizeResult(result)
   const { prediction } = result

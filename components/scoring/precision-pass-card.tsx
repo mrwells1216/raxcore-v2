@@ -93,6 +93,11 @@ export function PrecisionPassCard({
       net,
     })
 
+    if (!normalizedScoreSheet && !normalizedProvenance && gross == null && net == null) {
+      console.warn('[precision-pass] skipping empty UI payload', { runId })
+      return
+    }
+
     onPrecisionPassComplete({
       grossScore: gross,
       netScore: net,
