@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import useSWR from 'swr'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,9 +15,20 @@ const fetcher = (url: string) => fetch(url).then(r => r.json())
 interface PrecisionPassCardProps {
   predictionId: string
   className?: string
+  onPrecisionPassComplete?: (payload: {
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: any | null
+    runId: string
+  }) => void
 }
 
-export function PrecisionPassCard({ predictionId, className }: PrecisionPassCardProps) {
+export function PrecisionPassCard({
+  predictionId,
+  className,
+  onPrecisionPassComplete,
+}: PrecisionPassCardProps) {
   const [runId, setRunId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
@@ -50,6 +61,23 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
   const isComplete = status === 'completed'
   const isFailed = status === 'failed'
   const isRunning = status === 'running' || status === 'queued'
+
+  useEffect(() => {
+    if (!runId || !isComplete || !best || !onPrecisionPassComplete) return
+    onPrecisionPassComplete({
+      grossScore:
+        typeof best.predicted_gross === 'number'
+          ? best.predicted_gross
+          : Number(best.predicted_gross ?? null),
+      netScore:
+        typeof best.predicted_net === 'number'
+          ? best.predicted_net
+          : Number(best.predicted_net ?? null),
+      scoreSheet: (best as any)?.scoreSheet ?? null,
+      provenance: (best as any)?.provenance ?? null,
+      runId,
+    })
+  }, [runId, isComplete, best, onPrecisionPassComplete])
 
   async function start() {
     setIsStarting(true)
