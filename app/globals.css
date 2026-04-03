@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* xRack Premium Outdoor Theme - Light Mode */
+  /* RAXcore Premium Outdoor Theme - Light Mode */
   --background: oklch(0.98 0.008 45);
   --foreground: oklch(0.15 0.02 40);
   --card: oklch(1 0 0);
@@ -47,7 +47,7 @@
 }
 
 .dark {
-  /* xRack Premium Outdoor Theme - Dark Mode */
+  /* RAXcore Premium Outdoor Theme - Dark Mode */
   --background: oklch(0.14 0.018 35);
   --foreground: oklch(0.92 0.012 50);
   --card: oklch(0.18 0.018 35);
@@ -139,6 +139,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Ensure full-page scroll works on iOS Safari */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -154,28 +157,30 @@
   /* RaX Deer Overlay Styling */
   .rax-deer-overlay {
     opacity: 0.92;
-    animation: raxGlow 4s ease-in-out infinite;
+  }
+}
+
+/* Map Component Styles */
+@layer components {
+  /* Ensure map dialogs appear above map */
+  .map-dialog-overlay {
+    z-index: 10000 !important;
+  }
+  .map-dialog-content {
+    z-index: 10001 !important;
   }
   
-  @keyframes raxGlow {
-    0%, 100% {
-      filter:
-        brightness(0.95)
-        contrast(1.08)
-        saturate(1.05)
-        drop-shadow(0 0 6px rgba(0,0,0,1))
-        drop-shadow(0 0 18px rgba(230,122,61,0.35))
-        drop-shadow(0 0 40px rgba(230,122,61,0.15));
-    }
-
-    50% {
-      filter:
-        brightness(1)
-        contrast(1.12)
-        saturate(1.05)
-        drop-shadow(0 0 6px rgba(0,0,0,1))
-        drop-shadow(0 0 26px rgba(230,122,61,0.45))
-        drop-shadow(0 0 60px rgba(230,122,61,0.25));
-    }
+  /* Custom marker styles for react-simple-maps */
+  .rsm-marker {
+    cursor: pointer;
+  }
+  .rsm-marker:hover {
+    transform: scale(1.1);
+    transition: transform 0.15s ease-in-out;
+  }
+  
+  /* State geography hover effects */
+  .rsm-geography {
+    transition: fill 0.2s ease-in-out, stroke 0.2s ease-in-out;
   }
 }

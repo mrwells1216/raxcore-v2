@@ -1,16 +1,18 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { requiredServerEnv } from '@/lib/env'
 
 /**
  * Server-side Supabase client for use in Server Components, Route Handlers, and Server Actions.
  * Always create a new client within each function - don't store in global variable.
  */
 export async function createClient() {
+  const env = requiredServerEnv()
   const cookieStore = await cookies()
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {

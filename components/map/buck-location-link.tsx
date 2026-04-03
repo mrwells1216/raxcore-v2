@@ -66,10 +66,16 @@ export function BuckLocationLink({
       setIsLoading(true)
       try {
         const res = await fetch('/api/map/properties')
+        if (!res.ok) {
+          // Non-critical - properties table may not exist
+          setProperties([])
+          return
+        }
         const data = await res.json()
         setProperties(data.properties || [])
-      } catch (error) {
-        console.error('Failed to fetch properties:', error)
+      } catch {
+        // Silently fail - properties are optional
+        setProperties([])
       } finally {
         setIsLoading(false)
       }

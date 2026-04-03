@@ -1,18 +1,24 @@
 /**
- * 3D Render Adapter — Phase 12B: Parametric Antler Generator
+ * 3D Render Adapter — Phase 16: Stronger Parametric 3D Realism
  *
  * Converts AntlerGeometry measurements into Three.js-ready geometry parameters.
  * Modular pipeline: normalize → beam curves → tine positions → mesh params.
- * Future adapters (external AI mesh, taxidermy mount) can replace this module
- * without touching the viewer component.
  *
- * Renderer type registry — extend here to add future adapters.
+ * Phase 16 Enhancements:
+ * - Better beam realism with natural sweep, curvature, flare, and taper
+ * - Improved tine placement with anatomical spacing, angles, and transitions
+ * - Mass-driven thickness using H1-H4 circumferences
+ * - Support for rack asymmetry when left/right scores differ
+ * - European mount base option
+ * - Enhanced material parameters
  */
 
 import * as THREE from 'three'
-import type { AntlerGeometry, RenderSettings } from '@/lib/types'
+import type { AntlerGeometry, RenderSettings, PlacementConfig, WallTone, PlacementPreviewMode, PlacementPreset } from '@/lib/types'
 
 export type RendererType = 'parametric_3d' | 'canvas_2d' | 'external_mesh'
+export type MountMode = 'antlers_only' | 'european_mount'
+export type RealismLevel = 'basic' | 'standard' | 'enhanced'
 
 export const RENDERER_LABELS: Record<RendererType, string> = {
   parametric_3d: 'Parametric 3D',
@@ -24,6 +30,71 @@ export const RENDERER_LABELS: Record<RendererType, string> = {
 // 1 inch → 0.08 Three.js units gives a ~15-25 unit tall rack at typical sizes.
 const IN = 0.08
 
+// ─── Enhanced Render Config ──────────────────────────────────────────────────
+
+export interface RenderConfig {
+  mountMode: MountMode
+  realismLevel: RealismLevel
+  asymmetrySensitivity: number // 0-1, how much to emphasize L/R differences
+  beamSweepBias: number // -1 to 1, backward to forward sweep
+  tineForwardTilt: number // 0-1, how much tines tilt forward
+  showSkullPlate: boolean
+}
+
+export const DEFAULT_RENDER_CONFIG: RenderConfig = {
+  mountMode: 'antlers_only',
+  realismLevel: 'standard',
+  asymmetrySensitivity: 0.7,
+  beamSweepBias: 0.15, // slight forward sweep
+  tineForwardTilt: 0.4,
+  showSkullPlate: false,
+}
+
+// ─── Phase 18: Placement Preview Config ──────────────────────────────────────
+
+export const DEFAULT_PLACEMENT_CONFIG: PlacementConfig = {
+  previewMode: 'studio',
+  wallTone: 'cream',
+  horizontalOffset: 0,
+  verticalOffset: 0,
+  scale: 1.0,
+  roomImageUrl: null,
+  shadowIntensity: 0.3,
+  showMountHint: true,
+}
+
+export const WALL_TONE_COLORS: Record<WallTone, { background: string; accent: string; label: string }> = {
+  white: { background: '#FAFAFA', accent: '#E0E0E0', label: 'Clean White' },
+  cream: { background: '#F5F0E6', accent: '#E0D8C8', label: 'Warm Cream' },
+  gray: { background: '#E8E8E8', accent: '#D0D0D0', label: 'Modern Gray' },
+  beige: { background: '#E8DFC8', accent: '#D4C8B0', label: 'Classic Beige' },
+  wood_light: { background: '#DEB887', accent: '#C9A66B', label: 'Light Wood' },
+  wood_dark: { background: '#8B6914', accent: '#6B5010', label: 'Dark Wood' },
+  brick: { background: '#B85C4A', accent: '#8B4433', label: 'Exposed Brick' },
+  stone: { background: '#A09080', accent: '#807060', label: 'Natural Stone' },
+}
+
+export const PLACEMENT_PRESETS: PlacementPreset[] = [
+  { id: 'living_room', name: 'Living Room', wallTone: 'cream', description: 'Warm, inviting space' },
+  { id: 'office', name: 'Office', wallTone: 'gray', description: 'Modern, professional' },
+  { id: 'cabin', name: 'Cabin Lodge', wallTone: 'wood_dark', description: 'Rustic hunting lodge' },
+  { id: 'trophy_room', name: 'Trophy Room', wallTone: 'wood_light', description: 'Classic display' },
+  { id: 'gallery', name: 'Gallery', wallTone: 'white', description: 'Clean, museum-style' },
+]
+
+/**
+ * Ensure older render records without placement config still work.
+ * Merges saved config with defaults.
+ */
+export function ensurePlacementConfig(
+  savedConfig?: Partial<PlacementConfig> | null
+): PlacementConfig {
+  return {
+    ...DEFAULT_PLACEMENT_CONFIG,
+    ...(savedConfig || {}),
+  }
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface BeamCurve {
@@ -34,6 +105,8 @@ export interface BeamCurve {
    * Interpolated along the tube by the viewer.
    */
   radii: number[]
+  /** Side identifier for asymmetry handling */
+  side: 'left' | 'right'
 }
 
 export interface TineSpec {
@@ -42,13 +115,33 @@ export interface TineSpec {
   beamT: number
   /** Length in Three.js units */
   length: number
+  /** Base radius at attachment point */
+  baseRadius: number
   /** Tine branch direction in local beam tangent space (unit vector) */
   localDir: THREE.Vector3
+  /** Forward tilt angle in radians */
+  forwardTilt: number
+  /** Outward tilt angle in radians */
+  outwardTilt: number
+  /** Taper factor (0-1, how quickly it tapers to tip) */
+  taperFactor: number
 }
 
 export interface BurrSpec {
   center: THREE.Vector3
   radius: number
+  /** Height of the burr bulge */
+  height: number
+  /** Texture variation seed for procedural details */
+  textureSeed: number
+}
+
+export interface SkullPlateSpec {
+  center: THREE.Vector3
+  width: number
+  depth: number
+  height: number
+  burrDistance: number
 }
 
 export interface AntlerMeshParams {
@@ -59,21 +152,46 @@ export interface AntlerMeshParams {
   rightTines: TineSpec[]
   leftBurr: BurrSpec
   rightBurr: BurrSpec
+  skullPlate: SkullPlateSpec | null
   /** Half-skull offset on X axis (so beams start at ±offset) */
   skullHalfWidth: number
+  /** Asymmetry factor (0-1) based on L/R differences */
+  asymmetryFactor: number
+  /** Render configuration */
+  config: RenderConfig
+  /** Material hints */
+  materialHints: MaterialHints
 }
 
-// ─── Step 1: Normalize ───────────────────────────────────────────────────────
+export interface MaterialHints {
+  baseColor: string
+  tipColor: string
+  burrColor: string
+  roughnessBase: number
+  roughnessTip: number
+  colorVariation: number
+}
+
+// ─── Step 1: Normalize with Asymmetry Detection ─────────────────────────────
+
+interface NormalizedGeometry extends Required<Omit<AntlerGeometry, 'g5Left' | 'g5Right'>> {
+  g5Left: number | null
+  g5Right: number | null
+  asymmetryScore: number
+  beamAsymmetry: number
+  tineAsymmetry: number
+  massAsymmetry: number
+}
 
 /**
  * Fill in missing/zero measurements with anatomically reasonable defaults
- * so the renderer never has to deal with 0-length geometry.
+ * and compute asymmetry metrics for realistic rendering.
  */
-export function normalizeGeometry(g: AntlerGeometry): Required<AntlerGeometry> {
+export function normalizeGeometry(g: AntlerGeometry): NormalizedGeometry {
   const safe = (v: number | null | undefined, fallback: number) =>
     v && v > 0 ? v : fallback
 
-  return {
+  const normalized = {
     insideSpread: safe(g.insideSpread, 16),
     mainBeamLeft: safe(g.mainBeamLeft, 22),
     mainBeamRight: safe(g.mainBeamRight, 22),
@@ -99,68 +217,199 @@ export function normalizeGeometry(g: AntlerGeometry): Required<AntlerGeometry> {
     rackType: g.rackType,
     mainFramePoints: g.mainFramePoints ?? 10,
   }
+
+  // Compute asymmetry metrics
+  const beamAsymmetry = Math.abs(normalized.mainBeamLeft - normalized.mainBeamRight) / 
+    Math.max(normalized.mainBeamLeft, normalized.mainBeamRight)
+  
+  const tineAsymmetry = computeTineAsymmetry(normalized)
+  const massAsymmetry = computeMassAsymmetry(normalized)
+  
+  const asymmetryScore = (beamAsymmetry + tineAsymmetry + massAsymmetry) / 3
+
+  return {
+    ...normalized,
+    asymmetryScore,
+    beamAsymmetry,
+    tineAsymmetry,
+    massAsymmetry,
+  }
 }
 
-// ─── Step 2: Beam curves ─────────────────────────────────────────────────────
+function computeTineAsymmetry(g: {
+  g1Left: number; g1Right: number;
+  g2Left: number; g2Right: number;
+  g3Left: number; g3Right: number;
+  g4Left: number; g4Right: number;
+}): number {
+  const diffs = [
+    Math.abs(g.g1Left - g.g1Right) / Math.max(g.g1Left, g.g1Right, 1),
+    Math.abs(g.g2Left - g.g2Right) / Math.max(g.g2Left, g.g2Right, 1),
+    Math.abs(g.g3Left - g.g3Right) / Math.max(g.g3Left, g.g3Right, 1),
+    Math.abs(g.g4Left - g.g4Right) / Math.max(g.g4Left, g.g4Right, 1),
+  ]
+  return diffs.reduce((a, b) => a + b, 0) / diffs.length
+}
+
+function computeMassAsymmetry(g: {
+  h1Left: number; h1Right: number;
+  h2Left: number; h2Right: number;
+  h3Left: number; h3Right: number;
+  h4Left: number; h4Right: number;
+}): number {
+  const diffs = [
+    Math.abs(g.h1Left - g.h1Right) / Math.max(g.h1Left, g.h1Right, 1),
+    Math.abs(g.h2Left - g.h2Right) / Math.max(g.h2Left, g.h2Right, 1),
+    Math.abs(g.h3Left - g.h3Right) / Math.max(g.h3Left, g.h3Right, 1),
+    Math.abs(g.h4Left - g.h4Right) / Math.max(g.h4Left, g.h4Right, 1),
+  ]
+  return diffs.reduce((a, b) => a + b, 0) / diffs.length
+}
+
+// ─── Step 2: Enhanced Beam Curves ────────────────────────────────────────────
 
 /**
- * Generate a CatmullRom beam curve.
- *
- * Deer main beams sweep out and forward from the burr, curve up and slightly
- * back, then sweep inward toward the tip (like a backwards C when viewed from
- * the front).  We parameterize this with 7 control points so the shape is
- * recognisably antler-shaped across a wide range of measurements.
+ * Generate a realistic CatmullRom beam curve with:
+ * - Natural sweep with variable curvature
+ * - Forward/backward tilt options
+ * - Outward flare at peak spread
+ * - Realistic tip taper
+ * - Mild asymmetry support
  */
 function buildBeamCurve(
   beamLength: number,
   circumferences: [number, number, number, number],
   halfSpread: number,
-  isLeft: boolean
+  isLeft: boolean,
+  config: RenderConfig,
+  asymmetryOffset: number = 0 // -1 to 1, applied for L/R differences
 ): BeamCurve {
-  const sx = isLeft ? -1 : 1          // side sign
-  const bl = beamLength * IN          // beam length in 3D units
-  const hs = halfSpread * IN          // half-spread in 3D units
+  const sx = isLeft ? -1 : 1
+  const bl = beamLength * IN
+  const hs = halfSpread * IN
 
-  // Control points — tuned to look natural across 18–30" beams
+  // Asymmetry adjustments
+  const asymFactor = 1 + asymmetryOffset * config.asymmetrySensitivity * 0.15
+  const sweepVariation = asymmetryOffset * 0.08 * config.asymmetrySensitivity
+
+  // Base sweep parameters - tuned for anatomical realism
+  const sweepBias = config.beamSweepBias + sweepVariation
+  const forwardSweep = 0.12 + sweepBias * 0.15 // Z displacement
+  const verticalRise = 0.95 + Math.abs(sweepBias) * 0.05 // Y scale factor
+
+  // Control points for natural beam shape
+  // 9 control points for smoother curves
   const pts: THREE.Vector3[] = [
-    new THREE.Vector3(sx * 0.6,   0,        0),       // 0 — burr (base)
-    new THREE.Vector3(sx * 1.0,   bl * 0.1, 0.1),     // 1 — just off burr, slight forward kick
-    new THREE.Vector3(sx * hs * 0.55, bl * 0.25, 0.25),// 2 — sweeping out and forward
-    new THREE.Vector3(sx * hs * 0.85, bl * 0.48, 0.15),// 3 — peak outward reach
-    new THREE.Vector3(sx * hs * 0.80, bl * 0.68, -0.05),// 4 — turning back
-    new THREE.Vector3(sx * hs * 0.55, bl * 0.85, -0.18),// 5 — heading inward
-    new THREE.Vector3(sx * hs * 0.25, bl * 1.00, -0.08),// 6 — tip
+    // Burr - base attachment point
+    new THREE.Vector3(
+      sx * 0.55,
+      0,
+      0
+    ),
+    // Just off burr - initial outward/forward kick
+    new THREE.Vector3(
+      sx * 0.85,
+      bl * 0.06 * verticalRise,
+      forwardSweep * 0.3
+    ),
+    // Early beam - sweeping outward
+    new THREE.Vector3(
+      sx * hs * 0.45 * asymFactor,
+      bl * 0.15 * verticalRise,
+      forwardSweep * 0.6
+    ),
+    // Mid-lower beam - continuing outward arc
+    new THREE.Vector3(
+      sx * hs * 0.72 * asymFactor,
+      bl * 0.30 * verticalRise,
+      forwardSweep * 0.85
+    ),
+    // Peak outward reach - maximum spread point
+    new THREE.Vector3(
+      sx * hs * 0.92 * asymFactor,
+      bl * 0.48 * verticalRise,
+      forwardSweep * 0.7
+    ),
+    // Upper-mid beam - beginning inward curve
+    new THREE.Vector3(
+      sx * hs * 0.88 * asymFactor,
+      bl * 0.65 * verticalRise,
+      forwardSweep * 0.35
+    ),
+    // Upper beam - curving inward and slightly back
+    new THREE.Vector3(
+      sx * hs * 0.68 * asymFactor,
+      bl * 0.80 * verticalRise,
+      -forwardSweep * 0.15
+    ),
+    // Near tip - strong inward curve
+    new THREE.Vector3(
+      sx * hs * 0.42 * asymFactor,
+      bl * 0.92 * verticalRise,
+      -forwardSweep * 0.35
+    ),
+    // Tip - final point
+    new THREE.Vector3(
+      sx * hs * 0.22 * asymFactor,
+      bl * 1.0 * verticalRise,
+      -forwardSweep * 0.25
+    ),
   ]
 
-  // Circumference → radius: circumference = 2πr → r = c/(2π)
-  // Use H1–H4 mapped to 4 spread points along the beam, taper to tip
+  // Mass-driven radii using H1-H4 circumferences
+  // Circumference → radius: r = c/(2π)
   const c = circumferences
+  const baseRadiusFactor = config.realismLevel === 'enhanced' ? 1.0 : 0.9
+
+  // 9 radii corresponding to 9 control points
+  // Smooth interpolation between H measurements
   const radii = [
-    (c[0] / (2 * Math.PI)) * IN * 1.4, // 0 — burr (slightly wider)
-    (c[0] / (2 * Math.PI)) * IN * 1.1, // 1
-    (c[1] / (2 * Math.PI)) * IN,       // 2
-    (c[1] / (2 * Math.PI)) * IN * 0.9, // 3
-    (c[2] / (2 * Math.PI)) * IN * 0.8, // 4
-    (c[3] / (2 * Math.PI)) * IN * 0.65,// 5
-    (c[3] / (2 * Math.PI)) * IN * 0.25,// 6 — tip
+    (c[0] / (2 * Math.PI)) * IN * 1.5 * baseRadiusFactor,  // Burr - widest
+    (c[0] / (2 * Math.PI)) * IN * 1.25 * baseRadiusFactor, // Just off burr
+    ((c[0] + c[1]) / 2 / (2 * Math.PI)) * IN * 1.1 * baseRadiusFactor, // Early beam (H1-H2 blend)
+    (c[1] / (2 * Math.PI)) * IN * baseRadiusFactor, // Mid-lower (H2)
+    ((c[1] + c[2]) / 2 / (2 * Math.PI)) * IN * 0.95 * baseRadiusFactor, // Peak (H2-H3 blend)
+    (c[2] / (2 * Math.PI)) * IN * 0.85 * baseRadiusFactor, // Upper-mid (H3)
+    ((c[2] + c[3]) / 2 / (2 * Math.PI)) * IN * 0.72 * baseRadiusFactor, // Upper (H3-H4 blend)
+    (c[3] / (2 * Math.PI)) * IN * 0.45 * baseRadiusFactor, // Near tip (H4)
+    (c[3] / (2 * Math.PI)) * IN * 0.18 * baseRadiusFactor, // Tip - narrowest
   ]
 
-  return { points: pts, radii }
+  return { points: pts, radii, side: isLeft ? 'left' : 'right' }
 }
 
-// ─── Step 3: Tine attachment points ──────────────────────────────────────────
+// ─── Step 3: Enhanced Tine Placement ─────────────────────────────────────────
 
-const TINE_T_POSITIONS = [0.14, 0.32, 0.52, 0.70, 0.86] as const
+// Anatomically-tuned t-positions along the beam for each tine
+const TINE_T_POSITIONS: Record<string, number> = {
+  G1: 0.12, // Brow tine - early on beam
+  G2: 0.30, // Second point
+  G3: 0.48, // Third point - often longest
+  G4: 0.66, // Fourth point
+  G5: 0.82, // Fifth point (if present)
+}
+
+// Base angles for each tine (radians from vertical)
+const TINE_BASE_ANGLES: Record<string, { forward: number; outward: number }> = {
+  G1: { forward: 0.85, outward: 0.25 }, // Brow - sharp forward angle
+  G2: { forward: 0.35, outward: 0.18 }, // More upward
+  G3: { forward: 0.22, outward: 0.15 }, // Nearly vertical
+  G4: { forward: 0.18, outward: 0.12 }, // Slightly back-swept
+  G5: { forward: 0.12, outward: 0.10 }, // Nearly vertical
+}
 
 /**
- * Build tine specs. Each tine gets:
- * - a t-value along the beam CatmullRom curve
- * - a length in 3D units
- * - a local branch direction (outward + slightly forward + upward)
+ * Build enhanced tine specs with:
+ * - Anatomically believable spacing and angles
+ * - Forward and outward tilt parameters
+ * - Proper taper from base to tip
+ * - Per-side asymmetry support
  */
 function buildTineSpecs(
   tines: { name: string; length: number | null }[],
-  isLeft: boolean
+  circumferences: [number, number, number, number],
+  isLeft: boolean,
+  config: RenderConfig
 ): TineSpec[] {
   const sx = isLeft ? -1 : 1
   const result: TineSpec[] = []
@@ -169,46 +418,138 @@ function buildTineSpecs(
     const len = t.length && t.length > 0 ? t.length : null
     if (!len) return
 
-    // G1 (brow tine): angles sharply forward/upward
-    // G2–G4: progressively more vertical, slightly outward
-    // G5: nearly vertical
-    const fwdBias = i === 0 ? 0.7 : 0.2 - i * 0.04
-    const upBias = 0.5 + i * 0.08
-    const outBias = sx * (0.35 - i * 0.04)
+    const tineName = t.name as keyof typeof TINE_BASE_ANGLES
+    const angles = TINE_BASE_ANGLES[tineName] || { forward: 0.2, outward: 0.15 }
+    const tPos = TINE_T_POSITIONS[tineName] || (0.15 + i * 0.18)
 
-    const dir = new THREE.Vector3(outBias, upBias, fwdBias).normalize()
+    // Apply config-based forward tilt adjustment
+    const adjustedForward = angles.forward * (0.7 + config.tineForwardTilt * 0.6)
+    const adjustedOutward = angles.outward
+
+    // Build direction vector with natural variation
+    // G1 (brow): angles sharply forward and slightly outward
+    // G2-G4: progressively more vertical with slight outward cant
+    const upComponent = Math.cos(adjustedForward)
+    const fwdComponent = Math.sin(adjustedForward)
+    const outComponent = sx * Math.sin(adjustedOutward)
+
+    const dir = new THREE.Vector3(
+      outComponent,
+      upComponent,
+      fwdComponent
+    ).normalize()
+
+    // Base radius derived from beam thickness at attachment point
+    // Interpolate between H measurements based on t position
+    const hIndex = Math.min(3, Math.floor(tPos * 4))
+    const hBlend = (tPos * 4) - hIndex
+    const h1 = circumferences[hIndex] || 4
+    const h2 = circumferences[Math.min(3, hIndex + 1)] || 4
+    const localCircum = h1 * (1 - hBlend) + h2 * hBlend
+    
+    // Tine base is typically 40-60% of beam thickness at that point
+    const beamRadius = localCircum / (2 * Math.PI) * IN
+    const baseRadius = beamRadius * (0.55 - i * 0.03) // Smaller for higher tines
+
+    // Taper factor - brow tines taper more gradually
+    const taperFactor = i === 0 ? 0.6 : 0.75 + i * 0.03
 
     result.push({
       name: t.name,
-      beamT: TINE_T_POSITIONS[i] ?? 0.5,
+      beamT: tPos,
       length: len * IN,
+      baseRadius,
       localDir: dir,
+      forwardTilt: adjustedForward,
+      outwardTilt: adjustedOutward,
+      taperFactor,
     })
   })
 
   return result
 }
 
-// ─── Step 4: Assemble params ─────────────────────────────────────────────────
+// ─── Step 4: European Mount Base ─────────────────────────────────────────────
+
+function buildSkullPlate(
+  leftBurrCenter: THREE.Vector3,
+  rightBurrCenter: THREE.Vector3,
+  burrRadius: number
+): SkullPlateSpec {
+  const center = new THREE.Vector3(
+    (leftBurrCenter.x + rightBurrCenter.x) / 2,
+    Math.min(leftBurrCenter.y, rightBurrCenter.y) - burrRadius * 0.5,
+    (leftBurrCenter.z + rightBurrCenter.z) / 2
+  )
+  
+  const burrDistance = leftBurrCenter.distanceTo(rightBurrCenter)
+  
+  return {
+    center,
+    width: burrDistance * 1.3,
+    depth: burrRadius * 2.5,
+    height: burrRadius * 0.8,
+    burrDistance,
+  }
+}
+
+// ─── Step 5: Material Hints ──────────────────────────────────────────────────
+
+function computeMaterialHints(
+  config: RenderConfig,
+  asymmetryScore: number
+): MaterialHints {
+  // Base antler coloring with subtle variation
+  const baseColors = {
+    basic: { base: '#8B7355', tip: '#6B5344', burr: '#7A6348' },
+    standard: { base: '#A08060', tip: '#705540', burr: '#8B7050' },
+    enhanced: { base: '#B8956A', tip: '#7A6045', burr: '#9A7A55' },
+  }
+
+  const colors = baseColors[config.realismLevel]
+
+  return {
+    baseColor: colors.base,
+    tipColor: colors.tip,
+    burrColor: colors.burr,
+    roughnessBase: 0.72 + (config.realismLevel === 'enhanced' ? 0.05 : 0),
+    roughnessTip: 0.55,
+    colorVariation: 0.08 + asymmetryScore * 0.04,
+  }
+}
+
+// ─── Step 6: Assemble Enhanced Params ────────────────────────────────────────
 
 /**
  * Full pipeline: AntlerGeometry → AntlerMeshParams
+ * with all Phase 16 enhancements
  */
-export function geometryToMeshParams(geometry: AntlerGeometry): AntlerMeshParams {
+export function geometryToMeshParams(
+  geometry: AntlerGeometry,
+  config: RenderConfig = DEFAULT_RENDER_CONFIG
+): AntlerMeshParams {
   const g = normalizeGeometry(geometry)
   const halfSpread = g.insideSpread / 2
+
+  // Compute asymmetry offsets for each side
+  const beamLengthDiff = (g.mainBeamLeft - g.mainBeamRight) / Math.max(g.mainBeamLeft, g.mainBeamRight)
 
   const leftBeam = buildBeamCurve(
     g.mainBeamLeft,
     [g.h1Left, g.h2Left, g.h3Left, g.h4Left],
     halfSpread,
-    true
+    true,
+    config,
+    beamLengthDiff * 0.5 // Apply half the asymmetry offset
   )
+
   const rightBeam = buildBeamCurve(
     g.mainBeamRight,
     [g.h1Right, g.h2Right, g.h3Right, g.h4Right],
     halfSpread,
-    false
+    false,
+    config,
+    -beamLengthDiff * 0.5 // Opposite asymmetry offset
   )
 
   const leftTines = buildTineSpecs(
@@ -219,8 +560,11 @@ export function geometryToMeshParams(geometry: AntlerGeometry): AntlerMeshParams
       { name: 'G4', length: g.g4Left },
       { name: 'G5', length: g.g5Left },
     ],
-    true
+    [g.h1Left, g.h2Left, g.h3Left, g.h4Left],
+    true,
+    config
   )
+
   const rightTines = buildTineSpecs(
     [
       { name: 'G1', length: g.g1Right },
@@ -229,10 +573,35 @@ export function geometryToMeshParams(geometry: AntlerGeometry): AntlerMeshParams
       { name: 'G4', length: g.g4Right },
       { name: 'G5', length: g.g5Right },
     ],
-    false
+    [g.h1Right, g.h2Right, g.h3Right, g.h4Right],
+    false,
+    config
   )
 
-  const burrRadius = Math.max(g.h1Left, g.h1Right) / (2 * Math.PI) * IN * 1.6
+  // Burr specs with enhanced detail
+  const burrRadiusLeft = (g.h1Left / (2 * Math.PI)) * IN * 1.8
+  const burrRadiusRight = (g.h1Right / (2 * Math.PI)) * IN * 1.8
+
+  const leftBurr: BurrSpec = {
+    center: leftBeam.points[0].clone(),
+    radius: burrRadiusLeft,
+    height: burrRadiusLeft * 0.6,
+    textureSeed: 12345,
+  }
+
+  const rightBurr: BurrSpec = {
+    center: rightBeam.points[0].clone(),
+    radius: burrRadiusRight,
+    height: burrRadiusRight * 0.6,
+    textureSeed: 67890,
+  }
+
+  // Optional skull plate for European mount
+  const skullPlate = config.mountMode === 'european_mount'
+    ? buildSkullPlate(leftBurr.center, rightBurr.center, Math.max(burrRadiusLeft, burrRadiusRight))
+    : null
+
+  const materialHints = computeMaterialHints(config, g.asymmetryScore)
 
   return {
     rendererType: 'parametric_3d',
@@ -240,9 +609,13 @@ export function geometryToMeshParams(geometry: AntlerGeometry): AntlerMeshParams
     rightBeam,
     leftTines,
     rightTines,
-    leftBurr: { center: leftBeam.points[0].clone(), radius: burrRadius },
-    rightBurr: { center: rightBeam.points[0].clone(), radius: burrRadius },
-    skullHalfWidth: 0.6,
+    leftBurr,
+    rightBurr,
+    skullPlate,
+    skullHalfWidth: 0.55,
+    asymmetryFactor: g.asymmetryScore,
+    config,
+    materialHints,
   }
 }
 
@@ -276,43 +649,202 @@ export function getColorScheme(settings: RenderSettings): {
   }
 }
 
-// ─── Tube geometry builder ───────────────────────────────────────────────────
+// ─── Enhanced Tube Geometry Builder ──────────────────────────────────────────
 
 /**
- * Build a tapered tube along a CatmullRom curve.
- * Returns a THREE.TubeGeometry approximation by building a single tube with
- * the average radius. For visual taper we use a custom BufferGeometry approach
- * that the viewer will call per-segment.
+ * Build a tapered tube along a CatmullRom curve with variable radii.
+ * Creates proper BufferGeometry with smooth radius interpolation.
  */
 export function buildBeamTubeGeometry(
   curve: BeamCurve,
-  tubularSegments = 40,
-  radialSegments = 8
-): THREE.TubeGeometry {
+  tubularSegments = 48,
+  radialSegments = 12
+): THREE.BufferGeometry {
   const catmull = new THREE.CatmullRomCurve3(curve.points)
-  // Average radius across the beam for a single TubeGeometry pass
-  const avgRadius = curve.radii.reduce((s, r) => s + r, 0) / curve.radii.length
-  return new THREE.TubeGeometry(catmull, tubularSegments, avgRadius, radialSegments, false)
+  const path = catmull
+  const frames = path.computeFrenetFrames(tubularSegments, false)
+
+  const positions: number[] = []
+  const normals: number[] = []
+  const uvs: number[] = []
+  const indices: number[] = []
+
+  // Generate vertices with tapered radii
+  for (let i = 0; i <= tubularSegments; i++) {
+    const t = i / tubularSegments
+    const point = path.getPoint(t)
+    
+    // Interpolate radius at this t position
+    const radiusIndex = t * (curve.radii.length - 1)
+    const radiusFloor = Math.floor(radiusIndex)
+    const radiusCeil = Math.min(curve.radii.length - 1, radiusFloor + 1)
+    const radiusBlend = radiusIndex - radiusFloor
+    const radius = curve.radii[radiusFloor] * (1 - radiusBlend) + curve.radii[radiusCeil] * radiusBlend
+
+    const N = frames.normals[i]
+    const B = frames.binormals[i]
+
+    for (let j = 0; j <= radialSegments; j++) {
+      const v = (j / radialSegments) * Math.PI * 2
+      const sin = Math.sin(v)
+      const cos = Math.cos(v)
+
+      // Position
+      const x = point.x + radius * (cos * N.x + sin * B.x)
+      const y = point.y + radius * (cos * N.y + sin * B.y)
+      const z = point.z + radius * (cos * N.z + sin * B.z)
+      positions.push(x, y, z)
+
+      // Normal
+      const normal = new THREE.Vector3(cos * N.x + sin * B.x, cos * N.y + sin * B.y, cos * N.z + sin * B.z).normalize()
+      normals.push(normal.x, normal.y, normal.z)
+
+      // UV
+      uvs.push(j / radialSegments, t)
+    }
+  }
+
+  // Generate indices
+  for (let i = 0; i < tubularSegments; i++) {
+    for (let j = 0; j < radialSegments; j++) {
+      const a = i * (radialSegments + 1) + j
+      const b = (i + 1) * (radialSegments + 1) + j
+      const c = (i + 1) * (radialSegments + 1) + (j + 1)
+      const d = i * (radialSegments + 1) + (j + 1)
+
+      indices.push(a, b, d)
+      indices.push(b, c, d)
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geometry.setIndex(indices)
+
+  return geometry
 }
 
 /**
- * Build a straight taper-tipped cone-tube for a tine.
- * We use ConeGeometry oriented along the tine direction.
+ * Build an enhanced tine geometry with proper base and taper.
+ * Uses a tapered cylinder/cone hybrid for natural look.
  */
-export function buildTineGeometry(length: number, baseRadius: number): THREE.ConeGeometry {
-  return new THREE.ConeGeometry(baseRadius, length, 7, 1, false)
+export function buildTineGeometry(
+  spec: TineSpec
+): THREE.BufferGeometry {
+  const { length, baseRadius, taperFactor } = spec
+  
+  // Create a tapered cylinder using LatheGeometry for smoother results
+  const segments = 8
+  const heightSegments = 6
+  
+  const points: THREE.Vector2[] = []
+  
+  // Profile curve: wider at base, tapers to point
+  for (let i = 0; i <= heightSegments; i++) {
+    const t = i / heightSegments
+    // Exponential taper for natural look
+    const radius = baseRadius * Math.pow(1 - t, taperFactor)
+    const y = t * length
+    points.push(new THREE.Vector2(Math.max(radius, 0.001), y))
+  }
+  
+  return new THREE.LatheGeometry(points, segments)
+}
+
+/**
+ * Build a burr (pedicle base) geometry with textured appearance.
+ */
+export function buildBurrGeometry(
+  spec: BurrSpec
+): THREE.BufferGeometry {
+  // Create a flattened sphere with slight irregularity
+  const geometry = new THREE.SphereGeometry(spec.radius, 16, 12)
+  
+  // Scale to make it slightly flattened (oblate)
+  const positions = geometry.attributes.position
+  for (let i = 0; i < positions.count; i++) {
+    const y = positions.getY(i)
+    // Compress vertically
+    positions.setY(i, y * 0.7)
+  }
+  geometry.attributes.position.needsUpdate = true
+  geometry.computeVertexNormals()
+  
+  return geometry
+}
+
+/**
+ * Build European mount skull plate geometry.
+ */
+export function buildSkullPlateGeometry(
+  spec: SkullPlateSpec
+): THREE.BufferGeometry {
+  // Simple rounded box for skull plate
+  const geometry = new THREE.BoxGeometry(
+    spec.width,
+    spec.height,
+    spec.depth,
+    4, 2, 4
+  )
+  
+  // Round the edges by pushing vertices toward a sphere
+  const positions = geometry.attributes.position
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i)
+    const y = positions.getY(i)
+    const z = positions.getZ(i)
+    
+    // Apply subtle rounding
+    const len = Math.sqrt(x * x + z * z)
+    if (len > spec.width * 0.4) {
+      const factor = 0.92
+      positions.setX(i, x * factor)
+      positions.setZ(i, z * factor)
+    }
+  }
+  geometry.attributes.position.needsUpdate = true
+  geometry.computeVertexNormals()
+  
+  return geometry
 }
 
 /**
  * Sample a point + tangent on a CatmullRom beam at t ∈ [0,1].
+ * Enhanced to also return radius at that point.
  */
 export function sampleBeamAt(
   curve: BeamCurve,
   t: number
-): { position: THREE.Vector3; tangent: THREE.Vector3 } {
+): { position: THREE.Vector3; tangent: THREE.Vector3; radius: number } {
   const catmull = new THREE.CatmullRomCurve3(curve.points)
+  
+  // Interpolate radius at t
+  const radiusIndex = t * (curve.radii.length - 1)
+  const radiusFloor = Math.floor(radiusIndex)
+  const radiusCeil = Math.min(curve.radii.length - 1, radiusFloor + 1)
+  const radiusBlend = radiusIndex - radiusFloor
+  const radius = curve.radii[radiusFloor] * (1 - radiusBlend) + curve.radii[radiusCeil] * radiusBlend
+
   return {
     position: catmull.getPoint(t),
     tangent: catmull.getTangent(t).normalize(),
+    radius,
+  }
+}
+
+// ─── Backward Compatibility ──────────────────────────────────────────────────
+
+/**
+ * Ensure older render records without config still work.
+ * Merges saved config with defaults.
+ */
+export function ensureRenderConfig(
+  savedConfig?: Partial<RenderConfig> | null
+): RenderConfig {
+  return {
+    ...DEFAULT_RENDER_CONFIG,
+    ...(savedConfig || {}),
   }
 }

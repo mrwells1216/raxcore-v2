@@ -1,11 +1,12 @@
 'use client'
 
 import { useRef, useState, useCallback, useEffect } from 'react'
-import { Camera, SwitchCamera, X, Check, RefreshCw } from 'lucide-react'
+import { Camera, SwitchCamera, X, Check, RefreshCw, Eye, Maximize2, Sun, Focus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { ANGLE_TYPES } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 import type { AngleType } from '@/lib/types'
 
 interface CapturedImage {
@@ -108,8 +109,8 @@ export function CameraCapture({ onCapture }: CameraCaptureProps) {
     // Draw video frame to canvas
     ctx.drawImage(video, 0, 0)
 
-    // Get data URL
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+    // Get data URL with moderate quality (will be preprocessed further before upload)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
     setCapturedPhoto(dataUrl)
     stopCamera()
   }, [stopCamera])
@@ -190,6 +191,11 @@ export function CameraCapture({ onCapture }: CameraCaptureProps) {
           />
         )}
 
+        {/* Live Capture Guidance Overlay */}
+        {isStreaming && !capturedPhoto && (
+          <CaptureGuidanceOverlay angleType={angleType} />
+        )}
+
         {/* Placeholder when not streaming */}
         {!isStreaming && !capturedPhoto && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
@@ -255,16 +261,87 @@ export function CameraCapture({ onCapture }: CameraCaptureProps) {
               <RefreshCw className="h-5 w-5" />
               Retake
             </Button>
-            <Button 
-              onClick={confirmPhoto} 
-              className="flex-1 min-h-[48px] gap-2"
+        <Button 
+          onClick={confirmPhoto} 
+          className="flex-1 min-h-[48px] gap-2"
+        >
+          <Check className="h-5 w-5" />
+          Use Photo
+        </Button>
+      </>
+    )}
+  </div>
+</div>
+)
+}
+
+// Capture guidance overlay component
+function CaptureGuidanceOverlay({ angleType }: { angleType: AngleType }) {
+  const guidance = CAPTURE_GUIDANCE[angleType] || CAPTURE_GUIDANCE.front
+
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      {/* Top guidance bar */}
+      <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-3">
+        <div className="flex items-center justify-center gap-2 text-white text-sm">
+          <guidance.icon className="h-4 w-4" />
+          <span className="font-medium">{guidance.title}</span>
+        </div>
+      </div>
+      
+      {/* Center framing guide */}
+      <div className="absolute inset-8 border-2 border-white/30 rounded-lg">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded text-white text-xs">
+          Center rack here
+        </div>
+      </div>
+      
+      {/* Bottom tips */}
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {guidance.tips.map((tip, i) => (
+            <span 
+              key={i} 
+              className="text-xs text-white/90 bg-white/20 backdrop-blur-sm px-2 py-1 rounded-full"
             >
-              <Check className="h-5 w-5" />
-              Use Photo
-            </Button>
-          </>
-        )}
+              {tip}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   )
+}
+
+// Guidance configuration per angle type
+const CAPTURE_GUIDANCE: Record<AngleType, {
+  title: string
+  icon: typeof Camera
+  tips: string[]
+}> = {
+  front: {
+    title: 'Front View',
+    icon: Maximize2,
+    tips: ['Center full rack', 'Both ears visible', 'Avoid tilt'],
+  },
+  left: {
+    title: 'Left Side',
+    icon: Eye,
+    tips: ['Show left beam curve', 'Include ear for scale', 'Capture all tines'],
+  },
+  right: {
+    title: 'Right Side',
+    icon: Eye,
+    tips: ['Show right beam curve', 'Include ear for scale', 'Capture all tines'],
+  },
+  back: {
+    title: 'Back View',
+    icon: Maximize2,
+    tips: ['Show inside spread', 'Both beams visible', 'Level angle'],
+  },
+  other: {
+    title: 'Additional Angle',
+    icon: Camera,
+    tips: ['Capture unique features', 'Good lighting', 'Sharp focus'],
+  },
 }

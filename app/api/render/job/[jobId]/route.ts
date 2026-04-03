@@ -5,6 +5,8 @@ import {
   deleteRenderJob,
   getRenderOutputs 
 } from '@/lib/render/service'
+import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
+import { logEventFireForget } from '@/lib/monitoring/service'
 
 export async function GET(
   request: NextRequest,
@@ -53,7 +55,60 @@ export async function PATCH(
     if (!job) {
       return NextResponse.json({ error: 'Render job not found' }, { status: 404 })
     }
-    
+
+    // Phase 34+39: Fire notifications + log monitoring events on terminal status transitions
+    if (body.status === 'completed' || body.status === 'failed') {
+      const userId = (job as Record<string, unknown>).user_id as string | undefined
+      const buckId = (job as Record<string, unknown>).buck_id as string | undefined
+
+      // Phase 39: Log render terminal event
+      logEventFireForget({
+        eventType: body.status === 'completed' ? 'render_completed' : 'render_failed',
+        service: 'render',
+        route: `/api/render/job/${jobId}`,
+        status: body.status === 'completed' ? 'success' : 'failure',
+        errorMessage: body.status === 'failed' ? (body.error_message ?? 'Render failed') : undefined,
+        renderJobId: jobId,
+        userId: userId ?? null,
+        buckId: buckId ?? null,
+      })
+
+      if (userId) {
+        if (body.status === 'completed') {
+          createGatedUserNotification({
+            userId,
+            type: 'render_complete',
+            title: '3D render is ready',
+            body: 'Your antler model has finished rendering and is ready to view.',
+            linkHref: `/render/${(job as Record<string, unknown>).buck_id ?? jobId}`,
+            buckId: (job as Record<string, unknown>).buck_id as string | undefined,
+            priority: 'normal',
+          }).catch(err => console.error('[render] notification error:', err))
+        } else {
+          createGatedUserNotification({
+            userId,
+            type: 'render_failed',
+            title: '3D render failed',
+            body: body.error_message ?? 'An error occurred while generating your 3D model.',
+            linkHref: `/results/${(job as Record<string, unknown>).buck_id ?? jobId}`,
+            buckId: (job as Record<string, unknown>).buck_id as string | undefined,
+            priority: 'high',
+          }).catch(err => console.error('[render] notification error:', err))
+
+          // Admin task for failed renders
+          createAdminTask({
+            type: 'failed_validation',
+            title: `Render failed: job ${jobId.slice(-8)}`,
+            body: body.error_message ?? 'Render job ended in failed state.',
+            priority: 'normal',
+            linkHref: `/admin/submissions/${(job as Record<string, unknown>).buck_id ?? jobId}`,
+            relatedId: jobId,
+            relatedType: 'render_job',
+          }).catch(err => console.error('[render] admin task error:', err))
+        }
+      }
+    }
+
     return NextResponse.json({ job })
   } catch (error) {
     console.error('Error updating render job:', error)

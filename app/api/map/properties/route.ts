@@ -17,11 +17,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ properties })
   } catch (error) {
-    console.error('Error fetching properties:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch properties' },
-      { status: 500 }
-    )
+    // Downgrade to warn — properties table may not exist in all environments
+    console.warn('[map] getAllProperties error (non-critical):', error)
+    return NextResponse.json({ properties: [] })
   }
 }
 

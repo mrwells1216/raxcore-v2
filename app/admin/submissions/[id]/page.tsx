@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import Link from 'next/link'
 import Image from 'next/image'
 import { notFound } from 'next/navigation'
@@ -14,7 +16,8 @@ import {
   TrendingDown,
   Minus,
   AlertTriangle,
-  Eye
+  Eye,
+  Camera
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +26,9 @@ import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { getBuckBundle } from '@/lib/storage/service'
 import { LearningExplainabilityPanel } from '@/components/admin/learning-explainability-panel'
+import { IntakeQualityDisplay, IntakeQualityBadge } from '@/components/scoring/intake-quality-display'
+import { AbnormalPointsDisplay } from '@/components/scoring/abnormal-points-display'
+import type { IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 
 export default async function AdminSubmissionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -46,6 +52,9 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
   const netError = groundTruth && prediction?.predicted_net && groundTruth.official_net
     ? (prediction.predicted_net - groundTruth.official_net)
     : null
+
+  // Get intake quality from prediction if available
+  const intakeQuality = (prediction?.intake_quality as IntakeQualitySummary | null) || null
 
   return (
     <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
@@ -247,6 +256,20 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
                 <p className="text-sm">{buck.notes}</p>
               </div>
             )}
+
+            {/* Phase 54: Abnormal Points Display */}
+            {(buck.irregular_points_present || buck.non_typical_traits_present || buck.abnormal_point_tags?.length) && (
+              <div className="pt-2 border-t border-border">
+                <AbnormalPointsDisplay
+                  irregularPointsPresent={buck.irregular_points_present as YesNoUnsure}
+                  nonTypicalTraitsPresent={buck.non_typical_traits_present as YesNoUnsure}
+                  estimatedIrregularPointsCount={buck.estimated_irregular_points_count}
+                  abnormalPointNotes={buck.abnormal_point_notes}
+                  abnormalPointTags={buck.abnormal_point_tags as AbnormalPointTag[]}
+                  variant="inline"
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -269,9 +292,17 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
                   Error Band: {prediction.error_band_low?.toFixed(1)}&quot; - {prediction.error_band_high?.toFixed(1)}&quot;
                 </CardDescription>
               </div>
-              <Badge variant="outline" className={confidenceColors[confidenceLevel]}>
-                {confidence.toFixed(0)}% Confidence
-              </Badge>
+              <div className="flex flex-col items-end gap-1.5">
+                <Badge variant="outline" className={confidenceColors[confidenceLevel]}>
+                  {confidence.toFixed(0)}% Confidence
+                </Badge>
+                {intakeQuality && (
+                  <IntakeQualityBadge 
+                    tier={intakeQuality.tier} 
+                    score={intakeQuality.overallScore}
+                  />
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -324,6 +355,15 @@ export default async function AdminSubmissionDetailPage({ params }: { params: Pr
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Intake Quality Summary - Phase 15 */}
+            {intakeQuality && (
+              <IntakeQualityDisplay 
+                quality={intakeQuality}
+                showRecommendations={intakeQuality.tier === 'fair' || intakeQuality.tier === 'poor'}
+                compact={intakeQuality.tier === 'excellent' || intakeQuality.tier === 'good'}
+              />
             )}
 
             {/* Measurements Grid */}

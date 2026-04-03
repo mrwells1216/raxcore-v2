@@ -9,11 +9,11 @@ const _geist = Geist({ subsets: ['latin'] })
 const _geistMono = Geist_Mono({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'xRack - AI Antler Scoring',
+  title: 'RAXcore - AI Antler Scoring',
   description: 'AI-powered whitetail antler scoring from photos. Get estimated Boone & Crockett style scores using anatomical scaling references.',
   generator: 'v0.app',
   keywords: ['antler scoring', 'whitetail deer', 'Boone and Crockett', 'buck scoring', 'AI scoring', 'deer hunting'],
-  authors: [{ name: 'xRack' }],
+  authors: [{ name: 'RAXcore' }],
   icons: {
     icon: [
       {

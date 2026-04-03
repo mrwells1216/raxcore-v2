@@ -19,6 +19,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogPortal,
+  DialogOverlay,
 } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { MapPin, AlertCircle } from 'lucide-react'
@@ -114,7 +116,9 @@ export function PinForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogPortal>
+        <DialogOverlay className="z-[10000]" />
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto z-[10001]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MapPin className="h-5 w-5" />
@@ -304,6 +308,7 @@ export function PinForm({
           </div>
         </form>
       </DialogContent>
+      </DialogPortal>
     </Dialog>
   )
 }

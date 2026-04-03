@@ -10,10 +10,11 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PropertyForm } from '@/components/map/property-form'
 import { PinForm } from '@/components/map/pin-form'
-import { FilterPanel } from '@/components/map/filter-panel'
 import { PropertyList } from '@/components/map/property-list'
+import { US_STATES } from '@/lib/constants'
 import { 
   MapPin, 
   Plus, 
@@ -158,13 +159,6 @@ export default function MapPage() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Left Panel */}
           <div className="lg:col-span-1 space-y-4">
-            <FilterPanel
-              filters={filters}
-              onFiltersChange={setFilters}
-              properties={properties}
-              onClearFilters={() => setFilters({})}
-            />
-
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'properties' | 'pins')}>
               <TabsList className="w-full">
                 <TabsTrigger value="properties" className="flex-1">
@@ -266,8 +260,125 @@ export default function MapPage() {
           </div>
 
           {/* Map Area */}
-          <div className="lg:col-span-3">
-            <Card className="h-[600px] lg:h-[700px]">
+          <div className="lg:col-span-3 flex flex-col gap-0">
+            {/* Filter bar — sits above map card, visually connected */}
+            <div
+              className="rounded-t-lg border border-b-0 border-border/50 px-3 py-2 flex items-center gap-2 flex-wrap"
+              style={{
+                background: 'linear-gradient(145deg, rgba(18,14,11,0.97), rgba(28,22,17,0.95))',
+                boxShadow: 'inset 0 1px 0 rgba(107,93,82,0.15)',
+              }}
+            >
+              {/* Property */}
+              <Select
+                value={filters.property_id || 'all'}
+                onValueChange={(value) =>
+                  setFilters({ ...filters, property_id: value === 'all' ? undefined : value })
+                }
+              >
+                <SelectTrigger
+                  className="h-7 w-36 text-[11px] border-border/40 bg-transparent"
+                  style={{ color: 'rgba(180,163,145,0.85)', letterSpacing: '0.03em' }}
+                >
+                  <Building2 className="h-3 w-3 mr-1.5 shrink-0" style={{ color: 'rgba(180,163,145,0.5)' }} />
+                  <SelectValue placeholder="PROPERTY" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All properties</SelectItem>
+                  {properties.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* State */}
+              <Select
+                value={filters.state || 'all'}
+                onValueChange={(value) =>
+                  setFilters({ ...filters, state: value === 'all' ? undefined : value })
+                }
+              >
+                <SelectTrigger
+                  className="h-7 w-32 text-[11px] border-border/40 bg-transparent"
+                  style={{ color: 'rgba(180,163,145,0.85)', letterSpacing: '0.03em' }}
+                >
+                  <TreePine className="h-3 w-3 mr-1.5 shrink-0" style={{ color: 'rgba(180,163,145,0.5)' }} />
+                  <SelectValue placeholder="STATE" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All states</SelectItem>
+                  {US_STATES.map(s => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Pin type */}
+              <Select
+                value={filters.location_type || 'all'}
+                onValueChange={(value) =>
+                  setFilters({ ...filters, location_type: value === 'all' ? undefined : value as LocationType })
+                }
+              >
+                <SelectTrigger
+                  className="h-7 w-36 text-[11px] border-border/40 bg-transparent"
+                  style={{ color: 'rgba(180,163,145,0.85)', letterSpacing: '0.03em' }}
+                >
+                  <MapPin className="h-3 w-3 mr-1.5 shrink-0" style={{ color: 'rgba(180,163,145,0.5)' }} />
+                  <SelectValue placeholder="PIN TYPE" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  {Object.entries(LOCATION_TYPE_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0 inline-block"
+                          style={{ backgroundColor: LOCATION_TYPE_COLORS[value as LocationType] }}
+                        />
+                        {label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Year */}
+              <Select
+                value={filters.year?.toString() || 'all'}
+                onValueChange={(value) =>
+                  setFilters({ ...filters, year: value === 'all' ? undefined : parseInt(value) })
+                }
+              >
+                <SelectTrigger
+                  className="h-7 w-24 text-[11px] border-border/40 bg-transparent"
+                  style={{ color: 'rgba(180,163,145,0.85)', letterSpacing: '0.03em' }}
+                >
+                  <Calendar className="h-3 w-3 mr-1.5 shrink-0" style={{ color: 'rgba(180,163,145,0.5)' }} />
+                  <SelectValue placeholder="YEAR" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All years</SelectItem>
+                  {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                    <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Clear — only shown when filters are active */}
+              {(filters.property_id || filters.state || filters.location_type || filters.year) && (
+                <button
+                  onClick={() => setFilters({})}
+                  className="ml-auto flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border/30 transition-colors hover:bg-accent/20"
+                  style={{ color: 'rgba(180,163,145,0.65)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+                >
+                  <span>Clear</span>
+                </button>
+              )}
+            </div>
+
+            {/* Map card — rounded top corners removed so it connects to filter bar */}
+            <Card className="flex-1 h-[580px] lg:h-[660px] rounded-t-none">
               <CardContent className="p-0 h-full">
                 <MapViewer
                   pins={filteredPins}

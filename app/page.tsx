@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Camera, Upload, Target, TrendingUp, Shield, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { BinaryCamoBackground } from '@/components/binary-camo-background'
 
 const features = [
@@ -31,7 +31,7 @@ const features = [
 export default function HomePage() {
   return (
     <div className="min-h-svh flex flex-col bg-background">
-      <Header />
+      <AppHeader />
       
       <main className="flex-1">
         {/* Hero Section */}
@@ -184,9 +184,10 @@ export default function HomePage() {
         <div className="container max-w-screen-xl mx-auto px-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-xs">Xr</div>
-              <span className="text-sm text-muted-foreground">
-                xRack
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-xs">Rx</div>
+              <span className="text-sm">
+                <span className="text-black dark:text-white font-semibold">RAX</span>
+                <span className="text-muted-foreground">core</span>
               </span>
             </div>
             <p className="text-xs text-muted-foreground text-center">

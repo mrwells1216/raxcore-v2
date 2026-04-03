@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
+import {
   LayoutDashboard, 
   Database, 
   TrendingUp, 
@@ -11,7 +11,25 @@ import {
   Target,
   ChevronLeft,
   Menu,
-  BarChart3
+  BarChart3,
+  FlaskConical,
+  GitCompare,
+  Settings2,
+  Package,
+  HeartPulse,
+  Scale,
+  Activity,
+  CreditCard,
+  Radio,
+  Layers,
+  Cpu,
+  ListTodo,
+  TestTubes,
+  Combine,
+  RotateCcw,
+  Boxes,
+  Eye,
+  Zap,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -19,11 +37,30 @@ import { cn } from '@/lib/utils'
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { name: 'Monitoring', href: '/admin/monitoring', icon: Radio },
+  { name: 'Operations', href: '/admin/operations', icon: Activity },
+  { name: 'Accuracy', href: '/admin/accuracy', icon: Target },
+  { name: 'Calibration', href: '/admin/calibration', icon: Settings2 },
+  { name: 'Segments', href: '/admin/segments', icon: Layers },
+  { name: 'Dataset Health', href: '/admin/dataset-health', icon: HeartPulse },
+  { name: 'Influence', href: '/admin/influence', icon: Scale },
+  { name: 'Benchmarks', href: '/admin/benchmarks', icon: Package },
+  { name: 'Retraining', href: '/admin/retraining', icon: Cpu },
+  { name: 'Validation', href: '/admin/validation', icon: FlaskConical },
+  { name: 'Bulk Testing', href: '/admin/bulk-validation', icon: GitCompare },
   { name: 'Submissions', href: '/admin/submissions', icon: Database },
   { name: 'Training Data', href: '/admin/training', icon: TrendingUp },
   { name: 'Error Patterns', href: '/admin/error-patterns', icon: BarChart3 },
   { name: 'Teach AI', href: '/admin/teach', icon: Wand2 },
   { name: 'Export', href: '/admin/export', icon: FileDown },
+  { name: 'Jobs', href: '/admin/jobs', icon: ListTodo },
+  { name: 'Multi-View', href: '/admin/multiview', icon: Combine },
+  { name: 'Reverse Eng', href: '/admin/reverse', icon: RotateCcw },
+  { name: 'Structural', href: '/admin/structural', icon: Boxes },
+  { name: 'Supervision', href: '/admin/supervision', icon: Eye },
+  { name: 'Training Packs', href: '/admin/training-packs', icon: Zap },
+  { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
+  { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
 export function AdminSidebar() {
@@ -35,8 +72,8 @@ export function AdminSidebar() {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
         <Link href="/admin" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Xr</div>
-          <span className="font-semibold">xRack Admin</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
+          <span className="font-semibold">RAXcore Admin</span>
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -59,8 +96,8 @@ export function AdminSidebar() {
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
             <Link href="/admin" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Xr</div>
-              <span className="font-semibold text-sidebar-foreground">xRack Admin</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
+              <span className="font-semibold text-sidebar-foreground">RAXcore Admin</span>
             </Link>
             <Button 
               variant="ghost" 

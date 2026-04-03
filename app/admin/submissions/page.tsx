@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { SubmissionsTable } from '@/components/admin/submissions-table'
 import { listBucks } from '@/lib/storage/service'

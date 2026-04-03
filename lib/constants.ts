@@ -55,6 +55,13 @@ export const US_STATES = [
 export const HIGH_OUTPUT_STATES = ['IL', 'IA', 'WI', 'KS', 'OH', 'IN', 'MO', 'KY', 'NE', 'MN'] as const
 export const LOW_OUTPUT_STATES = ['AZ', 'NV', 'NM', 'CA', 'WA', 'OR', 'UT'] as const
 
+// Phase 41: Geographic region groupings for segmented calibration
+export const MIDWEST_STATES = ['IL', 'IA', 'WI', 'OH', 'IN', 'MO', 'MN', 'MI', 'ND', 'SD', 'WI'] as const
+export const SOUTH_STATES   = ['TX', 'AL', 'MS', 'GA', 'FL', 'SC', 'NC', 'TN', 'AR', 'LA', 'KY', 'VA', 'WV', 'OK'] as const
+export const NORTHEAST_STATES = ['NY', 'PA', 'VT', 'NH', 'ME', 'MA', 'CT', 'RI', 'NJ', 'DE', 'MD'] as const
+export const PLAINS_STATES  = ['KS', 'NE', 'CO', 'WY', 'MT', 'ID'] as const
+export const WEST_STATES    = ['AZ', 'NV', 'NM', 'CA', 'WA', 'OR', 'UT'] as const
+
 export const RACK_TYPES = [
   { value: 'typical', label: 'Typical' },
   { value: 'non-typical', label: 'Non-Typical' },
@@ -88,6 +95,24 @@ export const CAPTURE_DEVICES = [
 
 export const MAIN_FRAME_OPTIONS = [8, 9, 10, 11, 12, 13, 14]
 
+// Phase 54: Abnormal/Irregular Point Tags
+export const ABNORMAL_POINT_TAGS = [
+  { value: 'drop_tine', label: 'Drop Tine', description: 'A tine that grows downward from the main beam' },
+  { value: 'sticker_point', label: 'Sticker Point', description: 'A small abnormal point growing from another point or beam' },
+  { value: 'split_tine', label: 'Split Tine', description: 'A tine that splits into two or more points' },
+  { value: 'extra_abnormal_growth', label: 'Extra Abnormal Growth', description: 'Additional growth beyond normal tine structure' },
+  { value: 'palmation_like_growth', label: 'Palmation-like Growth', description: 'Flat, palm-like antler growth similar to moose' },
+  { value: 'kicker_point', label: 'Kicker Point', description: 'A point growing from the base/burr area' },
+  { value: 'inline_point', label: 'Inline Point', description: 'A point growing inline with the main beam' },
+  { value: 'unknown_abnormality', label: 'Other / Unknown', description: 'Other abnormal features not listed' },
+] as const
+
+export const YES_NO_UNSURE_OPTIONS = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+  { value: 'unsure', label: 'Unsure' },
+] as const
+
 export const ANGLE_TYPES = [
   { value: 'front', label: 'Front' },
   { value: 'left', label: 'Left Side' },
@@ -110,10 +135,29 @@ export const CONFIDENCE_THRESHOLDS = {
 } as const
 
 export const ANATOMICAL_REFERENCES = {
+  // ── Ear references (kept as secondary/bonus — not primary)
   EAR_BASE_TO_TIP: 6.25,
-  EYE_TO_EYE: 4.3,
   EAR_TIP_TO_TIP_ALERT: 16.0,
   EAR_TIP_TO_TIP_RELAXED: 14.0,
+  EAR_BASE_SPACING: 7.5,       // center-to-center of ear bases (front view)
+
+  // ── Top-tier: eye box dimensions
+  EYE_TO_EYE: 4.3,             // center-to-center of pupils (front view)
+  EYE_WIDTH: 1.4,              // horizontal width of one eye socket
+  EYE_HEIGHT: 0.9,             // vertical height of one eye socket
+  EYE_BOX_WIDTH: 1.4,          // full bony eye socket box width
+  EYE_BOX_HEIGHT: 1.0,         // full bony eye socket box height
+
+  // ── Top-tier: antler base / pedicle spacing
+  PEDICLE_SPACING: 3.8,        // center-to-center of antler pedicles on skull
+  EYE_TO_PEDICLE: 2.1,         // distance from eye center to nearest pedicle base
+
+  // ── Top-tier: skull / forehead width
+  SKULL_FOREHEAD_WIDTH: 5.2,   // forehead width between orbital ridges (front view)
+
+  // ── Secondary: nose bridge and muzzle
+  NOSE_BRIDGE_LENGTH: 2.8,     // bridge of nose from brow to tip
+  MUZZLE_WIDTH: 2.6,           // muzzle width at widest point (front view)
 } as const
 
 export const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const

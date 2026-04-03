@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { Header } from '@/components/header'
+import { AppHeader } from '@/components/app-header'
 import { ResultClient } from './result-client'
 import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
+import { ShareBuckButton } from '@/components/scoring/share-buck-button'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -52,14 +53,23 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <AppHeader />
       <main className="container max-w-2xl mx-auto px-4 py-6 pb-24">
         <div className="mb-6">
           <Link href="/history" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
             <ArrowLeft className="mr-1 h-4 w-4" />Back to History
           </Link>
-          <h1 className="text-2xl font-bold tracking-tight">Score Results</h1>
-          <p className="text-muted-foreground text-sm">{buck.state} | {buck.rack_type} | {buck.main_frame_points ? `${buck.main_frame_points}-frame | ` : ''}{new Date(buck.created_at).toLocaleDateString()}</p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Score Results</h1>
+              <p className="text-muted-foreground text-sm">{buck.state} | {buck.rack_type} | {buck.main_frame_points ? `${buck.main_frame_points}-frame | ` : ''}{new Date(buck.created_at).toLocaleDateString()}</p>
+            </div>
+            <ShareBuckButton 
+              buckId={buck.id} 
+              shareToken={(buck as any).share_token}
+              isPublic={(buck as any).is_public}
+            />
+          </div>
         </div>
         <ResultClient result={result} formData={formData} />
       </main>

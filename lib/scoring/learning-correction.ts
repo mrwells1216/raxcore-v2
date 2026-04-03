@@ -15,9 +15,15 @@ import type {
   CaptureDevice,
   ExtendedLearningSummary as ExtendedLearningSummaryType,
   MeasurementCorrectionInfo,
-  VerifiedExampleInfluenceInfo 
+  VerifiedExampleInfluenceInfo,
+  CalibrationProfile 
 } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES } from '@/lib/constants'
+import { 
+  DEFAULT_CALIBRATION,
+  getActiveCalibrationProfile as fetchActiveCalibrationProfile,
+  getCalibrationApplicationValues,
+} from '@/lib/calibration/utils'
 
 // ============================================================================
 // TYPES
@@ -35,6 +41,8 @@ export interface LearningInput {
   angleDiversity: number
   baseVisionConfidence: number
   normalizedConfidence: number
+  // Phase 20: Optional calibration profile override
+  calibrationProfile?: CalibrationProfile | null
 }
 
 // Re-export types from lib/types for convenience
@@ -532,12 +540,25 @@ export async function computeLearningCorrection(
     }
 
     // Apply guardrails to correction
-    const { correction: grossCorrection, capped, reason: cappingReason } = applyCorrectionGuardrails(
+    const { correction: baseGrossCorrection, capped, reason: cappingReason } = applyCorrectionGuardrails(
       rawGrossCorrection,
       consistency,
       topExamples.length,
       input.baseVisionConfidence
     )
+
+    // Phase 20: Apply calibration profile scaling using centralized utils
+    const calibrationValues = getCalibrationApplicationValues(input.calibrationProfile)
+    const learningStrength = calibrationValues.learningStrength
+    const maxTotalCorrection = calibrationValues.maxTotalCorrection
+    
+    // Scale correction by calibration learning strength
+    let grossCorrection = baseGrossCorrection * learningStrength
+    
+    // Apply calibration's max total correction cap
+    if (Math.abs(grossCorrection) > maxTotalCorrection) {
+      grossCorrection = Math.sign(grossCorrection) * maxTotalCorrection
+    }
 
     const netCorrection = grossCorrection * 0.85 // Net correction slightly less aggressive
 
@@ -566,17 +587,24 @@ export async function computeLearningCorrection(
     else if (avgSimilarity >= GUARDRAILS.MIN_SIMILARITY_THRESHOLD) matchQuality = 'weak'
 
     // Build per-measurement corrections (simplified - based on overall error direction)
+    // Phase 20: Use calibration weights for measurement corrections
     const measurementCorrections = new Map<string, number>()
     const measurementCorrectionsList: MeasurementCorrection[] = []
+
+    // Get calibration weights from centralized values
+    const spreadWeight = calibrationValues.spreadWeight
+    const beamWeight = calibrationValues.beamWeight
+    const maxSpreadCorr = calibrationValues.maxSpreadCorrection
+    const maxBeamCorr = calibrationValues.maxBeamCorrection
 
     if (currentMeasurements && Math.abs(grossCorrection) >= 1) {
       // Distribute correction proportionally across measurement categories
       const correctionFraction = grossCorrection / 100 // As fraction of typical total
       
-      // Apply small corrections to main measurements
+      // Apply small corrections to main measurements (scaled by calibration weights)
       if (currentMeasurements.inside_spread) {
-        const spreadCorrection = correctionFraction * currentMeasurements.inside_spread * 0.3
-        const cappedSpreadCorrection = Math.max(-3, Math.min(3, spreadCorrection))
+        const spreadCorrection = correctionFraction * currentMeasurements.inside_spread * 0.3 * spreadWeight
+        const cappedSpreadCorrection = Math.max(-maxSpreadCorr, Math.min(maxSpreadCorr, spreadCorrection))
         measurementCorrections.set('inside_spread', cappedSpreadCorrection)
         measurementCorrectionsList.push({
           field: 'inside_spread',
@@ -588,12 +616,12 @@ export async function computeLearningCorrection(
         })
       }
 
-      // Beam corrections
+      // Beam corrections (scaled by calibration weights)
       for (const beam of ['main_beam_left', 'main_beam_right'] as const) {
         const val = currentMeasurements[beam]
         if (val) {
-          const beamCorrection = correctionFraction * val * 0.25
-          const cappedBeamCorrection = Math.max(-2, Math.min(2, beamCorrection))
+          const beamCorrection = correctionFraction * val * 0.25 * beamWeight
+          const cappedBeamCorrection = Math.max(-maxBeamCorr, Math.min(maxBeamCorr, beamCorrection))
           measurementCorrections.set(beam, cappedBeamCorrection)
           measurementCorrectionsList.push({
             field: beam,
@@ -687,4 +715,12 @@ export function toSimpleLearningSummary(extended: ExtendedLearningSummary) {
     matchQuality: extended.matchQuality,
     notes: extended.notes,
   }
+}
+
+/**
+ * Phase 20: Get the currently active calibration profile
+ * Re-exported from centralized calibration utils for backward compatibility
+ */
+export async function getActiveCalibrationProfile(): Promise<CalibrationProfile | null> {
+  return fetchActiveCalibrationProfile()
 }

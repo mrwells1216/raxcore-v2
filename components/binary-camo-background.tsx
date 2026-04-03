@@ -198,22 +198,15 @@ export function BinaryCamoBackground({
         }}
       />
 
-      {/* softer cloud-light behind the deer */}
+      {/* subtle ambient behind the deer - no glow */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           zIndex: 2,
-          background: `
-            radial-gradient(circle at 50% 42%, rgba(255, 189, 150, 0.14) 0%, rgba(255, 189, 150, 0.08) 12%, rgba(255, 189, 150, 0.04) 24%, rgba(0,0,0,0) 40%),
-            radial-gradient(circle at 50% 50%, rgba(255, 146, 85, 0.09) 0%, rgba(255, 146, 85, 0.04) 16%, rgba(0,0,0,0) 34%)
-          `,
-          filter: 'blur(28px)',
-          opacity: 0.92,
-          animation: 'raxLightningPulse 6s ease-in-out infinite',
         }}
       />
 
-      {/* RaX Title - preserve existing title styling */}
+      {/* RAX Title - preserve existing title styling */}
       {showRaxTitle && (
         <div 
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
@@ -222,18 +215,18 @@ export function BinaryCamoBackground({
           <h1
             className="font-bold tracking-[0.2em] uppercase select-none"
             style={{
-              fontSize: 'clamp(6rem, 20vw, 16rem)',
+              fontSize: 'clamp(5rem, 18vw, 14rem)',
               color: 'rgba(230, 122, 61, 0.05)',
               textShadow: '0 0 60px rgba(230, 122, 61, 0.04)',
               letterSpacing: '0.25em',
             }}
           >
-            RaX
+            RAX
           </h1>
         </div>
       )}
       
-      {/* Deer image overlay - preserve size, reduce cutout feel */}
+      {/* Deer image overlay - soft blended edges */}
       {showDeerOverlay && (
         <div 
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
@@ -242,13 +235,14 @@ export function BinaryCamoBackground({
           <img
             src={deerImageSrc}
             alt="RaX deer mark"
-            className="select-none rax-deer-overlay"
+            className="select-none"
             style={{
-              width: 'min(90vw, 840px)',
+              width: 'clamp(280px, 85vw, 840px)',
               maxWidth: '840px',
-              minWidth: '400px',
-              WebkitMaskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
-              maskImage: 'radial-gradient(circle at center, rgba(0,0,0,1) 55%, rgba(0,0,0,0.93) 72%, rgba(0,0,0,0.76) 84%, rgba(0,0,0,0.38) 94%, rgba(0,0,0,0.14) 100%)',
+              opacity: 0.55,
+              filter: 'blur(0.5px) brightness(0.7) saturate(0.7)',
+              WebkitMaskImage: 'radial-gradient(ellipse 75% 70% at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 35%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.2) 80%, rgba(0,0,0,0) 100%)',
+              maskImage: 'radial-gradient(ellipse 75% 70% at center, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 35%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.2) 80%, rgba(0,0,0,0) 100%)',
             }}
           />
         </div>
@@ -258,33 +252,14 @@ export function BinaryCamoBackground({
           variant="outline"
           size="sm"
           onClick={cycleTheme}
-          className="absolute top-4 right-4 z-10 bg-background/50 backdrop-blur-sm border-border/50 hover:bg-background/70 gap-2 text-xs"
+          className="absolute bottom-4 right-4 z-20 bg-background/60 backdrop-blur-sm border-border/50 hover:bg-background/80 gap-2 text-xs shadow-lg"
         >
           <Paintbrush className="h-3.5 w-3.5" />
-          {CAMO_THEMES[themeIndex].name}
+          <span className="hidden sm:inline">{CAMO_THEMES[themeIndex].name}</span>
         </Button>
       )}
 
-      <style jsx>{`
-        @keyframes raxLightningPulse {
-          0%, 100% {
-            opacity: 0.48;
-            transform: scale(1);
-          }
-          45% {
-            opacity: 0.7;
-            transform: scale(1.02);
-          }
-          50% {
-            opacity: 0.92;
-            transform: scale(1.035);
-          }
-          56% {
-            opacity: 0.62;
-            transform: scale(1.01);
-          }
-        }
-      `}</style>
+
     </>
   )
 }
