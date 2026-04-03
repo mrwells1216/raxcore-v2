@@ -235,6 +235,13 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
   const [showTrainingForm, setShowTrainingForm] = useState(false)
   const [isSubmittingTraining, setIsSubmittingTraining] = useState(false)
   const [trainingSubmitted, setTrainingSubmitted] = useState(false)
+  const [precisionPassOverride, setPrecisionPassOverride] = useState<{
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: FieldProvenanceMap | null
+    runId: string | null
+  } | null>(null)
 
   const normalized = normalizeResult(result)
   const { prediction } = result
@@ -465,12 +472,12 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         <ScoreSheetEditor
           predictionId={normalized.predictionId}
           buckId={result.buck.id}
-          aiScoreSheet={result.scoreSheet}
-          aiGrossScore={normalized.grossScore}
-          aiNetScore={normalized.netScore}
+          aiScoreSheet={precisionPassOverride?.scoreSheet ?? result.scoreSheet}
+          aiGrossScore={precisionPassOverride?.grossScore ?? normalized.grossScore}
+          aiNetScore={precisionPassOverride?.netScore ?? normalized.netScore}
           aiConfidence={normalized.confidencePercent}
           isFallback={normalized.isFallback}
-          aiFieldProvenance={extractFieldProvenance(result)}
+          aiFieldProvenance={precisionPassOverride?.provenance ?? extractFieldProvenance(result)}
         />
       )}
       {/* Measurements Breakdown (Legacy) */}
@@ -507,7 +514,27 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       />
 
       {/* Precision Pass - Phase 50 */}
-      {normalized.predictionId && <PrecisionPassCard predictionId={normalized.predictionId} />}
+      {normalized.predictionId && (
+        <PrecisionPassCard
+          predictionId={normalized.predictionId}
+          onPrecisionPassComplete={(payload) => {
+            console.log('[precision-pass] applying UI override', {
+              runId: payload.runId,
+              hasScoreSheet: !!payload.scoreSheet,
+              hasProvenance: !!payload.provenance,
+              grossScore: payload.grossScore,
+              netScore: payload.netScore,
+            })
+            setPrecisionPassOverride({
+              grossScore: payload.grossScore,
+              netScore: payload.netScore,
+              scoreSheet: payload.scoreSheet,
+              provenance: payload.provenance ?? null,
+              runId: payload.runId,
+            })
+          }}
+        />
+      )}
 
       {/* Structural Hypothesis - Phase 51 */}
       {normalized.predictionId && <StructuralHypothesisCard predictionId={normalized.predictionId} />}
