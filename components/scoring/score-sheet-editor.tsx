@@ -197,6 +197,7 @@ export function ScoreSheetEditor({
   aiNetScore,
   aiConfidence,
   isFallback = false,
+  aiFieldProvenance = null,
   onSave,
   onFinalize,
 }: ScoreSheetEditorProps) {
@@ -322,7 +323,7 @@ export function ScoreSheetEditor({
         measurements,
         correctedGross,
         correctedNet,
-        { 
+        {
           scoringSystem: rackType === 'typical' ? 'boone_and_crockett_typical' : 'boone_and_crockett_non_typical',
           aiMeasurements: {
             inside_spread: aiScoreSheet.spread.inside.value,
@@ -346,10 +347,13 @@ export function ScoreSheetEditor({
             h3_right: aiScoreSheet.right.h3.value,
             h4_left: aiScoreSheet.left.h4.value,
             h4_right: aiScoreSheet.right.h4.value,
+            abnormal_points: aiScoreSheet.abnormal_points.total_length.value,
+            deductions: aiScoreSheet.deductions.symmetry_total.value,
           },
           aiGross: aiGrossScore,
           aiNet: aiNetScore,
           isFallback,
+          aiProvenance: aiFieldProvenance,
         }
       )
       
@@ -530,18 +534,21 @@ export function ScoreSheetEditor({
                 aiValue={aiScoreSheet.spread.inside.value}
                 value={measurements.inside_spread}
                 onChange={(v) => updateMeasurement('inside_spread', v)}
+                field={aiFieldProvenance?.insideSpread}
               />
               <MeasurementInput
                 label="Main Beam (L)"
                 aiValue={aiScoreSheet.left.main_beam.value}
                 value={measurements.main_beam_left}
                 onChange={(v) => updateMeasurement('main_beam_left', v)}
+                field={aiFieldProvenance?.leftMainBeam}
               />
               <MeasurementInput
                 label="Main Beam (R)"
                 aiValue={aiScoreSheet.right.main_beam.value}
                 value={measurements.main_beam_right}
                 onChange={(v) => updateMeasurement('main_beam_right', v)}
+                field={aiFieldProvenance?.rightMainBeam}
               />
             </TabsContent>
 
@@ -551,60 +558,70 @@ export function ScoreSheetEditor({
                 aiValue={aiScoreSheet.left.g1.value}
                 value={measurements.g1_left}
                 onChange={(v) => updateMeasurement('g1_left', v)}
+                field={aiFieldProvenance?.leftTines?.[1]}
               />
               <MeasurementInput
                 label="G1 (R)"
                 aiValue={aiScoreSheet.right.g1.value}
                 value={measurements.g1_right}
                 onChange={(v) => updateMeasurement('g1_right', v)}
+                field={aiFieldProvenance?.rightTines?.[1]}
               />
               <MeasurementInput
                 label="G2 (L)"
                 aiValue={aiScoreSheet.left.g2.value}
                 value={measurements.g2_left}
                 onChange={(v) => updateMeasurement('g2_left', v)}
+                field={aiFieldProvenance?.leftTines?.[2]}
               />
               <MeasurementInput
                 label="G2 (R)"
                 aiValue={aiScoreSheet.right.g2.value}
                 value={measurements.g2_right}
                 onChange={(v) => updateMeasurement('g2_right', v)}
+                field={aiFieldProvenance?.rightTines?.[2]}
               />
               <MeasurementInput
                 label="G3 (L)"
                 aiValue={aiScoreSheet.left.g3.value}
                 value={measurements.g3_left}
                 onChange={(v) => updateMeasurement('g3_left', v)}
+                field={aiFieldProvenance?.leftTines?.[3]}
               />
               <MeasurementInput
                 label="G3 (R)"
                 aiValue={aiScoreSheet.right.g3.value}
                 value={measurements.g3_right}
                 onChange={(v) => updateMeasurement('g3_right', v)}
+                field={aiFieldProvenance?.rightTines?.[3]}
               />
               <MeasurementInput
                 label="G4 (L)"
                 aiValue={aiScoreSheet.left.g4.value}
                 value={measurements.g4_left}
                 onChange={(v) => updateMeasurement('g4_left', v)}
+                field={aiFieldProvenance?.leftTines?.[4]}
               />
               <MeasurementInput
                 label="G4 (R)"
                 aiValue={aiScoreSheet.right.g4.value}
                 value={measurements.g4_right}
                 onChange={(v) => updateMeasurement('g4_right', v)}
+                field={aiFieldProvenance?.rightTines?.[4]}
               />
               <MeasurementInput
                 label="G5 (L)"
                 aiValue={aiScoreSheet.left.g5.value}
                 value={measurements.g5_left}
                 onChange={(v) => updateMeasurement('g5_left', v)}
+                field={aiFieldProvenance?.leftTines?.[5]}
               />
               <MeasurementInput
                 label="G5 (R)"
                 aiValue={aiScoreSheet.right.g5.value}
                 value={measurements.g5_right}
                 onChange={(v) => updateMeasurement('g5_right', v)}
+                field={aiFieldProvenance?.rightTines?.[5]}
               />
             </TabsContent>
 
@@ -614,48 +631,56 @@ export function ScoreSheetEditor({
                 aiValue={aiScoreSheet.left.h1.value}
                 value={measurements.h1_left}
                 onChange={(v) => updateMeasurement('h1_left', v)}
+                field={aiFieldProvenance?.leftMasses?.[1]}
               />
               <MeasurementInput
                 label="H1 (R)"
                 aiValue={aiScoreSheet.right.h1.value}
                 value={measurements.h1_right}
                 onChange={(v) => updateMeasurement('h1_right', v)}
+                field={aiFieldProvenance?.rightMasses?.[1]}
               />
               <MeasurementInput
                 label="H2 (L)"
                 aiValue={aiScoreSheet.left.h2.value}
                 value={measurements.h2_left}
                 onChange={(v) => updateMeasurement('h2_left', v)}
+                field={aiFieldProvenance?.leftMasses?.[2]}
               />
               <MeasurementInput
                 label="H2 (R)"
                 aiValue={aiScoreSheet.right.h2.value}
                 value={measurements.h2_right}
                 onChange={(v) => updateMeasurement('h2_right', v)}
+                field={aiFieldProvenance?.rightMasses?.[2]}
               />
               <MeasurementInput
                 label="H3 (L)"
                 aiValue={aiScoreSheet.left.h3.value}
                 value={measurements.h3_left}
                 onChange={(v) => updateMeasurement('h3_left', v)}
+                field={aiFieldProvenance?.leftMasses?.[3]}
               />
               <MeasurementInput
                 label="H3 (R)"
                 aiValue={aiScoreSheet.right.h3.value}
                 value={measurements.h3_right}
                 onChange={(v) => updateMeasurement('h3_right', v)}
+                field={aiFieldProvenance?.rightMasses?.[3]}
               />
               <MeasurementInput
                 label="H4 (L)"
                 aiValue={aiScoreSheet.left.h4.value}
                 value={measurements.h4_left}
                 onChange={(v) => updateMeasurement('h4_left', v)}
+                field={aiFieldProvenance?.leftMasses?.[4]}
               />
               <MeasurementInput
                 label="H4 (R)"
                 aiValue={aiScoreSheet.right.h4.value}
                 value={measurements.h4_right}
                 onChange={(v) => updateMeasurement('h4_right', v)}
+                field={aiFieldProvenance?.rightMasses?.[4]}
               />
             </TabsContent>
 
@@ -665,6 +690,7 @@ export function ScoreSheetEditor({
                 aiValue={aiScoreSheet.abnormal_points.total_length.value}
                 value={measurements.abnormal_points}
                 onChange={(v) => updateMeasurement('abnormal_points', v)}
+                field={aiFieldProvenance?.abnormalPoints}
               />
               <div className="grid grid-cols-[1fr_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50">
                 <Label className="text-sm font-medium">Symmetry Deductions</Label>
@@ -702,9 +728,27 @@ export function ScoreSheetEditor({
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 Corrected Scores
                 <TotalsProvenanceBadge
-                  grossProvenance={isFallback ? 'fallback' : 'ai_raw'}
-                  netProvenance={isFallback ? 'fallback' : 'ai_raw'}
-                  hasHumanEdits={grossDiff !== 0 || netDiff !== 0}
+                  grossProvenance={getDisplayField(
+                    aiFieldProvenance?.grossScore,
+                    correctedGross,
+                    aiGrossScore,
+                    !!isFallback
+                  ).provenance}
+                  netProvenance={getDisplayField(
+                    aiFieldProvenance?.netScore,
+                    correctedNet,
+                    aiNetScore,
+                    !!isFallback
+                  ).provenance}
+                  hasHumanEdits={
+                    getOverallTotalsProvenance([
+                      aiFieldProvenance?.insideSpread,
+                      aiFieldProvenance?.leftMainBeam,
+                      aiFieldProvenance?.rightMainBeam,
+                      aiFieldProvenance?.grossScore,
+                      aiFieldProvenance?.netScore,
+                    ]) === 'human_review' || grossDiff !== 0 || netDiff !== 0
+                  }
                 />
               </div>
               <div className="text-lg font-bold tabular-nums">
