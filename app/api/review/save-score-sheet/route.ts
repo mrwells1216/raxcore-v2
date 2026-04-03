@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { buildTrainingSample } from '@/lib/training/build-training-sample'
 import type { ScoreSheetPayload } from '@/lib/rules-engine/types'
 
 interface SaveScoreSheetInput {
@@ -110,6 +111,41 @@ export async function POST(req: Request) {
         { error: 'Failed to save reviewed score sheet', details: error.message },
         { status: 500 }
       )
+    }
+
+    // Create training sample when review is saved
+    if (isTrainingTruth) {
+      const { data: prediction } = await db
+        .from('predictions')
+        .select('*')
+        .eq('id', predictionId)
+        .maybeSingle()
+
+      if (prediction) {
+        const trainingSample = buildTrainingSample({
+          buckId,
+          predictionId,
+          reviewedSheet,
+          originalPrediction: prediction,
+        })
+
+        const { error: trainingError } = await db
+          .from('training_samples')
+          .insert(trainingSample)
+
+        if (trainingError) {
+          console.warn('[training] failed to create sample', {
+            predictionId,
+            buckId,
+            error: trainingError.message,
+          })
+        } else {
+          console.log('[training] sample created', {
+            predictionId,
+            buckId,
+          })
+        }
+      }
     }
 
     return NextResponse.json({ ok: true, reviewedScoreSheet: data, updated: false })
