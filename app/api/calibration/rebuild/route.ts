@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 import {
   buildCalibrationAggregate,
   buildProfileFromRows,
-  extractTrainingScores,
 } from '@/lib/calibration'
 
 export async function POST() {
