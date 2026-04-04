@@ -310,11 +310,22 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         reviewedGross:
           reviewData.reviewedScoreSheet?.reviewed_gross ??
           reviewData.reviewedScoreSheet?.sheet_json?.measurements?.grossScore ??
+          reviewData.reviewedScoreSheet?.sheet_json?.grossScore ??
           null,
         reviewedNet:
           reviewData.reviewedScoreSheet?.reviewed_net ??
           reviewData.reviewedScoreSheet?.sheet_json?.measurements?.netScore ??
+          reviewData.reviewedScoreSheet?.sheet_json?.netScore ??
           null,
+        reviewedAt:
+          reviewData.reviewedScoreSheet?.updated_at ??
+          reviewData.reviewedScoreSheet?.reviewed_at ??
+          reviewData.reviewedScoreSheet?.created_at ??
+          null,
+        reviewedBy:
+          reviewData.reviewedScoreSheet?.created_by ??
+          reviewData.reviewedScoreSheet?.reviewed_by ??
+          'human_review',
       }
     : null
 
@@ -465,6 +476,69 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                   profile: {result.prediction.raw_ai_response.calibrationMeta.profileKey}
                 </div>
               ) : null}
+            </div>
+          )}
+
+          {/* Reviewed Score Sheet Summary Card */}
+          {reviewedScoreSheet && (
+            <div className="rounded-lg border bg-background px-4 py-4 mb-3">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-sm font-medium">Reviewed score sheet</div>
+                  <div className="text-xs text-muted-foreground">
+                    Human-reviewed measurement summary
+                  </div>
+                </div>
+
+                {reviewedScoreSheet.isOfficial ? (
+                  <div className="rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-800">
+                    Official
+                  </div>
+                ) : (
+                  <div className="rounded-full border border-yellow-200 bg-yellow-50 px-2.5 py-1 text-[11px] font-medium text-yellow-800">
+                    Partial
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed gross</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedGross ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed net</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedNet ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Completeness</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewCompleteness ?? 0}%
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed by</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedBy ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2 col-span-2 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed at</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedAt
+                      ? new Date(reviewedScoreSheet.reviewedAt).toLocaleString()
+                      : '-'}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
