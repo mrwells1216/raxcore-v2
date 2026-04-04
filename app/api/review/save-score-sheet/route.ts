@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { buildTrainingSample } from '@/lib/training/build-training-sample'
+import { getReviewCompleteness, isOfficialScore } from '@/lib/review/review-completeness'
 import type { ScoreSheetPayload } from '@/lib/rules-engine/types'
 
 interface SaveScoreSheetInput {
@@ -122,6 +123,9 @@ export async function POST(req: Request) {
         .maybeSingle()
 
       if (prediction) {
+        const completeness = getReviewCompleteness(reviewedSheet?.measurements)
+        const official = isOfficialScore(completeness)
+
         const trainingSample = buildTrainingSample({
           buckId,
           predictionId,
@@ -131,18 +135,27 @@ export async function POST(req: Request) {
 
         const { error: trainingError } = await db
           .from('training_samples')
-          .insert(trainingSample)
+          .upsert({
+            ...trainingSample,
+            is_official: official,
+            review_completeness: completeness,
+            reviewed_at: new Date().toISOString(),
+            reviewed_gross: reviewedGross,
+            reviewed_net: reviewedNet,
+          }, { onConflict: 'prediction_id' })
 
         if (trainingError) {
-          console.warn('[training] failed to create sample', {
+          console.warn('[training] failed to create/update sample', {
             predictionId,
             buckId,
             error: trainingError.message,
           })
         } else {
-          console.log('[training] sample created', {
+          console.log('[training] sample created/updated', {
             predictionId,
             buckId,
+            completeness,
+            isOfficial: official,
           })
         }
       }
