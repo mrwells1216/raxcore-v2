@@ -48,6 +48,13 @@ export default async function CalibrationAdminPage() {
         >
           Export official training truth (CSV)
         </a>
+
+        <a
+          href="/admin/training-analytics"
+          className="rounded-md border px-3 py-2 text-sm"
+        >
+          View training analytics
+        </a>
       </div>
 
       <p className="text-xs text-muted-foreground">
