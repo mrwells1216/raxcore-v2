@@ -1,8 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { createClient } from '@/lib/supabase/server'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { RebuildCalibrationButton } from '@/components/admin/rebuild-calibration-button'
 
 export const metadata = {
   title: 'Calibration Profiles | Admin',
@@ -27,14 +26,7 @@ export default async function CalibrationProfilesPage() {
         </p>
       </div>
 
-      <form action="/api/calibration/rebuild" method="post">
-        <button
-          type="submit"
-          className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
-        >
-          Rebuild calibration profiles
-        </button>
-      </form>
+      <RebuildCalibrationButton />
 
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">

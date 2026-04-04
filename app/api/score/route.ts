@@ -34,8 +34,7 @@ import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
-import { getActiveCalibrationProfile } from '@/lib/calibration/get-active-profile'
-import { applyCalibration } from '@/lib/calibration/apply-calibration'
+import { getBestCalibrationProfile, applyCalibration } from '@/lib/calibration'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -370,42 +369,52 @@ export async function POST(request: Request) {
       }
     }
 
-    // Apply calibration from training data
-    const calibrationProfile = await getActiveCalibrationProfile({
-      state,
+    // Apply calibration from training data using unified calibration engine
+    const rawPredictedGross =
+      typeof scoringResult?.predictedGross === 'number'
+        ? scoringResult.predictedGross
+        : null
+
+    const rawPredictedNet =
+      typeof scoringResult?.predictedNet === 'number'
+        ? scoringResult.predictedNet
+        : null
+
+    const rawConfidence =
+      typeof scoringResult?.confidencePercent === 'number'
+        ? scoringResult.confidencePercent
+        : null
+
+    const calibrationProfile = await getBestCalibrationProfile({
+      state: state ?? null,
       rackType: rackType ?? null,
-      imageCount: images?.length ?? 0,
     })
 
-    const calibratedScore = applyCalibration(
-      {
-        predictedGross: scoringResult.predictedGross ?? null,
-        predictedNet: scoringResult.predictedNet ?? null,
-        confidencePercent: scoringResult.confidencePercent ?? null,
-        errorMargin: scoringResult.errorMargin ?? null,
-      },
-      calibrationProfile
-    )
+    const calibrated = applyCalibration({
+      rawGross: rawPredictedGross,
+      rawNet: rawPredictedNet,
+      rawConfidence,
+      profile: calibrationProfile,
+    })
 
-    scoringResult.predictedGross = calibratedScore.predictedGross ?? scoringResult.predictedGross
-    scoringResult.predictedNet = calibratedScore.predictedNet ?? scoringResult.predictedNet
-    scoringResult.confidencePercent = calibratedScore.confidencePercent ?? scoringResult.confidencePercent
-    scoringResult.errorMargin = calibratedScore.errorMargin ?? scoringResult.errorMargin
+    // Preserve raw values
+    ;(scoringResult as any).rawPredictedGross = rawPredictedGross
+    ;(scoringResult as any).rawPredictedNet = rawPredictedNet
+    ;(scoringResult as any).rawConfidence = rawConfidence
 
-    if (calibratedScore.errorMargin) {
-      scoringResult.errorBandLow = calibratedScore.errorMargin.low
-      scoringResult.errorBandHigh = calibratedScore.errorMargin.high
-    }
+    // Apply calibrated values
+    scoringResult.predictedGross = calibrated.calibratedGross
+    scoringResult.predictedNet = calibrated.calibratedNet
+    scoringResult.confidencePercent = calibrated.calibratedConfidence
 
-    ;(scoringResult as any).calibrationApplied = calibratedScore.calibrationApplied
-    ;(scoringResult as any).calibrationMeta = calibratedScore.calibrationMeta
+    ;(scoringResult as any).calibrationApplied = calibrated.calibrationApplied
+    ;(scoringResult as any).calibrationMeta = calibrated.calibrationMeta
 
     console.log('[score] calibration applied', {
-      applied: calibratedScore.calibrationApplied,
-      meta: calibratedScore.calibrationMeta,
-      gross: scoringResult.predictedGross,
-      net: scoringResult.predictedNet,
-      confidence: scoringResult.confidencePercent,
+      applied: calibrated.calibrationApplied,
+      meta: calibrated.calibrationMeta,
+      rawGross: rawPredictedGross,
+      calibratedGross: calibrated.calibratedGross,
     })
 
     // Get active model version
