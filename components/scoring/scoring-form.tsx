@@ -17,6 +17,8 @@ import { US_STATES, RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, 
 import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
+import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
+import { useState, useEffect } from 'react'
 
 const formSchema = z.object({
   state: z.string().min(1, 'State is required'),
@@ -44,9 +46,12 @@ interface ScoringFormProps {
   onSubmit: (data: ScoringFormData) => void
   onBack: () => void
   isSubmitting: boolean
+  onImageDiagnosticsComputed?: (diagnostics: ImageDiagnostics[], summary: ImageDiagnosticsSummary | null) => void
 }
 
-export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps) {
+export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed }: ScoringFormProps) {
+  const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
+  const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
   const form = useForm<ScoringFormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -82,6 +87,20 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
     referenceType: watchReferenceType,
     referenceNotes: watchReferenceNotes,
   })
+
+  const handleComputeImageDiagnostics = async (files: File[]) => {
+    try {
+      const diagnostics = await Promise.all(
+        files.map((file, i) => computeImageDiagnosticsFromFile(file, i))
+      )
+      const summary = summarizeDiagnostics(diagnostics)
+      setImageDiagnostics(diagnostics)
+      setImageDiagnosticsSummary(summary)
+      onImageDiagnosticsComputed?.(diagnostics, summary)
+    } catch (err) {
+      console.error('[scoring-form] failed to compute image diagnostics', err)
+    }
+  }
 
   return (
     <Form {...form}>
@@ -522,6 +541,28 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
             </div>
           )}
         </div>
+
+        {/* Image Diagnostics Summary */}
+        {imageDiagnosticsSummary && (
+          <div className="rounded-lg border px-4 py-3 space-y-2">
+            <div className="text-sm font-medium">Image quality analysis</div>
+            <div className="text-xs">
+              Overall: <span className="font-semibold">{imageDiagnosticsSummary.overall}</span>
+            </div>
+            
+            {imageDiagnosticsSummary.poorCount > 0 && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {imageDiagnosticsSummary.poorCount} image{imageDiagnosticsSummary.poorCount === 1 ? '' : 's'} may reduce accuracy (blurry, dark, or bright).
+              </div>
+            )}
+
+            {imageDiagnosticsSummary.okCount > 0 && imageDiagnosticsSummary.poorCount === 0 && (
+              <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+                {imageDiagnosticsSummary.okCount} image{imageDiagnosticsSummary.okCount === 1 ? '' : 's'} has reduced detail.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-3 pt-4 border-t border-border">
           <Button type="button" variant="outline" onClick={onBack} className="min-h-[48px] gap-2" disabled={isSubmitting}>

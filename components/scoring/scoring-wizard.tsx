@@ -12,6 +12,7 @@ import { EditableImageCarousel } from './editable-image-carousel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
+import { summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -44,6 +45,8 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [intakeQuality, setIntakeQuality] = useState<IntakeQualityAssessment | null>(null)
+  const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
+  const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
 
   // Normalise GridImage[] → CapturedImage[] for the pipeline
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -167,6 +170,14 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('reference_type', data.reference_type ?? 'none')
         if (data.reference_notes) apiFormData.append('reference_notes', data.reference_notes)
         apiFormData.append('reference_mode_summary', JSON.stringify(referenceModeSummary))
+      }
+
+      // Include image diagnostics (quality analysis)
+      if (imageDiagnostics.length > 0) {
+        apiFormData.append('image_diagnostics', JSON.stringify(imageDiagnostics))
+      }
+      if (imageDiagnosticsSummary) {
+        apiFormData.append('image_diagnostics_summary', JSON.stringify(imageDiagnosticsSummary))
       }
 
       // Preprocess and add images (resize + compress to reduce payload)
@@ -371,6 +382,10 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                 onSubmit={handleFormSubmit}
                 onBack={() => setStep(0)}
                 isSubmitting={isAnalyzing}
+                onImageDiagnosticsComputed={(diags, summary) => {
+                  setImageDiagnostics(diags)
+                  setImageDiagnosticsSummary(summary)
+                }}
               />
             </CardContent>
           </Card>

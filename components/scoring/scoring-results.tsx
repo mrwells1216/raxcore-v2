@@ -552,6 +552,35 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             )
           })()}
 
+          {/* Image Diagnostics */}
+          {(() => {
+            const imageDiagnosticsSummary = result?.imageDiagnosticsSummary as any ||
+              result?.prediction?.imageDiagnosticsSummary as any ||
+              result?.prediction?.raw_ai_response?.imageDiagnosticsSummary as any ||
+              null
+            
+            if (!imageDiagnosticsSummary) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                <div className="font-medium mb-1">Image quality analysis</div>
+                <div>
+                  Quality: <span className="font-semibold">{imageDiagnosticsSummary.overall}</span>
+                </div>
+                {imageDiagnosticsSummary.poorCount > 0 && (
+                  <div className="mt-1 text-[11px] text-red-700">
+                    {imageDiagnosticsSummary.poorCount} image{imageDiagnosticsSummary.poorCount === 1 ? '' : 's'} may reduce accuracy
+                  </div>
+                )}
+                {imageDiagnosticsSummary.okCount > 0 && imageDiagnosticsSummary.poorCount === 0 && (
+                  <div className="mt-1 text-[11px] text-yellow-700">
+                    {imageDiagnosticsSummary.okCount} image{imageDiagnosticsSummary.okCount === 1 ? '' : 's'} has reduced detail
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Reviewed Score Sheet Summary Card */}
           {reviewedScoreSheet && (
             <div className="rounded-lg border bg-background px-4 py-4 mb-3">

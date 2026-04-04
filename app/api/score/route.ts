@@ -100,6 +100,8 @@ export async function POST(request: Request) {
   const referenceTypeRaw = formData.get('reference_type') as string | null
   const referenceNotesRaw = formData.get('reference_notes') as string | null
   const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
+  const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
+  const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
   const userId = formData.get('user_id') as string | null
     
     // Phase 54: Abnormal/Irregular Points
@@ -366,6 +368,22 @@ export async function POST(request: Request) {
       console.log('[score] reference mode summary', referenceModeData)
     }
 
+    // Log image diagnostics (quality analysis)
+    if (imageDiagnosticsRaw || imageDiagnosticsSummaryRaw) {
+      let imageDiagnosticsData: any = {}
+      try {
+        if (imageDiagnosticsRaw) imageDiagnosticsData.diagnostics = JSON.parse(imageDiagnosticsRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      try {
+        if (imageDiagnosticsSummaryRaw) imageDiagnosticsData.summary = JSON.parse(imageDiagnosticsSummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] image diagnostics', imageDiagnosticsData)
+    }
+
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
       images: resolvedImages,
@@ -534,7 +552,14 @@ export async function POST(request: Request) {
           mainFramePoints: scoringResult.mainFramePoints ?? 10,
         }),
       },
-      intakeQuality: intakeQuality as Record<string, unknown> | null
+      intakeQuality: intakeQuality as Record<string, unknown> | null,
+      imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
+        try {
+          return JSON.parse(imageDiagnosticsSummaryRaw)
+        } catch {
+          return null
+        }
+      })() : null
     })
 
     // Update status to completed
