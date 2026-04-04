@@ -483,19 +483,28 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           )}
 
           {/* Calibration status */}
-          {result?.prediction?.raw_ai_response?.calibrationApplied && (
+          {(result?.prediction?.raw_ai_response?.calibrationApplied ||
+            result?.rawAiResponse?.calibrationApplied ||
+            normalized?.calibrationApplied) && (
             <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
-              Calibrated using reviewed training data
-              {result?.prediction?.raw_ai_response?.calibrationMeta?.sampleCount ? (
-                <span className="ml-1 text-muted-foreground">
-                  ({result.prediction.raw_ai_response.calibrationMeta.sampleCount} samples)
-                </span>
-              ) : null}
-              {result?.prediction?.raw_ai_response?.calibrationMeta?.profileKey ? (
-                <div className="text-[11px] text-muted-foreground mt-1">
-                  profile: {result.prediction.raw_ai_response.calibrationMeta.profileKey}
+              Calibrated using reviewed data
+              {(result?.prediction?.raw_ai_response?.calibrationMeta?.profile_type ||
+                result?.rawAiResponse?.calibrationMeta?.profile_type ||
+                normalized?.calibrationMeta?.profile_type) && (
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  profile:{' '}
+                  {result?.prediction?.raw_ai_response?.calibrationMeta?.profile_type ||
+                    result?.rawAiResponse?.calibrationMeta?.profile_type ||
+                    normalized?.calibrationMeta?.profile_type}
+                  {(result?.prediction?.raw_ai_response?.calibrationMeta?.sample_count ||
+                    result?.rawAiResponse?.calibrationMeta?.sample_count ||
+                    normalized?.calibrationMeta?.sample_count) && (
+                    <> · {result?.prediction?.raw_ai_response?.calibrationMeta?.sample_count ||
+                      result?.rawAiResponse?.calibrationMeta?.sample_count ||
+                      normalized?.calibrationMeta?.sample_count} samples</>
+                  )}
                 </div>
-              ) : null}
+              )}
             </div>
           )}
 
@@ -618,6 +627,10 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                 AI:{' '}
                 {result?.prediction?.raw_ai_response?.grossScore ??
                   result?.rawAiResponse?.grossScore ??
+                  result?.prediction?.raw_ai_response?.predictedGross ??
+                  result?.prediction?.raw_ai_response?.rawPredictedGross ??
+                  result?.rawAiResponse?.rawPredictedGross ??
+                  result?.prediction?.rawPredictedGross ??
                   '-'}
               </div>
               <div>
@@ -628,7 +641,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </div>
               <div>
                 Calibrated:{' '}
-                {normalized.grossScore ?? '-'}
+                {normalized?.grossScore ??
+                  result?.prediction?.predictedGross ??
+                  '-'}
               </div>
               {reviewedScoreSheet?.reviewedGross != null && (
                 <div className="font-semibold">
