@@ -8,6 +8,10 @@ create table if not exists training_samples (
   input jsonb not null,
   ai_output jsonb not null,
   ground_truth jsonb not null,
+  review_completeness integer not null default 0,
+  is_official boolean not null default false,
+  reviewed_by text,
+  reviewed_at timestamp with time zone,
   created_at timestamp with time zone default now()
 );
 
@@ -15,7 +19,22 @@ create table if not exists training_samples (
 create index if not exists idx_training_samples_buck_id on training_samples(buck_id);
 create index if not exists idx_training_samples_prediction_id on training_samples(prediction_id);
 create index if not exists idx_training_samples_created_at on training_samples(created_at desc);
+create index if not exists idx_training_samples_is_official on training_samples(is_official);
 
 -- Prevent duplicate training samples per prediction
 create unique index if not exists idx_training_samples_prediction_unique 
   on training_samples(prediction_id);
+
+-- Add columns if they don't exist (for migrations)
+alter table training_samples
+  add column if not exists review_completeness integer not null default 0;
+
+alter table training_samples
+  add column if not exists is_official boolean not null default false;
+
+alter table training_samples
+  add column if not exists reviewed_by text;
+
+alter table training_samples
+  add column if not exists reviewed_at timestamp with time zone;
+

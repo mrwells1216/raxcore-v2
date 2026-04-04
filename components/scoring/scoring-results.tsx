@@ -295,6 +295,29 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     fetcher
   )
 
+  const { data: reviewData } = useSWR(
+    result?.prediction?.id
+      ? `/api/review/save-score-sheet?predictionId=${result.prediction.id}`
+      : null,
+    fetcher
+  )
+
+  const reviewedScoreSheet = reviewData?.reviewedScoreSheet
+    ? {
+        ...reviewData.reviewedScoreSheet,
+        reviewCompleteness: reviewData.reviewCompleteness ?? 0,
+        isOfficial: reviewData.isOfficial ?? false,
+        reviewedGross:
+          reviewData.reviewedScoreSheet?.reviewed_gross ??
+          reviewData.reviewedScoreSheet?.sheet_json?.measurements?.grossScore ??
+          null,
+        reviewedNet:
+          reviewData.reviewedScoreSheet?.reviewed_net ??
+          reviewData.reviewedScoreSheet?.sheet_json?.measurements?.netScore ??
+          null,
+      }
+    : null
+
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showLearning, setShowLearning] = useState(false)
@@ -413,21 +436,17 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             </div>
           </div>
 
-          {/* Training Truth / Legitimacy Badge */}
-          {(result as any)?.review?.is_official && (
-            <div className="bg-green-50 border border-green-200 text-green-800 text-xs px-3 py-2 rounded mb-2">
+          {/* Legitimacy / review status */}
+          {reviewedScoreSheet?.isOfficial ? (
+            <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800 mb-3">
               Official reviewed score
             </div>
-          )}
-
-          {!(result as any)?.review?.is_official && (result as any)?.review?.review_completeness > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs px-3 py-2 rounded mb-2">
-              Partially reviewed ({(result as any)?.review?.review_completeness}% complete)
+          ) : reviewedScoreSheet?.reviewCompleteness ? (
+            <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 mb-3">
+              Partially reviewed ({reviewedScoreSheet.reviewCompleteness}% complete)
             </div>
-          )}
-
-          {!(result as any)?.review?.review_completeness && !result?.prediction?.raw_ai_response?.calibrationApplied && (
-            <div className="bg-neutral-50 border text-xs px-3 py-2 rounded mb-2 text-muted-foreground">
+          ) : (
+            <div className="rounded-md border bg-neutral-50 px-3 py-2 text-xs mb-3">
               AI estimated score
             </div>
           )}
@@ -449,38 +468,34 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             </div>
           )}
 
-          {/* Score Evolution Panel */}
-          {(result?.prediction?.raw_ai_response?.grossScore || 
-            (result as any)?.precisionPassGross || 
-            (result as any)?.review?.reviewed_gross) && (
-            <div className="text-xs space-y-1 mb-3 p-2 rounded border bg-muted/30">
-              <div className="font-medium text-muted-foreground mb-1">Score Evolution</div>
-              {result?.prediction?.raw_ai_response?.grossScore && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">AI Raw:</span>
-                  <span className="tabular-nums">{Number(result.prediction.raw_ai_response.grossScore).toFixed(1)}</span>
-                </div>
-              )}
-              {(result as any)?.precisionPassGross && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Precision:</span>
-                  <span className="tabular-nums">{Number((result as any).precisionPassGross).toFixed(1)}</span>
-                </div>
-              )}
-              {result?.prediction?.raw_ai_response?.calibrationApplied && normalized.grossScore && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Calibrated:</span>
-                  <span className="tabular-nums">{normalized.grossScore.toFixed(1)}</span>
-                </div>
-              )}
-              {(result as any)?.review?.reviewed_gross && (
-                <div className="flex justify-between font-semibold">
-                  <span>Final:</span>
-                  <span className="tabular-nums">{Number((result as any).review.reviewed_gross).toFixed(1)}</span>
+          {/* Score evolution */}
+          <div className="rounded-md border bg-background px-3 py-3 mb-3">
+            <div className="text-xs font-medium mb-2">Score evolution</div>
+            <div className="space-y-1 text-xs">
+              <div>
+                AI:{' '}
+                {result?.prediction?.raw_ai_response?.grossScore ??
+                  result?.rawAiResponse?.grossScore ??
+                  normalized.grossScore ??
+                  '-'}
+              </div>
+              <div>
+                Precision:{' '}
+                {precisionPassOverride?.grossScore ??
+                  result?.latestPrecisionPassRun?.best_summary?.predicted_gross ??
+                  '-'}
+              </div>
+              <div>
+                Calibrated:{' '}
+                {normalized.grossScore ?? '-'}
+              </div>
+              {reviewedScoreSheet?.reviewedGross != null && (
+                <div className="font-semibold">
+                  Final: {reviewedScoreSheet.reviewedGross}
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           {/* Fallback notice */}
           {normalized.isFallback && normalized.fallbackMessage && (

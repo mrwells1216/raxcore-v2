@@ -44,6 +44,11 @@ export async function POST(req: Request) {
     const reviewedNet = reviewedSheet?.measurements?.netScore ?? null
     const reviewStatus = isTrainingTruth ? 'final' : 'draft'
 
+    const reviewedMeasurements = reviewedSheet?.measurements ?? null
+    const reviewCompleteness = getReviewCompleteness(reviewedMeasurements)
+    const isOfficial = isTrainingTruth && reviewCompleteness >= 90
+    const reviewedBy = 'human_review'
+
     // Check if a reviewed sheet already exists for this prediction
     const { data: existing } = await db
       .from('reviewed_score_sheets')
@@ -56,19 +61,19 @@ export async function POST(req: Request) {
       const { data, error } = await db
         .from('reviewed_score_sheets')
         .update({
-          sheet_json: reviewedSheet,
-          ai_sheet_json: aiSheet,
-          raw_ai_response: rawAiResponse ?? null,
-          notes: notes ?? null,
-          is_training_truth: isTrainingTruth,
-          scoring_system: reviewedSheet.scoringSystem ?? 'boone_and_crockett_typical',
-          original_gross: originalGross,
-          original_net: originalNet,
-          reviewed_gross: reviewedGross,
-          reviewed_net: reviewedNet,
-          review_status: reviewStatus,
-          updated_at: new Date().toISOString(),
-        })
+        sheet_json: reviewedSheet,
+        ai_sheet_json: aiSheet,
+        raw_ai_response: rawAiResponse ?? null,
+        notes: notes ?? null,
+        is_training_truth: isTrainingTruth,
+        scoring_system: reviewedSheet.scoringSystem ?? 'boone_and_crockett_typical',
+        original_gross: originalGross,
+        original_net: originalNet,
+        reviewed_gross: reviewedGross,
+        reviewed_net: reviewedNet,
+        review_status: reviewStatus,
+        created_by: reviewedBy,
+      })
         .eq('id', existing.id)
         .select()
         .single()
@@ -81,7 +86,13 @@ export async function POST(req: Request) {
         )
       }
 
-      return NextResponse.json({ ok: true, reviewedScoreSheet: data, updated: true })
+      return NextResponse.json({
+        ok: true,
+        reviewedScoreSheet: data,
+        updated: true,
+        reviewCompleteness,
+        isOfficial,
+      })
     }
 
     // Insert new
@@ -131,6 +142,9 @@ export async function POST(req: Request) {
           predictionId,
           reviewedSheet,
           originalPrediction: prediction,
+          reviewCompleteness,
+          isOfficial,
+          reviewedBy,
         })
 
         const { error: trainingError } = await db
@@ -161,7 +175,13 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, reviewedScoreSheet: data, updated: false })
+    return NextResponse.json({
+      ok: true,
+      reviewedScoreSheet: data,
+      updated: false,
+      reviewCompleteness,
+      isOfficial,
+    })
   } catch (err) {
     console.error('[save-score-sheet] Unexpected error:', err)
     return NextResponse.json(
@@ -199,7 +219,15 @@ export async function GET(req: Request) {
       )
     }
 
-    return NextResponse.json({ reviewedScoreSheet: data })
+    const measurements = data?.sheet_json?.measurements ?? null
+    const reviewCompleteness = getReviewCompleteness(measurements)
+    const isOfficial = Boolean(data?.is_training_truth) && reviewCompleteness >= 90
+
+    return NextResponse.json({
+      reviewedScoreSheet: data,
+      reviewCompleteness,
+      isOfficial,
+    })
   } catch (err) {
     console.error('[save-score-sheet] Unexpected GET error:', err)
     return NextResponse.json(
