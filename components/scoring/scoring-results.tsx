@@ -483,30 +483,35 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           )}
 
           {/* Calibration status */}
-          {(result?.prediction?.raw_ai_response?.calibrationApplied ||
-            result?.rawAiResponse?.calibrationApplied ||
-            normalized?.calibrationApplied) && (
-            <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
-              Calibrated using reviewed data
-              {(result?.prediction?.raw_ai_response?.calibrationMeta?.profile_type ||
-                result?.rawAiResponse?.calibrationMeta?.profile_type ||
-                normalized?.calibrationMeta?.profile_type) && (
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  profile:{' '}
-                  {result?.prediction?.raw_ai_response?.calibrationMeta?.profile_type ||
-                    result?.rawAiResponse?.calibrationMeta?.profile_type ||
-                    normalized?.calibrationMeta?.profile_type}
-                  {(result?.prediction?.raw_ai_response?.calibrationMeta?.sample_count ||
-                    result?.rawAiResponse?.calibrationMeta?.sample_count ||
-                    normalized?.calibrationMeta?.sample_count) && (
-                    <> · {result?.prediction?.raw_ai_response?.calibrationMeta?.sample_count ||
-                      result?.rawAiResponse?.calibrationMeta?.sample_count ||
-                      normalized?.calibrationMeta?.sample_count} samples</>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {(() => {
+            const calibrationApplied =
+              result?.prediction?.calibrationApplied ??
+              result?.prediction?.raw_ai_response?.calibrationApplied ??
+              result?.rawAiResponse?.calibrationApplied ??
+              normalized?.calibrationApplied ??
+              false
+
+            const calibrationMeta =
+              result?.prediction?.calibrationMeta ??
+              result?.prediction?.raw_ai_response?.calibrationMeta ??
+              result?.rawAiResponse?.calibrationMeta ??
+              normalized?.calibrationMeta ??
+              null
+
+            return calibrationApplied ? (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Calibrated using reviewed data
+                {calibrationMeta?.profile_type && (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    profile: {calibrationMeta.profile_type}
+                    {calibrationMeta?.sample_count ? (
+                      <> · {calibrationMeta.sample_count} samples</>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null
+          })()}
 
           {/* Reviewed Score Sheet Summary Card */}
           {reviewedScoreSheet && (
@@ -625,12 +630,11 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             <div className="space-y-1 text-xs">
               <div>
                 AI:{' '}
-                {result?.prediction?.raw_ai_response?.grossScore ??
+                {result?.prediction?.rawPredictedGross ??
+                  result?.prediction?.raw_ai_response?.grossScore ??
                   result?.rawAiResponse?.grossScore ??
-                  result?.prediction?.raw_ai_response?.predictedGross ??
                   result?.prediction?.raw_ai_response?.rawPredictedGross ??
                   result?.rawAiResponse?.rawPredictedGross ??
-                  result?.prediction?.rawPredictedGross ??
                   '-'}
               </div>
               <div>

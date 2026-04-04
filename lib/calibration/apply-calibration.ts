@@ -1,3 +1,9 @@
+/**
+ * Deprecated runtime helper.
+ * The canonical calibration runtime now lives in: lib/calibration.ts
+ * Kept temporarily only for backward compatibility / migration safety.
+ */
+
 type ScoreLike = {
   predictedGross?: number | null
   predictedNet?: number | null
