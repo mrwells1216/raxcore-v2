@@ -1,3 +1,12 @@
+/**
+ * Legacy calibration dashboard.
+ * Kept temporarily for backward compatibility while the app uses
+ * the canonical calibration system:
+ * - lib/calibration.ts
+ * - /api/calibration/rebuild
+ * - calibration_profiles (profile_key/profile_type/etc)
+ */
+
 'use client'
 
 import { useState } from 'react'
