@@ -513,6 +513,23 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             ) : null
           })()}
 
+          {/* Capture quality metadata */}
+          {(() => {
+            const captureQuality = result?.captureQualitySummary as any
+            if (!captureQuality?.coverage) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Capture quality: {captureQuality.coverage.coverageLabel}
+                {captureQuality.coverage.missingAngles?.length ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Missing: {captureQuality.coverage.missingAngles.join(', ')}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })()}
+
           {/* Reviewed Score Sheet Summary Card */}
           {reviewedScoreSheet && (
             <div className="rounded-lg border bg-background px-4 py-4 mb-3">

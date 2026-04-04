@@ -10,6 +10,7 @@ import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
+import { buildCaptureQualitySummary, type CaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -38,6 +39,7 @@ const STEPS = [
 export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
   const [step, setStep] = useState(0)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
+  const [selectedImageAngles, setSelectedImageAngles] = useState<(CaptureAngle | null)[]>([])
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [intakeQuality, setIntakeQuality] = useState<IntakeQualityAssessment | null>(null)
@@ -61,6 +63,14 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
   const handleGridChange = useCallback((imgs: GridImage[]) => {
     setGridImages(imgs)
+    // Sync selected angles array with image count
+    setSelectedImageAngles(prev => {
+      const updated = [...prev]
+      while (updated.length < imgs.length) {
+        updated.push(null)
+      }
+      return updated.slice(0, imgs.length)
+    })
     updateIntakeQuality(imgs)
   }, [updateIntakeQuality])
 
@@ -132,6 +142,18 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         }
         apiFormData.append('intake_quality', JSON.stringify(qualitySummary))
       }
+
+      // Include capture quality (angle coverage check)
+      const captureQuality = buildCaptureQualitySummary({
+        images: gridImages.map(img => ({ name: `Image ${img.id}` })),
+        selectedAngles: selectedImageAngles.map(a => a ?? undefined),
+      })
+      apiFormData.append('selected_image_angles', JSON.stringify(selectedImageAngles))
+      apiFormData.append('capture_quality_summary', JSON.stringify({
+        coverage: captureQuality.coverage,
+        recommendation: captureQuality.recommendation,
+        recommendationReason: captureQuality.recommendationReason,
+      }))
 
       // Preprocess and add images (resize + compress to reduce payload)
       for (let index = 0; index < images.length; index++) {
@@ -246,6 +268,52 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                 }}
               />
             )}
+
+            {/* Capture Quality Check - angle coverage and labeling */}
+            {gridImages.length > 0 && (() => {
+              const captureQuality = buildCaptureQualitySummary({
+                images: gridImages.map(img => ({ name: `Image ${img.id}` })),
+                selectedAngles: selectedImageAngles.map(a => a ?? undefined),
+              })
+
+              return (
+                <div className="rounded-lg border px-4 py-3 space-y-3">
+                  <div className="text-sm font-medium">Photo coverage check</div>
+
+                  <div className="text-xs text-muted-foreground">
+                    {captureQuality.recommendationReason}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasFront ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                      Front: {captureQuality.coverage.hasFront ? 'yes' : 'missing'}
+                    </span>
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasLeft ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                      Left: {captureQuality.coverage.hasLeft ? 'yes' : 'missing'}
+                    </span>
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasRight ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                      Right: {captureQuality.coverage.hasRight ? 'yes' : 'missing'}
+                    </span>
+                  </div>
+
+                  <div className="text-xs">
+                    Coverage: <span className="font-medium">{captureQuality.coverage.coverageLabel}</span>
+                  </div>
+
+                  {captureQuality.recommendation === 'ok_lower_confidence' && (
+                    <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 mt-3">
+                      This rack can be scored, but missing angle coverage may reduce confidence.
+                    </div>
+                  )}
+
+                  {captureQuality.recommendation === 'needs_better_photos' && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 mt-3">
+                      This image set is weak for reliable scoring. You can still continue, but results may be less accurate.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Navigation */}
             <div className="flex justify-end pt-4 border-t border-border">

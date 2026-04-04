@@ -93,8 +93,10 @@ export async function POST(request: Request) {
     const nickname = formData.get('nickname') as string | null
     const location = formData.get('location') as string | null
     const harvestDate = formData.get('harvest_date') as string | null
-    const intakeQualityRaw = formData.get('intake_quality') as string | null
-    const userId = formData.get('user_id') as string | null
+  const intakeQualityRaw = formData.get('intake_quality') as string | null
+  const selectedImageAnglesRaw = formData.get('selected_image_angles') as string | null
+  const captureQualitySummaryRaw = formData.get('capture_quality_summary') as string | null
+  const userId = formData.get('user_id') as string | null
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -329,6 +331,22 @@ export async function POST(request: Request) {
 
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
+
+    // Log capture quality metadata
+    if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
+      let captureQualityData: any = {}
+      try {
+        if (selectedImageAnglesRaw) captureQualityData.selectedImageAngles = JSON.parse(selectedImageAnglesRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      try {
+        if (captureQualitySummaryRaw) captureQualityData.summary = JSON.parse(captureQualitySummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] capture quality check', captureQualityData)
+    }
 
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
