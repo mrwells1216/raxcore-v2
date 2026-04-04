@@ -476,7 +476,6 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                 AI:{' '}
                 {result?.prediction?.raw_ai_response?.grossScore ??
                   result?.rawAiResponse?.grossScore ??
-                  normalized.grossScore ??
                   '-'}
               </div>
               <div>

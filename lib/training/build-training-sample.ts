@@ -19,7 +19,9 @@ export function buildTrainingSample(params: {
 
   const imageUrls =
     originalPrediction?.image_urls ??
-    originalPrediction?.buck_images?.map((img: any) => img.image_url || img.public_url).filter(Boolean) ??
+    originalPrediction?.buck_images
+      ?.map((img: any) => img.image_url || img.public_url)
+      .filter(Boolean) ??
     []
 
   return {
@@ -63,7 +65,6 @@ export function buildTrainingSample(params: {
     is_official: isOfficial,
     reviewed_by: reviewedBy,
     reviewed_at: new Date().toISOString(),
-
     created_at: new Date().toISOString(),
   }
 }
