@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   let updated = false
 
   const reviewedScoreSheetPayload = {
-    bucket_id: buckId,
+    buck_id: buckId,
     prediction_id: predictionId,
     sheet_json: reviewedSheet,
     reviewed_gross: reviewedGross,
