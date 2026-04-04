@@ -371,7 +371,11 @@ export async function POST(request: Request) {
     }
 
     // Apply calibration from training data
-    const calibrationProfile = await getActiveCalibrationProfile()
+    const calibrationProfile = await getActiveCalibrationProfile({
+      state,
+      rackType: rackType ?? null,
+      imageCount: images?.length ?? 0,
+    })
 
     const calibratedScore = applyCalibration(
       {

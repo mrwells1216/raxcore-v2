@@ -71,6 +71,7 @@ export function applyCalibration<T extends ScoreLike>(
       grossMae: profile.gross_mae,
       netMae: profile.net_mae,
       confidenceScale: profile.confidence_scale,
+      profileKey: (profile as any).profile_key ?? null,
     },
   }
 }

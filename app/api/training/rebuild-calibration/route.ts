@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { buildCalibrationProfile } from '@/lib/calibration/build-calibration-profile'
+import {
+  buildCalibrationProfile,
+  buildSegmentedCalibrationProfiles,
+} from '@/lib/calibration/build-calibration-profile'
 
 export async function POST() {
   const supabase = await createClient()
@@ -14,21 +17,34 @@ export async function POST() {
     return NextResponse.json({ error: 'Failed to load training samples' }, { status: 500 })
   }
 
-  const profile = buildCalibrationProfile(samples ?? [])
-  if (!profile) {
+  const allSamples = samples ?? []
+
+  const globalProfile = buildCalibrationProfile(allSamples)
+  const segmentedProfiles = buildSegmentedCalibrationProfiles(allSamples)
+
+  if (!globalProfile) {
     return NextResponse.json({
       ok: true,
       message: 'Not enough usable samples to build calibration profile',
     })
   }
 
-  const profileKey = 'global_default'
-
-  const { error: upsertError } = await supabase
-    .from('calibration_profiles')
-    .upsert({
-      profile_key: profileKey,
+  const rows = [
+    {
+      profile_key: 'global_default',
       scope: { level: 'global' },
+      sample_count: globalProfile.sample_count,
+      gross_bias: globalProfile.gross_bias,
+      net_bias: globalProfile.net_bias,
+      gross_mae: globalProfile.gross_mae,
+      net_mae: globalProfile.net_mae,
+      confidence_scale: globalProfile.confidence_scale,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    },
+    ...segmentedProfiles.map((profile) => ({
+      profile_key: profile.profile_key,
+      scope: profile.scope,
       sample_count: profile.sample_count,
       gross_bias: profile.gross_bias,
       net_bias: profile.net_bias,
@@ -37,19 +53,27 @@ export async function POST() {
       confidence_scale: profile.confidence_scale,
       is_active: true,
       updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'profile_key',
-    })
+    })),
+  ]
+
+  const { error: upsertError } = await supabase
+    .from('calibration_profiles')
+    .upsert(rows, { onConflict: 'profile_key' })
 
   if (upsertError) {
-    console.error('[calibration] failed to save profile', upsertError)
-    return NextResponse.json({ error: 'Failed to save calibration profile' }, { status: 500 })
+    console.error('[calibration] failed to save profiles', upsertError)
+    return NextResponse.json({ error: 'Failed to save calibration profiles' }, { status: 500 })
   }
 
-  console.log('[calibration] profile rebuilt', profile)
+  console.log('[calibration] profiles rebuilt', {
+    globalSampleCount: globalProfile.sample_count,
+    segmentedCount: segmentedProfiles.length,
+  })
 
   return NextResponse.json({
     ok: true,
-    profile,
+    globalProfile,
+    segmentedCount: segmentedProfiles.length,
+    profilesSaved: rows.length,
   })
 }

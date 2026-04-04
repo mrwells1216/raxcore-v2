@@ -415,12 +415,17 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
           {/* Calibration status */}
           {result?.prediction?.raw_ai_response?.calibrationApplied && (
-            <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50 dark:bg-neutral-900">
+            <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
               Calibrated using reviewed training data
               {result?.prediction?.raw_ai_response?.calibrationMeta?.sampleCount ? (
                 <span className="ml-1 text-muted-foreground">
                   ({result.prediction.raw_ai_response.calibrationMeta.sampleCount} samples)
                 </span>
+              ) : null}
+              {result?.prediction?.raw_ai_response?.calibrationMeta?.profileKey ? (
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  profile: {result.prediction.raw_ai_response.calibrationMeta.profileKey}
+                </div>
               ) : null}
             </div>
           )}
