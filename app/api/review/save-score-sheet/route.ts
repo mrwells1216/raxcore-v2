@@ -208,7 +208,11 @@ export async function GET(req: Request) {
 
     const measurements = data?.sheet_json?.measurements ?? null
     const reviewCompleteness = getReviewCompleteness(measurements)
-    const isOfficial = Boolean(data?.is_training_truth) && reviewCompleteness >= 90
+    const isOfficial = isOfficialReview({
+      reviewCompleteness,
+      measurements,
+      isTrainingTruth: Boolean(data?.is_training_truth),
+    })
 
     return NextResponse.json({
       reviewedScoreSheet: data,
