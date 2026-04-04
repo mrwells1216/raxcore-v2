@@ -34,6 +34,26 @@ export default async function CalibrationAdminPage() {
         </button>
       </form>
 
+      <div className="flex flex-wrap gap-3">
+        <a
+          href="/api/training/export?format=json"
+          className="rounded-md border px-3 py-2 text-sm"
+        >
+          Export official training truth (JSON)
+        </a>
+
+        <a
+          href="/api/training/export?format=csv"
+          className="rounded-md border px-3 py-2 text-sm"
+        >
+          Export official training truth (CSV)
+        </a>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Only official reviewed samples are included in exports.
+      </p>
+
       {error ? (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           Failed to load calibration profiles
