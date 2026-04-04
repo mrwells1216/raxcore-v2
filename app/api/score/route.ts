@@ -96,6 +96,10 @@ export async function POST(request: Request) {
   const intakeQualityRaw = formData.get('intake_quality') as string | null
   const selectedImageAnglesRaw = formData.get('selected_image_angles') as string | null
   const captureQualitySummaryRaw = formData.get('capture_quality_summary') as string | null
+  const precisionModeEnabledRaw = formData.get('precision_mode_enabled') as string | null
+  const referenceTypeRaw = formData.get('reference_type') as string | null
+  const referenceNotesRaw = formData.get('reference_notes') as string | null
+  const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
   const userId = formData.get('user_id') as string | null
     
     // Phase 54: Abnormal/Irregular Points
@@ -346,6 +350,20 @@ export async function POST(request: Request) {
         // ignore parse error
       }
       console.log('[score] capture quality check', captureQualityData)
+    }
+
+    // Log reference mode metadata (precision mode)
+    if (precisionModeEnabledRaw || referenceModeSummaryRaw) {
+      let referenceModeData: any = {}
+      referenceModeData.precisionModeEnabled = precisionModeEnabledRaw === 'true'
+      if (referenceTypeRaw) referenceModeData.referenceType = referenceTypeRaw
+      if (referenceNotesRaw) referenceModeData.referenceNotes = referenceNotesRaw
+      try {
+        if (referenceModeSummaryRaw) referenceModeData.summary = JSON.parse(referenceModeSummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] reference mode summary', referenceModeData)
     }
 
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)

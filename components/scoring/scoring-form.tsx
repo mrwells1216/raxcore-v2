@@ -16,6 +16,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { US_STATES, RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, MAIN_FRAME_OPTIONS, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
 import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
+import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 
 const formSchema = z.object({
   state: z.string().min(1, 'State is required'),
@@ -33,6 +34,10 @@ const formSchema = z.object({
   estimated_irregular_points_count: z.coerce.number().min(0).max(50).optional(),
   abnormal_point_notes: z.string().max(500).optional(),
   abnormal_point_tags: z.array(z.enum(['drop_tine', 'sticker_point', 'split_tine', 'extra_abnormal_growth', 'palmation_like_growth', 'kicker_point', 'inline_point', 'unknown_abnormality'])).optional(),
+  // Precision mode: reference object / scale marker
+  precision_mode_enabled: z.boolean().optional().default(false),
+  reference_type: z.enum(['none', 'ruler', 'credit_card', 'coin', 'aruco_marker', 'other_known_object']).optional().default('none'),
+  reference_notes: z.string().optional().default(''),
 })
 
 interface ScoringFormProps {
@@ -59,11 +64,24 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
       estimated_irregular_points_count: undefined,
       abnormal_point_notes: '',
       abnormal_point_tags: [],
+      precision_mode_enabled: false,
+      reference_type: 'none',
+      reference_notes: '',
     },
   })
   
   const watchRackType = form.watch('rack_type')
   const watchIrregularPoints = form.watch('irregular_points_present')
+  
+  const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
+  const watchReferenceType = form.watch('reference_type')
+  const watchReferenceNotes = form.watch('reference_notes')
+
+  const referenceModeSummary = buildReferenceModeSummary({
+    precisionModeEnabled: watchPrecisionModeEnabled,
+    referenceType: watchReferenceType,
+    referenceNotes: watchReferenceNotes,
+  })
 
   return (
     <Form {...form}>
@@ -434,6 +452,76 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting }: ScoringFormProps
             </CollapsibleContent>
           </div>
         </Collapsible>
+
+        {/* Precision Mode */}
+        <div className="rounded-lg border px-4 py-3 space-y-3">
+          <div>
+            <div className="text-sm font-medium">Precision mode</div>
+            <div className="text-xs text-muted-foreground">
+              Tell the app if your photos include a known-size reference object or scale marker.
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={!!watchPrecisionModeEnabled}
+              onChange={(e) => form.setValue('precision_mode_enabled', e.target.checked, { shouldDirty: true })}
+              className="rounded border"
+            />
+            <label className="text-sm">I included a size reference in my photos</label>
+          </div>
+
+          {watchPrecisionModeEnabled && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Reference type</label>
+                <select
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  value={watchReferenceType ?? 'none'}
+                  onChange={(e) =>
+                    form.setValue('reference_type', e.target.value as any, { shouldDirty: true })
+                  }
+                >
+                  <option value="none">None selected</option>
+                  <option value="ruler">Ruler / tape</option>
+                  <option value="credit_card">Credit card</option>
+                  <option value="coin">Coin</option>
+                  <option value="aruco_marker">Printed marker</option>
+                  <option value="other_known_object">Other known-size object</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
+                <textarea
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  rows={2}
+                  placeholder="Example: standard credit card placed next to left beam"
+                  value={watchReferenceNotes ?? ''}
+                  onChange={(e) =>
+                    form.setValue('reference_notes', e.target.value, { shouldDirty: true })
+                  }
+                />
+              </div>
+
+              <div className="rounded-md border bg-neutral-50 px-3 py-2 text-xs">
+                {referenceModeSummary.referencePresent ? (
+                  <>
+                    Reference recorded: <span className="font-medium">{referenceModeSummary.referenceType}</span>
+                    {referenceModeSummary.shouldBoostConfidenceLater ? (
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        This reference type is a strong candidate for future scale-aware confidence improvements.
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <>Precision mode is on, but no reference type has been selected yet.</>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="flex gap-3 pt-4 border-t border-border">
           <Button type="button" variant="outline" onClick={onBack} className="min-h-[48px] gap-2" disabled={isSubmitting}>

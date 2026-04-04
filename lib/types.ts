@@ -364,6 +364,10 @@ export interface ScoringFormData {
   abnormal_point_tags?: AbnormalPointTag[]
   // Capture quality metadata
   selected_image_angles?: CaptureAngle[]
+  // Precision mode: reference object / scale marker
+  precision_mode_enabled?: boolean
+  reference_type?: 'none' | 'ruler' | 'credit_card' | 'coin' | 'aruco_marker' | 'other_known_object'
+  reference_notes?: string
 }
 
 export interface GroundTruthFormData {

@@ -11,6 +11,7 @@ import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
+import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import { toast } from 'sonner'
@@ -154,6 +155,19 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         recommendation: captureQuality.recommendation,
         recommendationReason: captureQuality.recommendationReason,
       }))
+
+      // Include precision mode metadata
+      if (data.precision_mode_enabled) {
+        const referenceModeSummary = buildReferenceModeSummary({
+          precisionModeEnabled: data.precision_mode_enabled,
+          referenceType: data.reference_type,
+          referenceNotes: data.reference_notes,
+        })
+        apiFormData.append('precision_mode_enabled', String(data.precision_mode_enabled))
+        apiFormData.append('reference_type', data.reference_type ?? 'none')
+        if (data.reference_notes) apiFormData.append('reference_notes', data.reference_notes)
+        apiFormData.append('reference_mode_summary', JSON.stringify(referenceModeSummary))
+      }
 
       // Preprocess and add images (resize + compress to reduce payload)
       for (let index = 0; index < images.length; index++) {

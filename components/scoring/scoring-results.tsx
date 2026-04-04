@@ -530,6 +530,28 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             )
           })()}
 
+          {/* Precision Mode Metadata */}
+          {(() => {
+            const referenceModeSummary = result?.referenceModeSummary as any ||
+              result?.prediction?.referenceModeSummary as any ||
+              result?.prediction?.raw_ai_response?.referenceModeSummary as any ||
+              null
+            
+            if (!referenceModeSummary?.precisionModeEnabled) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Precision mode enabled
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Reference type: {referenceModeSummary.referenceType ?? 'unknown'}
+                  {referenceModeSummary.referenceNotes ? (
+                    <> · {referenceModeSummary.referenceNotes}</>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Reviewed Score Sheet Summary Card */}
           {reviewedScoreSheet && (
             <div className="rounded-lg border bg-background px-4 py-4 mb-3">
