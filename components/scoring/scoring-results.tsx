@@ -472,6 +472,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           ) : reviewedScoreSheet?.reviewCompleteness ? (
             <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 mb-3">
               Partially reviewed ({reviewedScoreSheet.reviewCompleteness}% complete)
+              <div className="mt-1 text-[11px] text-yellow-700">
+                Missing one or more required official-review fields
+              </div>
             </div>
           ) : (
             <div className="rounded-md border bg-neutral-50 px-3 py-2 text-xs mb-3">

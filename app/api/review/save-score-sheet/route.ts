@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { buildTrainingSample } from '@/lib/training/build-training-sample'
 import { getReviewCompleteness } from '@/lib/review/review-completeness'
+import { isOfficialReview } from '@/lib/review/is-official-review'
 
 export async function POST(req: Request) {
   const db = await createClient()
@@ -24,8 +25,19 @@ export async function POST(req: Request) {
   const reviewStatus = isTrainingTruth ? 'final' : 'draft'
   const reviewedMeasurements = reviewedSheet?.measurements ?? null
   const reviewCompleteness = getReviewCompleteness(reviewedMeasurements)
-  const isOfficial = isTrainingTruth && reviewCompleteness >= 90
+  const isOfficial = isOfficialReview({
+    reviewCompleteness,
+    measurements: reviewedMeasurements,
+    isTrainingTruth,
+  })
   const reviewedBy = 'human_review'
+
+  console.log('[review-save] official review gate', {
+    predictionId,
+    reviewCompleteness,
+    isTrainingTruth,
+    isOfficial,
+  })
 
   const reviewedGross =
     reviewedSheet?.measurements?.grossScore ??
