@@ -18,6 +18,7 @@ import { GroundTruthForm } from './ground-truth-form'
 import { ConfidenceIndicator, ConfidenceExplanation, ConfidenceBadge } from './confidence-indicator'
 import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-display'
 import { BuckLocationLink } from '@/components/map/buck-location-link'
+import { buildMeasurementDiff } from '@/lib/review/measurement-diff'
 import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
@@ -329,6 +330,22 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       }
     : null
 
+  const aiMeasurements =
+    result?.prediction?.raw_ai_response?.measurements ??
+    result?.rawAiResponse?.measurements ??
+    result?.prediction?.measurements ??
+    null
+
+  const reviewedMeasurements =
+    reviewedScoreSheet?.sheet_json?.measurements ??
+    reviewedScoreSheet?.sheet_json ??
+    null
+
+  const measurementDiffRows = buildMeasurementDiff({
+    aiMeasurements,
+    reviewedMeasurements,
+  })
+
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showLearning, setShowLearning] = useState(false)
@@ -538,6 +555,54 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                       : '-'}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Field-level diff view */}
+          {reviewedScoreSheet && measurementDiffRows.length > 0 && (
+            <div className="rounded-lg border bg-background px-4 py-4 mb-3">
+              <div className="mb-3">
+                <div className="text-sm font-medium">Field-level review changes</div>
+                <div className="text-xs text-muted-foreground">
+                  Comparison between AI measurements and reviewed values
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground mb-2">
+                {measurementDiffRows.filter((row) => row.changed).length} changed field(s)
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="py-2 pr-3 font-medium">Field</th>
+                      <th className="py-2 pr-3 font-medium">AI</th>
+                      <th className="py-2 pr-3 font-medium">Reviewed</th>
+                      <th className="py-2 pr-3 font-medium">Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {measurementDiffRows.map((row) => (
+                      <tr
+                        key={row.key}
+                        className={row.changed ? 'border-b bg-yellow-50/40' : 'border-b'}
+                      >
+                        <td className="py-2 pr-3 font-medium">{row.label}</td>
+                        <td className="py-2 pr-3">
+                          {row.aiValue ?? '-'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {row.reviewedValue ?? '-'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {row.delta === null ? '-' : row.delta > 0 ? `+${row.delta}` : row.delta}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
