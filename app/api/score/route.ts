@@ -388,6 +388,11 @@ export async function POST(request: Request) {
     scoringResult.confidencePercent = calibratedScore.confidencePercent ?? scoringResult.confidencePercent
     scoringResult.errorMargin = calibratedScore.errorMargin ?? scoringResult.errorMargin
 
+    if (calibratedScore.errorMargin) {
+      scoringResult.errorBandLow = calibratedScore.errorMargin.low
+      scoringResult.errorBandHigh = calibratedScore.errorMargin.high
+    }
+
     ;(scoringResult as any).calibrationApplied = calibratedScore.calibrationApplied
     ;(scoringResult as any).calibrationMeta = calibratedScore.calibrationMeta
 
