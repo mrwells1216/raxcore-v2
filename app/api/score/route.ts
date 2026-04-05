@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { hasRequiredServerEnv } from '@/lib/env'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
+import { computeConfidence } from '@/lib/confidence/engine'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 import { 
@@ -384,6 +385,27 @@ export async function POST(request: Request) {
       console.log('[score] image diagnostics', imageDiagnosticsData)
     }
 
+    // Parse metadata for confidence engine
+    let captureQualitySummary: any = null
+    let imageDiagnosticsSummary: any = null
+    let referenceModeSummary: any = null
+
+    try {
+      if (captureQualitySummaryRaw) captureQualitySummary = JSON.parse(captureQualitySummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+    try {
+      if (imageDiagnosticsSummaryRaw) imageDiagnosticsSummary = JSON.parse(imageDiagnosticsSummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+    try {
+      if (referenceModeSummaryRaw) referenceModeSummary = JSON.parse(referenceModeSummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
       images: resolvedImages,
@@ -701,6 +723,47 @@ export async function POST(request: Request) {
       },
     })
 
+    // Compute final confidence using the confidence engine
+    const confidenceResult = computeConfidence({
+      rawConfidence:
+        typeof (scoringResult as any).rawConfidence === 'number'
+          ? (scoringResult as any).rawConfidence
+          : typeof scoringResult?.confidencePercent === 'number'
+            ? scoringResult.confidencePercent
+            : null,
+
+      captureQualitySummary: captureQualitySummary ?? null,
+      imageDiagnosticsSummary: imageDiagnosticsSummary ?? null,
+      referenceModeSummary: referenceModeSummary ?? null,
+
+      measurements:
+        scoringResult?.measurements ??
+        scoringResult?.rawAiResponse?.measurements ??
+        null,
+
+      isFallback: Boolean(scoringResult?.isFallback),
+      calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
+      calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
+    })
+
+    ;(scoringResult as any).rawConfidence =
+      typeof (scoringResult as any).rawConfidence === 'number'
+        ? (scoringResult as any).rawConfidence
+        : confidenceResult.rawConfidence
+
+    scoringResult.confidencePercent = confidenceResult.finalConfidence
+    ;(scoringResult as any).confidenceBand = confidenceResult.confidenceBand
+    ;(scoringResult as any).confidenceReasons = confidenceResult.reasons
+    ;(scoringResult as any).confidenceComponentScores = confidenceResult.componentScores
+
+    console.log('[score] confidence engine result', {
+      rawConfidence: confidenceResult.rawConfidence,
+      finalConfidence: confidenceResult.finalConfidence,
+      confidenceBand: confidenceResult.confidenceBand,
+      reasons: confidenceResult.reasons,
+      componentScores: confidenceResult.componentScores,
+    })
+
     // Return result
     return NextResponse.json({
       // Include buck object for UI to access id and property_id
@@ -717,8 +780,8 @@ export async function POST(request: Request) {
         low: adjustedErrorBandLow,
         high: adjustedErrorBandHigh
       },
-      confidence: adjustedConfidence >= 75 ? 'high' : adjustedConfidence >= 50 ? 'medium' : 'low',
-      confidencePercent: adjustedConfidence,
+      confidence: (scoringResult as any).confidenceBand ?? (scoringResult.confidencePercent >= 75 ? 'high' : scoringResult.confidencePercent >= 50 ? 'medium' : 'low'),
+      confidencePercent: scoringResult.confidencePercent,
       measurements: scoringResult.measurements,
       landmarks: scoringResult.landmarks,
       stateCalibration: scoringResult.stateCalibration,
