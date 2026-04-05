@@ -139,3 +139,33 @@ export function buildConfidenceBacktest(rows: TrainingRow[]) {
       .slice(0, 25),
   }
 }
+
+export function diagnoseConfidenceIssues(backtest: any) {
+  const issues: string[] = []
+
+  const high = backtest.by_band.find((b: any) => b.band === 'high')
+  const medium = backtest.by_band.find((b: any) => b.band === 'medium')
+  const low = backtest.by_band.find((b: any) => b.band === 'low')
+
+  if (!backtest.confidence_ordering_passes) {
+    issues.push('Confidence ordering is broken (high ≥ medium ≥ low not satisfied)')
+  }
+
+  if (high?.mean_absolute_error > medium?.mean_absolute_error) {
+    issues.push('High confidence performs worse than medium')
+  }
+
+  if (medium?.mean_absolute_error > low?.mean_absolute_error) {
+    issues.push('Medium confidence performs worse than low')
+  }
+
+  if (high?.mean_absolute_error > 8) {
+    issues.push('High confidence error too large (>8 inches avg)')
+  }
+
+  if (low?.mean_absolute_error < 5) {
+    issues.push('Low confidence too accurate (bands not separated enough)')
+  }
+
+  return issues
+}

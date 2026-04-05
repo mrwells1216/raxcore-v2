@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { createClient } from '@/lib/supabase/server'
 import { buildTrainingAnalytics } from '@/lib/training/analytics'
-import { buildConfidenceBacktest } from '@/lib/training/confidence-backtest'
+import { buildConfidenceBacktest, diagnoseConfidenceIssues } from '@/lib/training/confidence-backtest'
 
 export const metadata = {
   title: 'Training Analytics | RAXcore Admin',
@@ -20,6 +20,7 @@ export default async function TrainingAnalyticsPage() {
 
   const analytics = buildTrainingAnalytics(data ?? [])
   const confidenceBacktest = buildConfidenceBacktest(data ?? [])
+  const confidenceIssues = diagnoseConfidenceIssues(confidenceBacktest)
 
   return (
     <div className="p-6 space-y-8">
@@ -151,6 +152,31 @@ export default async function TrainingAnalyticsPage() {
               row.abs_gross_delta,
             ])}
           />
+
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold">Confidence Diagnostics</h2>
+
+            {confidenceIssues.length === 0 ? (
+              <div className="text-sm text-green-600">
+                Confidence ordering is behaving correctly.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {confidenceIssues.map((issue, i) => (
+                  <div key={i} className="rounded-md border px-3 py-2 text-sm text-red-600">
+                    {issue}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+            Target performance:
+            <div>High confidence → &lt; 4–5 inch avg error</div>
+            <div>Medium → 5–8 inch avg error</div>
+            <div>Low → 8+ inch avg error</div>
+          </div>
         </>
       )}
     </div>
