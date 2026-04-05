@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { createClient } from '@/lib/supabase/server'
 import { buildTrainingAnalytics } from '@/lib/training/analytics'
+import { buildConfidenceBacktest } from '@/lib/training/confidence-backtest'
 
 export const metadata = {
   title: 'Training Analytics | RAXcore Admin',
@@ -18,6 +19,7 @@ export default async function TrainingAnalyticsPage() {
     .order('reviewed_at', { ascending: false })
 
   const analytics = buildTrainingAnalytics(data ?? [])
+  const confidenceBacktest = buildConfidenceBacktest(data ?? [])
 
   return (
     <div className="p-6 space-y-8">
@@ -95,6 +97,58 @@ export default async function TrainingAnalyticsPage() {
               row.ai_gross ?? '-',
               row.reviewed_gross ?? '-',
               row.gross_delta ?? '-',
+            ])}
+          />
+
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold">Confidence Backtest</h2>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <MetricCard
+                label="Usable confidence samples"
+                value={confidenceBacktest.usable_samples}
+              />
+              <MetricCard
+                label="Overall gross abs error"
+                value={confidenceBacktest.overall_mean_absolute_error}
+              />
+              <MetricCard
+                label="Ordering passes"
+                value={confidenceBacktest.confidence_ordering_passes ? 'yes' : 'no'}
+              />
+            </div>
+          </div>
+
+          <SectionTable
+            title="Error by confidence band"
+            headers={['Band', 'Samples', 'Mean signed error', 'Mean absolute error']}
+            rows={confidenceBacktest.by_band.map((row) => [
+              row.band,
+              row.sample_count,
+              row.mean_signed_error,
+              row.mean_absolute_error,
+            ])}
+          />
+
+          <SectionTable
+            title="Error by confidence bucket"
+            headers={['Confidence bucket', 'Samples', 'Mean absolute error']}
+            rows={confidenceBacktest.by_confidence_bucket.map((row) => [
+              row.label,
+              row.sample_count,
+              row.mean_absolute_error,
+            ])}
+          />
+
+          <SectionTable
+            title="Worst confidence mismatches"
+            headers={['Buck', 'Confidence', 'Band', 'Gross delta', 'Abs gross delta']}
+            rows={confidenceBacktest.worst_mismatches.map((row) => [
+              row.buck_id ?? '-',
+              row.confidence,
+              row.band,
+              row.gross_delta,
+              row.abs_gross_delta,
             ])}
           />
         </>

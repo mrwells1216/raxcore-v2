@@ -55,6 +55,13 @@ export default async function CalibrationAdminPage() {
         >
           View training analytics
         </a>
+
+        <a
+          href="/api/training/confidence-backtest"
+          className="rounded-md border px-3 py-2 text-sm"
+        >
+          View confidence backtest JSON
+        </a>
       </div>
 
       <p className="text-xs text-muted-foreground">

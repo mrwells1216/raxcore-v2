@@ -19,7 +19,9 @@ function getConfidence(row: TrainingRow) {
     toNumber(row?.ai_output?.confidence_percent) ??
     toNumber(row?.ai_output?.confidencePercent) ??
     toNumber(row?.ai_output?.final_confidence) ??
-    toNumber(row?.ai_output?.raw_ai_response?.confidencePercent)
+    toNumber(row?.ai_output?.rawConfidence) ??
+    toNumber(row?.ai_output?.raw_ai_response?.confidencePercent) ??
+    toNumber(row?.ai_output?.raw_ai_response?.rawConfidence)
   )
 }
 
