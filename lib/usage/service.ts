@@ -50,8 +50,6 @@ export function invalidateUsageConfigCache() {
 // ============================================================================
 
 export async function getActiveRateLimitConfig(): Promise<RateLimitConfig> {
-  const isDev = process.env.NODE_ENV === 'development' || !process.env.VERCEL_ENV
-
   const now = Date.now()
   if (cachedRateLimitConfig && now - rateLimitConfigCacheTime < RATE_LIMIT_CONFIG_CACHE_TTL) {
     return cachedRateLimitConfig
@@ -66,9 +64,6 @@ export async function getActiveRateLimitConfig(): Promise<RateLimitConfig> {
     .single()
 
   if (error || !data) {
-    if (isDev) {
-      console.warn('[rate-limit] missing table/config, allowing request in dev', { table: 'rate_limit_config' })
-    }
     // Return safe defaults
     return {
       id: 'default',
@@ -392,41 +387,18 @@ async function getOrCreateRateLimitState(
   windowType: 'minute' | 'hour' | 'day' | 'month' | 'burst',
   burstSeconds = 10
 ): Promise<RateLimitState> {
-  const isDev = process.env.NODE_ENV === 'development' || !process.env.VERCEL_ENV
-
   // Use service role client to bypass RLS for internal rate limit operations
   const supabase = await getServiceSupabase()
   const { start, end } = getWindowBounds(windowType, burstSeconds)
 
   // Try to get existing state
-  const { data: existing, error: existingError } = await supabase
+  const { data: existing } = await supabase
     .from('rate_limit_state')
     .select('*')
     .eq('client_key', clientKey)
     .eq('window_type', windowType)
     .eq('window_start', start.toISOString())
     .single()
-
-  if (existingError && existingError.code !== 'PGRST116' && isDev) {
-    // Table might not exist in dev - log and return a permissive mock state
-    console.warn('[rate-limit] failed to query rate_limit_state in dev, returning mock state', { 
-      error: existingError.message,
-      table: 'rate_limit_state' 
-    })
-    return {
-      id: `dev-mock-${Date.now()}`,
-      client_key: clientKey,
-      window_type: windowType,
-      window_start: start.toISOString(),
-      window_end: end.toISOString(),
-      request_count: 0,
-      image_count: 0,
-      estimated_cost_mc: 0,
-      last_request_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-  }
 
   if (existing) return existing
 
@@ -446,26 +418,6 @@ async function getOrCreateRateLimitState(
     .single()
 
   if (error) {
-    if (isDev && error.code === 'PGRST116') {
-      // Table doesn't exist in dev - log and return mock state
-      console.warn('[rate-limit] rate_limit_state table missing in dev, returning mock state', { 
-        table: 'rate_limit_state' 
-      })
-      return {
-        id: `dev-mock-${Date.now()}`,
-        client_key: clientKey,
-        window_type: windowType,
-        window_start: start.toISOString(),
-        window_end: end.toISOString(),
-        request_count: 0,
-        image_count: 0,
-        estimated_cost_mc: 0,
-        last_request_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-    }
-
     // Race condition - try to get again
     const { data: retry } = await supabase
       .from('rate_limit_state')
@@ -476,26 +428,6 @@ async function getOrCreateRateLimitState(
       .single()
 
     if (retry) return retry
-
-    if (isDev) {
-      console.warn('[rate-limit] failed to create rate_limit_state in dev, returning mock state', { 
-        error: error.message,
-        table: 'rate_limit_state'
-      })
-      return {
-        id: `dev-mock-${Date.now()}`,
-        client_key: clientKey,
-        window_type: windowType,
-        window_start: start.toISOString(),
-        window_end: end.toISOString(),
-        request_count: 0,
-        image_count: 0,
-        estimated_cost_mc: 0,
-        last_request_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-    }
 
     throw new Error(`Failed to create rate limit state: ${error.message}`)
   }
@@ -552,22 +484,6 @@ export async function checkRateLimit(
   clientKey: string,
   imageCount: number
 ): Promise<RateLimitCheckResult> {
-  const isDev = process.env.NODE_ENV === 'development' || !process.env.VERCEL_ENV
-
-  if (isDev) {
-    // Dev bypass - skip rate limiting locally
-    console.log('[rate-limit] DEV BYPASS enabled for local scoring')
-    return {
-      allowed: true,
-      reason: undefined,
-      limit_type: undefined,
-      current_count: 0,
-      max_count: undefined,
-      retry_after_seconds: undefined,
-      warnings: [],
-    }
-  }
-
   const config = await getActiveRateLimitConfig()
   const warnings: string[] = []
 
