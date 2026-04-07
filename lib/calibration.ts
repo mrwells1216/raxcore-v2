@@ -108,6 +108,9 @@ export function applyCalibration(params: {
   }
 }
 
+// Track whether we've already warned about the schema mismatch to avoid log spam
+let _hasWarnedCalibrationSchema = false
+
 export async function getBestCalibrationProfile(params: {
   state?: string | null
   rackType?: string | null
@@ -143,7 +146,12 @@ export async function getBestCalibrationProfile(params: {
     .in('profile_key', candidateKeys)
 
   if (error) {
-    console.warn('[calibration] failed loading profiles', error)
+    // Only warn once per process lifetime to avoid log spam when the column
+    // or table doesn't exist in this environment
+    if (!_hasWarnedCalibrationSchema) {
+      console.warn('[calibration] failed loading profiles (will use raw scores):', error.message)
+      _hasWarnedCalibrationSchema = true
+    }
     return null
   }
 

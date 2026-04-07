@@ -10,7 +10,7 @@
  * No dependency on old human_review_sheets system.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -201,36 +201,38 @@ export function ScoreSheetEditor({
   onSave,
   onFinalize,
 }: ScoreSheetEditorProps) {
-  // Initialize measurements from AI values
-  const getInitialMeasurements = useCallback((): CorrectedMeasurements => {
-    return {
-      inside_spread: aiScoreSheet.spread.inside.value,
-      main_beam_left: aiScoreSheet.left.main_beam.value,
-      main_beam_right: aiScoreSheet.right.main_beam.value,
-      g1_left: aiScoreSheet.left.g1.value,
-      g1_right: aiScoreSheet.right.g1.value,
-      g2_left: aiScoreSheet.left.g2.value,
-      g2_right: aiScoreSheet.right.g2.value,
-      g3_left: aiScoreSheet.left.g3.value,
-      g3_right: aiScoreSheet.right.g3.value,
-      g4_left: aiScoreSheet.left.g4.value,
-      g4_right: aiScoreSheet.right.g4.value,
-      g5_left: aiScoreSheet.left.g5.value,
-      g5_right: aiScoreSheet.right.g5.value,
-      h1_left: aiScoreSheet.left.h1.value,
-      h1_right: aiScoreSheet.right.h1.value,
-      h2_left: aiScoreSheet.left.h2.value,
-      h2_right: aiScoreSheet.right.h2.value,
-      h3_left: aiScoreSheet.left.h3.value,
-      h3_right: aiScoreSheet.right.h3.value,
-      h4_left: aiScoreSheet.left.h4.value,
-      h4_right: aiScoreSheet.right.h4.value,
-      abnormal_points: aiScoreSheet.abnormal_points.total_length.value,
-      deductions: aiScoreSheet.deductions.symmetry_total.value,
-    }
-  }, [aiScoreSheet])
+  // Stable hydration guard — only re-initialize when predictionId changes
+  const lastHydratedIdRef = useRef<string | null>(null)
 
-  const [measurements, setMeasurements] = useState<CorrectedMeasurements>(getInitialMeasurements)
+  const buildInitialMeasurements = (sheet: typeof aiScoreSheet): CorrectedMeasurements => ({
+    inside_spread: sheet.spread.inside.value,
+    main_beam_left: sheet.left.main_beam.value,
+    main_beam_right: sheet.right.main_beam.value,
+    g1_left: sheet.left.g1.value,
+    g1_right: sheet.right.g1.value,
+    g2_left: sheet.left.g2.value,
+    g2_right: sheet.right.g2.value,
+    g3_left: sheet.left.g3.value,
+    g3_right: sheet.right.g3.value,
+    g4_left: sheet.left.g4.value,
+    g4_right: sheet.right.g4.value,
+    g5_left: sheet.left.g5.value,
+    g5_right: sheet.right.g5.value,
+    h1_left: sheet.left.h1.value,
+    h1_right: sheet.right.h1.value,
+    h2_left: sheet.left.h2.value,
+    h2_right: sheet.right.h2.value,
+    h3_left: sheet.left.h3.value,
+    h3_right: sheet.right.h3.value,
+    h4_left: sheet.left.h4.value,
+    h4_right: sheet.right.h4.value,
+    abnormal_points: sheet.abnormal_points.total_length.value,
+    deductions: sheet.deductions.symmetry_total.value,
+  })
+
+  const [measurements, setMeasurements] = useState<CorrectedMeasurements>(() =>
+    buildInitialMeasurements(aiScoreSheet)
+  )
   const [rackType, setRackType] = useState<'typical' | 'non-typical'>(aiScoreSheet.metadata.rack_type)
   const [mainFramePoints, setMainFramePoints] = useState<number>(aiScoreSheet.metadata.main_frame_points)
   const [reviewNotes, setReviewNotes] = useState<string>('')
@@ -240,61 +242,40 @@ export function ScoreSheetEditor({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [hasSaved, setHasSaved] = useState(false)
 
+  // Re-hydrate editor state only when the predictionId changes (new scoring run)
+  useEffect(() => {
+    if (lastHydratedIdRef.current === predictionId) return
+    lastHydratedIdRef.current = predictionId
+    setMeasurements(buildInitialMeasurements(aiScoreSheet))
+    setRackType(aiScoreSheet.metadata.rack_type)
+    setMainFramePoints(aiScoreSheet.metadata.main_frame_points)
+    setHasSaved(false)
+    setReviewStatus('draft')
+    setSaveError(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [predictionId])
+
   // Calculate scores based on corrected measurements
   const correctedGross = calculateGrossScore(measurements)
   const correctedNet = calculateNetScore(measurements, rackType)
   const correctedDeductions = calculateSymmetryDeductions(measurements)
-  
-  // Update deductions when measurements change
+
+  // Sync auto-computed symmetry deductions back into measurements without recursion.
+  // Use a ref to compare the previous computed value so we only call setMeasurements
+  // when the value actually changes, preventing an infinite update loop.
+  const prevDeductionsRef = useRef<number | null>(null)
   useEffect(() => {
-    setMeasurements(prev => ({
-      ...prev,
-      deductions: correctedDeductions,
-    }))
-  }, [
-    measurements.main_beam_left, measurements.main_beam_right,
-    measurements.g1_left, measurements.g1_right,
-    measurements.g2_left, measurements.g2_right,
-    measurements.g3_left, measurements.g3_right,
-    measurements.g4_left, measurements.g4_right,
-    measurements.g5_left, measurements.g5_right,
-    measurements.h1_left, measurements.h1_right,
-    measurements.h2_left, measurements.h2_right,
-    measurements.h3_left, measurements.h3_right,
-    measurements.h4_left, measurements.h4_right,
-    correctedDeductions,
-  ])
+    if (prevDeductionsRef.current === correctedDeductions) return
+    prevDeductionsRef.current = correctedDeductions
+    setMeasurements(prev => ({ ...prev, deductions: correctedDeductions }))
+  }, [correctedDeductions])
 
   const updateMeasurement = useCallback((key: keyof CorrectedMeasurements, value: number | null) => {
     setMeasurements(prev => ({ ...prev, [key]: value }))
   }, [])
 
   const resetToAiValues = useCallback(() => {
-    setMeasurements({
-      inside_spread: aiScoreSheet.spread.inside.value,
-      main_beam_left: aiScoreSheet.left.main_beam.value,
-      main_beam_right: aiScoreSheet.right.main_beam.value,
-      g1_left: aiScoreSheet.left.g1.value,
-      g1_right: aiScoreSheet.right.g1.value,
-      g2_left: aiScoreSheet.left.g2.value,
-      g2_right: aiScoreSheet.right.g2.value,
-      g3_left: aiScoreSheet.left.g3.value,
-      g3_right: aiScoreSheet.right.g3.value,
-      g4_left: aiScoreSheet.left.g4.value,
-      g4_right: aiScoreSheet.right.g4.value,
-      g5_left: aiScoreSheet.left.g5.value,
-      g5_right: aiScoreSheet.right.g5.value,
-      h1_left: aiScoreSheet.left.h1.value,
-      h1_right: aiScoreSheet.right.h1.value,
-      h2_left: aiScoreSheet.left.h2.value,
-      h2_right: aiScoreSheet.right.h2.value,
-      h3_left: aiScoreSheet.left.h3.value,
-      h3_right: aiScoreSheet.right.h3.value,
-      h4_left: aiScoreSheet.left.h4.value,
-      h4_right: aiScoreSheet.right.h4.value,
-      abnormal_points: aiScoreSheet.abnormal_points.total_length.value,
-      deductions: aiScoreSheet.deductions.symmetry_total.value,
-    })
+    setMeasurements(buildInitialMeasurements(aiScoreSheet))
     setRackType(aiScoreSheet.metadata.rack_type)
     setMainFramePoints(aiScoreSheet.metadata.main_frame_points)
   }, [aiScoreSheet])
