@@ -1,123 +1,213 @@
 -- Migration: Fix RLS infinite recursion on profiles table
--- Problem: policies on profiles that query profiles cause recursion
--- Solution: Create a SECURITY DEFINER function to bypass RLS when checking admin status
+-- Problem: policies that query profiles from within profiles policies cause recursion
+-- Solution: Use direct ownership checks only, remove all subqueries to profiles
 
 -- ============================================
--- 1. CREATE ADMIN CHECK FUNCTION (SECURITY DEFINER)
+-- 1. FIX PROFILES TABLE POLICIES
 -- ============================================
--- This function runs with the privileges of the function owner (postgres)
--- and bypasses RLS, preventing the recursion loop
-
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-STABLE
-AS $$
-  SELECT COALESCE(
-    (SELECT is_admin FROM profiles WHERE id = auth.uid()),
-    false
-  );
-$$;
-
--- Grant execute to authenticated users
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO anon;
-
--- ============================================
--- 2. FIX PROFILES TABLE POLICIES
--- ============================================
--- Drop the problematic recursive admin select policy
+-- Drop ALL existing profiles policies to start fresh
+DROP POLICY IF EXISTS "profiles_select_own" ON profiles;
+DROP POLICY IF EXISTS "profiles_insert_own" ON profiles;
+DROP POLICY IF EXISTS "profiles_update_own" ON profiles;
 DROP POLICY IF EXISTS "profiles_admin_select" ON profiles;
 
--- The existing policies are fine:
--- - profiles_select_own: auth.uid() = id (direct comparison, no recursion)
--- - profiles_insert_own: auth.uid() = id (direct comparison, no recursion)  
--- - profiles_update_own: auth.uid() = id (direct comparison, no recursion)
+-- Recreate with direct ownership checks only (no subqueries)
+CREATE POLICY "profiles_select_own" ON profiles FOR SELECT 
+  USING (id = auth.uid());
 
--- Add admin select policy using the safe function
-CREATE POLICY "profiles_admin_select" ON profiles FOR SELECT 
-  USING (public.is_admin());
+CREATE POLICY "profiles_insert_own" ON profiles FOR INSERT 
+  WITH CHECK (id = auth.uid());
+
+CREATE POLICY "profiles_update_own" ON profiles FOR UPDATE 
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
 
 -- ============================================
--- 3. FIX BUCKS TABLE POLICIES
+-- 2. FIX BUCKS TABLE POLICIES
 -- ============================================
--- Drop existing policies that reference profiles
+-- Drop policies that reference profiles
 DROP POLICY IF EXISTS "bucks_admin_all" ON bucks;
 DROP POLICY IF EXISTS "bucks_user_update" ON bucks;
 DROP POLICY IF EXISTS "bucks_user_delete" ON bucks;
+DROP POLICY IF EXISTS "bucks_select_own" ON bucks;
+DROP POLICY IF EXISTS "bucks_insert_own" ON bucks;
+DROP POLICY IF EXISTS "bucks_update_own" ON bucks;
+DROP POLICY IF EXISTS "bucks_delete_own" ON bucks;
+DROP POLICY IF EXISTS "bucks_insert_anon" ON bucks;
+DROP POLICY IF EXISTS "bucks_select_anon" ON bucks;
+DROP POLICY IF EXISTS "bucks_public_read" ON bucks;
+DROP POLICY IF EXISTS "bucks_public_insert" ON bucks;
 
--- Recreate admin policy using safe function
-CREATE POLICY "bucks_admin_all" ON bucks FOR ALL 
-  USING (public.is_admin());
+-- Recreate with direct ownership checks only
+CREATE POLICY "bucks_select_own" ON bucks FOR SELECT 
+  USING (user_id = auth.uid() OR user_id IS NULL);
 
--- Recreate user update policy (from 032_user_auth_tables.sql)
-CREATE POLICY "bucks_user_update" ON bucks FOR UPDATE USING (
-  auth.uid() = user_id 
-  OR user_id IS NULL
-  OR public.is_admin()
-);
+CREATE POLICY "bucks_insert_own" ON bucks FOR INSERT 
+  WITH CHECK (user_id = auth.uid() OR user_id IS NULL);
 
--- Recreate user delete policy
-CREATE POLICY "bucks_user_delete" ON bucks FOR DELETE USING (
-  auth.uid() = user_id
-  OR public.is_admin()
-);
+CREATE POLICY "bucks_update_own" ON bucks FOR UPDATE 
+  USING (user_id = auth.uid() OR user_id IS NULL)
+  WITH CHECK (user_id = auth.uid() OR user_id IS NULL);
+
+CREATE POLICY "bucks_delete_own" ON bucks FOR DELETE 
+  USING (user_id = auth.uid());
 
 -- ============================================
--- 4. FIX BUCK_IMAGES TABLE POLICIES
+-- 3. FIX BUCK_IMAGES TABLE POLICIES
 -- ============================================
 DROP POLICY IF EXISTS "buck_images_admin_all" ON buck_images;
+DROP POLICY IF EXISTS "buck_images_select" ON buck_images;
+DROP POLICY IF EXISTS "buck_images_insert" ON buck_images;
 
-CREATE POLICY "buck_images_admin_all" ON buck_images FOR ALL 
-  USING (public.is_admin());
+-- Use direct ownership via bucks join (no profiles reference)
+CREATE POLICY "buck_images_select" ON buck_images FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = buck_images.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "buck_images_insert" ON buck_images FOR INSERT 
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = buck_images.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "buck_images_update" ON buck_images FOR UPDATE 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = buck_images.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "buck_images_delete" ON buck_images FOR DELETE 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = buck_images.buck_id 
+      AND bucks.user_id = auth.uid()
+    )
+  );
 
 -- ============================================
--- 5. FIX PREDICTIONS TABLE POLICIES
+-- 4. FIX PREDICTIONS TABLE POLICIES
 -- ============================================
 DROP POLICY IF EXISTS "predictions_admin_all" ON predictions;
+DROP POLICY IF EXISTS "predictions_select" ON predictions;
+DROP POLICY IF EXISTS "predictions_insert" ON predictions;
 
-CREATE POLICY "predictions_admin_all" ON predictions FOR ALL 
-  USING (public.is_admin());
+-- Use direct ownership via bucks join (no profiles reference)
+CREATE POLICY "predictions_select" ON predictions FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = predictions.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "predictions_insert" ON predictions FOR INSERT 
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = predictions.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "predictions_update" ON predictions FOR UPDATE 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = predictions.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
 
 -- ============================================
--- 6. FIX GROUND_TRUTH_SCORES TABLE POLICIES
+-- 5. FIX GROUND_TRUTH_SCORES TABLE POLICIES
 -- ============================================
 DROP POLICY IF EXISTS "ground_truth_admin_all" ON ground_truth_scores;
+DROP POLICY IF EXISTS "ground_truth_select" ON ground_truth_scores;
+DROP POLICY IF EXISTS "ground_truth_insert" ON ground_truth_scores;
+DROP POLICY IF EXISTS "ground_truth_update" ON ground_truth_scores;
 
-CREATE POLICY "ground_truth_admin_all" ON ground_truth_scores FOR ALL 
-  USING (public.is_admin());
+-- Use direct ownership via bucks join (no profiles reference)
+CREATE POLICY "ground_truth_select" ON ground_truth_scores FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = ground_truth_scores.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "ground_truth_insert" ON ground_truth_scores FOR INSERT 
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = ground_truth_scores.buck_id 
+      AND (bucks.user_id = auth.uid() OR bucks.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "ground_truth_update" ON ground_truth_scores FOR UPDATE 
+  USING (
+    EXISTS (
+      SELECT 1 FROM bucks 
+      WHERE bucks.id = ground_truth_scores.buck_id 
+      AND bucks.user_id = auth.uid()
+    )
+  );
 
 -- ============================================
--- 7. FIX TRAINING_EXAMPLES TABLE POLICIES
+-- 6. FIX TRAINING_EXAMPLES TABLE POLICIES
 -- ============================================
 DROP POLICY IF EXISTS "training_examples_admin_all" ON training_examples;
+DROP POLICY IF EXISTS "training_examples_select_own" ON training_examples;
 
-CREATE POLICY "training_examples_admin_all" ON training_examples FOR ALL 
-  USING (public.is_admin());
+-- Use direct ownership via predictions->bucks join (no profiles reference)
+CREATE POLICY "training_examples_select" ON training_examples FOR SELECT 
+  USING (
+    EXISTS (
+      SELECT 1 FROM predictions p 
+      JOIN bucks b ON b.id = p.buck_id 
+      WHERE p.id = training_examples.prediction_id 
+      AND (b.user_id = auth.uid() OR b.user_id IS NULL)
+    )
+  );
+
+CREATE POLICY "training_examples_insert" ON training_examples FOR INSERT 
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM predictions p 
+      JOIN bucks b ON b.id = p.buck_id 
+      WHERE p.id = training_examples.prediction_id 
+      AND (b.user_id = auth.uid() OR b.user_id IS NULL)
+    )
+  );
 
 -- ============================================
--- 8. FIX MODEL_VERSIONS TABLE POLICIES
+-- 7. FIX MODEL_VERSIONS TABLE POLICIES
 -- ============================================
 DROP POLICY IF EXISTS "model_versions_admin_write" ON model_versions;
+DROP POLICY IF EXISTS "model_versions_select_all" ON model_versions;
 
-CREATE POLICY "model_versions_admin_write" ON model_versions FOR ALL 
-  USING (public.is_admin());
+-- Model versions: read for all authenticated, no write restrictions for now
+CREATE POLICY "model_versions_select" ON model_versions FOR SELECT 
+  USING (true);
 
 -- ============================================
 -- VERIFICATION
 -- ============================================
 DO $$
 BEGIN
-  -- Verify the function exists
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_proc 
-    WHERE proname = 'is_admin' 
-    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
-  ) THEN
-    RAISE EXCEPTION 'is_admin() function was not created';
-  END IF;
-  
-  RAISE NOTICE 'RLS recursion fix applied successfully';
+  RAISE NOTICE 'RLS recursion fix applied successfully - all profiles subqueries removed';
 END $$;
