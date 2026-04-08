@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
@@ -358,29 +358,59 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     scoreSheet: any | null
     provenance: FieldProvenanceMap | null
     runId: string | null
-  } | null>(() => extractPrecisionPassPayload({
-    ...result,
-    latestPrecisionPassRun: latestRun ?? result.latestPrecisionPassRun,
-  }))
+  } | null>(null)
 
+  // Refs that gate precision-pass hydration — each runId is applied at most once.
+  // Using refs (not state) ensures these guards don't themselves trigger re-renders.
+  const lastAppliedPrecisionRunIdRef = useRef<string | null>(null)
+  const lastHydratedPersistedRunIdRef = useRef<string | null>(null)
+
+  // Hydrate persisted precision-pass override (from DB / latestRun) exactly once per runId.
   useEffect(() => {
     const persisted = extractPrecisionPassPayload({
       ...result,
       latestPrecisionPassRun: latestRun ?? result.latestPrecisionPassRun,
     })
-    if (!persisted) return
-    setPrecisionPassOverride((current) => {
-      if (current?.runId === persisted.runId) return current
-      console.log('[precision-pass] hydrating persisted override', {
-        runId: persisted.runId,
-        grossScore: persisted.grossScore,
-        netScore: persisted.netScore,
-        hasScoreSheet: !!persisted.scoreSheet,
-        hasProvenance: !!persisted.provenance,
-      })
-      return persisted
+    if (!persisted?.runId) return
+    if (lastHydratedPersistedRunIdRef.current === persisted.runId) return
+    lastHydratedPersistedRunIdRef.current = persisted.runId
+    console.log('[precision-pass] hydrating persisted override', {
+      runId: persisted.runId,
+      grossScore: persisted.grossScore,
+      netScore: persisted.netScore,
+      hasScoreSheet: !!persisted.scoreSheet,
+      hasProvenance: !!persisted.provenance,
     })
+    setPrecisionPassOverride(persisted)
   }, [result, latestRun])
+
+  // Stable callback passed to PrecisionPassCard — must not change identity on re-renders
+  // so PrecisionPassCard's internal useEffect doesn't re-fire after we apply the override.
+  const handlePrecisionPassComplete = useCallback((payload: {
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: any | null
+    runId: string
+  }) => {
+    if (!payload.runId) return
+    if (lastAppliedPrecisionRunIdRef.current === payload.runId) return
+    lastAppliedPrecisionRunIdRef.current = payload.runId
+    console.log('[precision-pass] applying UI override', {
+      runId: payload.runId,
+      hasScoreSheet: !!payload.scoreSheet,
+      hasProvenance: !!payload.provenance,
+      grossScore: payload.grossScore,
+      netScore: payload.netScore,
+    })
+    setPrecisionPassOverride({
+      grossScore: payload.grossScore,
+      netScore: payload.netScore,
+      scoreSheet: payload.scoreSheet,
+      provenance: payload.provenance ?? null,
+      runId: payload.runId,
+    })
+  }, [])
 
   const normalized = normalizeResult(result)
   const { prediction } = result
@@ -953,6 +983,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               ? precisionPassOverride.provenance
               : extractFieldProvenance(result)
           }
+          precisionRunId={precisionPassOverride?.runId ?? null}
         />
       )}
       {/* Measurements Breakdown (Legacy) */}
@@ -992,22 +1023,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       {normalized.predictionId && (
         <PrecisionPassCard
           predictionId={normalized.predictionId}
-          onPrecisionPassComplete={(payload) => {
-            console.log('[precision-pass] applying UI override', {
-              runId: payload.runId,
-              hasScoreSheet: !!payload.scoreSheet,
-              hasProvenance: !!payload.provenance,
-              grossScore: payload.grossScore,
-              netScore: payload.netScore,
-            })
-            setPrecisionPassOverride({
-              grossScore: payload.grossScore,
-              netScore: payload.netScore,
-              scoreSheet: payload.scoreSheet,
-              provenance: payload.provenance ?? null,
-              runId: payload.runId,
-            })
-          }}
+          onPrecisionPassComplete={handlePrecisionPassComplete}
         />
       )}
 

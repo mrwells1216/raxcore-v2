@@ -75,6 +75,13 @@ interface ScoreSheetEditorProps {
    * Pass this when you have precision-pass provenance available.
    */
   aiFieldProvenance?: FieldProvenanceMap | null
+  /**
+   * Optional stable runId from the precision-pass that produced aiScoreSheet.
+   * When provided, the editor uses `${predictionId}:${precisionRunId}` as its
+   * hydration key so it re-initializes exactly once when a new precision run
+   * lands, but not on every re-render caused by object-reference churn.
+   */
+  precisionRunId?: string | null
   /** Callback when review is saved */
   onSave?: () => void
   /** Callback when review is finalized */
@@ -198,11 +205,14 @@ export function ScoreSheetEditor({
   aiConfidence,
   isFallback = false,
   aiFieldProvenance = null,
+  precisionRunId = null,
   onSave,
   onFinalize,
 }: ScoreSheetEditorProps) {
-  // Stable hydration guard — only re-initialize when predictionId changes
-  const lastHydratedIdRef = useRef<string | null>(null)
+  // Stable hydration guard — only re-initialize when the effective editor key changes.
+  // Key is predictionId + precisionRunId so a new precision run re-hydrates the editor
+  // once, but object-reference churn on aiScoreSheet does not.
+  const lastHydratedKeyRef = useRef<string | null>(null)
 
   const buildInitialMeasurements = (sheet: typeof aiScoreSheet): CorrectedMeasurements => ({
     inside_spread: sheet.spread.inside.value,
@@ -242,10 +252,13 @@ export function ScoreSheetEditor({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [hasSaved, setHasSaved] = useState(false)
 
-  // Re-hydrate editor state only when the predictionId changes (new scoring run)
+  // Re-hydrate editor state only when the effective editor key changes.
+  // Using a ref-based guard means the effect body can safely read aiScoreSheet
+  // without listing it as a dependency (avoiding re-fires on every render).
   useEffect(() => {
-    if (lastHydratedIdRef.current === predictionId) return
-    lastHydratedIdRef.current = predictionId
+    const editorKey = `${predictionId}:${precisionRunId ?? 'base'}`
+    if (lastHydratedKeyRef.current === editorKey) return
+    lastHydratedKeyRef.current = editorKey
     setMeasurements(buildInitialMeasurements(aiScoreSheet))
     setRackType(aiScoreSheet.metadata.rack_type)
     setMainFramePoints(aiScoreSheet.metadata.main_frame_points)
@@ -253,7 +266,7 @@ export function ScoreSheetEditor({
     setReviewStatus('draft')
     setSaveError(null)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [predictionId])
+  }, [predictionId, precisionRunId])
 
   // Calculate scores based on corrected measurements
   const correctedGross = calculateGrossScore(measurements)

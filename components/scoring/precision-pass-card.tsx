@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import useSWR from 'swr'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,10 @@ export function PrecisionPassCard({
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
+  // Guard: fire onPrecisionPassComplete at most once per runId regardless of
+  // how many times the parent re-renders or the effect re-evaluates.
+  const firedRunIdRef = useRef<string | null>(null)
+
   // Stop polling once completed or failed — no need to keep hitting the API
   const shouldPoll = runId && initialStatus !== 'completed' && initialStatus !== 'failed'
 
@@ -64,6 +68,9 @@ export function PrecisionPassCard({
 
   useEffect(() => {
     if (!runId || !isComplete || !best || !onPrecisionPassComplete) return
+    // Never fire for the same runId twice — guards against effect re-runs caused
+    // by the parent passing a new onPrecisionPassComplete reference on re-render.
+    if (firedRunIdRef.current === runId) return
 
     const normalizedScoreSheet =
       (best as any)?.scoreSheet ??
@@ -98,6 +105,7 @@ export function PrecisionPassCard({
       return
     }
 
+    firedRunIdRef.current = runId
     onPrecisionPassComplete({
       grossScore: gross,
       netScore: net,
