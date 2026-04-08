@@ -108,7 +108,7 @@ export function applyCalibration(params: {
   }
 }
 
-// Track whether we've already warned about the schema mismatch to avoid log spam
+// Warn at most once per process lifetime if the calibration schema is not ready.
 let _hasWarnedCalibrationSchema = false
 
 export async function getBestCalibrationProfile(params: {
@@ -120,23 +120,12 @@ export async function getBestCalibrationProfile(params: {
   const state = normalizeState(params.state)
   const rackType = normalizeRackType(params.rackType)
 
+  // Priority order: most-specific segment first, global last.
   const candidateKeys = [
-    makeCalibrationProfileKey({
-      profileType: 'state_rack_type',
-      state,
-      rackType,
-    }),
-    makeCalibrationProfileKey({
-      profileType: 'state',
-      state,
-    }),
-    makeCalibrationProfileKey({
-      profileType: 'rack_type',
-      rackType,
-    }),
-    makeCalibrationProfileKey({
-      profileType: 'global',
-    }),
+    makeCalibrationProfileKey({ profileType: 'state_rack_type', state, rackType }),
+    makeCalibrationProfileKey({ profileType: 'state', state }),
+    makeCalibrationProfileKey({ profileType: 'rack_type', rackType }),
+    makeCalibrationProfileKey({ profileType: 'global' }),
   ]
 
   const { data, error } = await supabase
@@ -146,17 +135,23 @@ export async function getBestCalibrationProfile(params: {
     .in('profile_key', candidateKeys)
 
   if (error) {
-    // Only warn once per process lifetime to avoid log spam when the column
-    // or table doesn't exist in this environment
+    // Warn once so the dev console is clean after the initial startup.
+    // The most common cause is migration 095 not yet applied (profile_key column missing).
+    // Scoring falls through to raw scores — no user-facing impact.
     if (!_hasWarnedCalibrationSchema) {
-      console.warn('[calibration] failed loading profiles (will use raw scores):', error.message)
       _hasWarnedCalibrationSchema = true
+      console.warn(
+        '[calibration] profile lookup failed — scoring will use raw scores.' ,
+        'Run migration 095_add_calibration_profile_key.sql to fix.',
+        `(${error.message})`
+      )
     }
     return null
   }
 
   if (!data?.length) return null
 
+  // Pick the highest-priority key that has a matching row.
   const selected =
     candidateKeys
       .map((key) => data.find((row) => row.profile_key === key))
@@ -166,15 +161,15 @@ export async function getBestCalibrationProfile(params: {
 
   return {
     profile_key: selected.profile_key,
-    profile_type: selected.profile_type,
-    state: selected.state,
-    rack_type: selected.rack_type,
-    sample_count: Number(selected.sample_count || 0),
-    gross_bias: Number(selected.gross_bias || 0),
-    net_bias: Number(selected.net_bias || 0),
-    gross_mae: Number(selected.gross_mae || 0),
-    net_mae: Number(selected.net_mae || 0),
-    confidence_multiplier: Number(selected.confidence_multiplier || 1),
+    profile_type: selected.profile_type ?? 'global',
+    state: selected.state ?? null,
+    rack_type: selected.rack_type ?? null,
+    sample_count: Number(selected.sample_count ?? 0),
+    gross_bias: Number(selected.gross_bias ?? 0),
+    net_bias: Number(selected.net_bias ?? 0),
+    gross_mae: Number(selected.gross_mae ?? 0),
+    net_mae: Number(selected.net_mae ?? 0),
+    confidence_multiplier: Number(selected.confidence_multiplier ?? 1),
     is_active: selected.is_active,
   }
 }
