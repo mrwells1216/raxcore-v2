@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { ArrowRight, Loader2 } from 'lucide-react'
+import { ArrowRight, Loader2, Camera, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -9,13 +9,17 @@ import { ScoringForm } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { EditableImageCarousel } from './editable-image-carousel'
+import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
+import type { ScanAngle } from '@/lib/capture/scan-session'
 import { toast } from 'sonner'
+
+type ScoreInputMode = 'upload' | 'scan'
 
 interface CapturedImage {
   id: string
@@ -39,6 +43,7 @@ const STEPS = [
 ]
 
 export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
+  const [inputMode, setInputMode] = useState<ScoreInputMode>('upload')
   const [step, setStep] = useState(0)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
   const [selectedImageAngles, setSelectedImageAngles] = useState<(CaptureAngle | null)[]>([])
@@ -76,6 +81,48 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       return updated.slice(0, imgs.length)
     })
     updateIntakeQuality(imgs)
+  }, [updateIntakeQuality])
+
+  // Handle scan mode files ready
+  const handleScanFilesReady = useCallback(async (files: File[], angles: ScanAngle[]) => {
+    const scanImages: GridImage[] = []
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      const angle = angles[i]
+      
+      // Convert File to data URL for preview
+      const url = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(file)
+      })
+      
+      // Get image dimensions
+      const { width, height } = await new Promise<{ width: number; height: number }>((resolve) => {
+        const img = new Image()
+        img.onload = () => resolve({ width: img.width, height: img.height })
+        img.src = url
+      })
+      
+      // Map scan angle to grid slot
+      const slotKey = angle === 'front' ? 'front_center' : angle === 'left' ? 'left_side' : 'right_side'
+      
+      scanImages.push({
+        id: `scan-${angle}-${Date.now()}`,
+        url,
+        file,
+        slotKey: slotKey as any,
+        angleType: angle,
+        width,
+        height,
+      })
+    }
+    
+    setGridImages(scanImages)
+    setSelectedImageAngles(angles.map(a => a as CaptureAngle))
+    updateIntakeQuality(scanImages, undefined, 'live_deer')
+    setStep(1) // Move to details step
   }, [updateIntakeQuality])
 
   const progress = ((step + 1) / STEPS.length) * 100
@@ -263,18 +310,61 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
           <CardHeader className="pb-4">
             <CardTitle>Add Buck Photos</CardTitle>
             <CardDescription>
-              Tap any box to add a photo for that angle — front and sides give the best score
+              Choose how you want to capture photos for scoring
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* 3x3 photo grid — replaces dropdown + single uploader */}
-            <PhotoGridUploader
-              images={gridImages}
-              onChange={handleGridChange}
-            />
+            {/* Mode Chooser */}
+            <div className="flex gap-2 p-1 bg-secondary rounded-lg">
+              <button
+                onClick={() => setInputMode('upload')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-md font-medium text-sm transition-all ${
+                  inputMode === 'upload'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Upload className="h-4 w-4" />
+                Upload Photos
+              </button>
+              <button
+                onClick={() => setInputMode('scan')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-md font-medium text-sm transition-all ${
+                  inputMode === 'scan'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Camera className="h-4 w-4" />
+                Scan Rack
+                <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+                  Recommended
+                </span>
+              </button>
+            </div>
 
-            {/* Intake Quality Assessment - show when images exist */}
-            {intakeQuality && gridImages.length > 0 && (
+            {/* Upload Mode */}
+            {inputMode === 'upload' && (
+              <>
+                <div className="text-sm text-muted-foreground">
+                  Tap any box to add a photo for that angle — front and sides give the best score
+                </div>
+                
+                {/* 3x3 photo grid — replaces dropdown + single uploader */}
+                <PhotoGridUploader
+                  images={gridImages}
+                  onChange={handleGridChange}
+                />
+              </>
+            )}
+
+            {/* Scan Mode */}
+            {inputMode === 'scan' && (
+              <ScanModePanel onFilesReady={handleScanFilesReady} />
+            )}
+
+            {/* Intake Quality Assessment - show when images exist (upload mode only) */}
+            {inputMode === 'upload' && intakeQuality && gridImages.length > 0 && (
               <IntakeQualityDisplay
                 quality={{
                   tier: intakeQuality.tier,
@@ -294,8 +384,8 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
               />
             )}
 
-            {/* Capture Quality Check - angle coverage and labeling */}
-            {gridImages.length > 0 && (() => {
+            {/* Capture Quality Check - angle coverage and labeling (upload mode only) */}
+            {inputMode === 'upload' && gridImages.length > 0 && (() => {
               const captureQuality = buildCaptureQualitySummary({
                 images: gridImages.map(img => ({ name: `Image ${img.id}` })),
                 selectedAngles: selectedImageAngles.map(a => a ?? undefined),
@@ -310,13 +400,13 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                   </div>
 
                   <div className="flex flex-wrap gap-2 text-xs">
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasFront ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasFront ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
                       Front: {captureQuality.coverage.hasFront ? 'yes' : 'missing'}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasLeft ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasLeft ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
                       Left: {captureQuality.coverage.hasLeft ? 'yes' : 'missing'}
                     </span>
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasRight ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasRight ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
                       Right: {captureQuality.coverage.hasRight ? 'yes' : 'missing'}
                     </span>
                   </div>
@@ -326,13 +416,13 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                   </div>
 
                   {captureQuality.recommendation === 'ok_lower_confidence' && (
-                    <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 mt-3">
+                    <div className="rounded-md border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/30 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-200 mt-3">
                       This rack can be scored, but missing angle coverage may reduce confidence.
                     </div>
                   )}
 
                   {captureQuality.recommendation === 'needs_better_photos' && (
-                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 mt-3">
+                    <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/30 px-3 py-2 text-xs text-red-800 dark:text-red-200 mt-3">
                       This image set is weak for reliable scoring. You can still continue, but results may be less accurate.
                     </div>
                   )}
@@ -340,17 +430,19 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
               )
             })()}
 
-            {/* Navigation */}
-            <div className="flex justify-end pt-4 border-t border-border">
-              <Button
-                onClick={() => setStep(1)}
-                disabled={!canProceedToDetails}
-                className="min-h-[48px] gap-2"
-              >
-                Continue
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+            {/* Navigation - only for upload mode (scan mode has its own flow) */}
+            {inputMode === 'upload' && (
+              <div className="flex justify-end pt-4 border-t border-border">
+                <Button
+                  onClick={() => setStep(1)}
+                  disabled={!canProceedToDetails}
+                  className="min-h-[48px] gap-2"
+                >
+                  Continue
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
