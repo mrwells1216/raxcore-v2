@@ -36,6 +36,7 @@ import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
 import { getBestCalibrationProfile, applyCalibration } from '@/lib/calibration'
+import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -763,6 +764,25 @@ export async function POST(request: Request) {
       reasons: confidenceResult.reasons,
       componentScores: confidenceResult.componentScores,
     })
+
+    // Phase 50: Shadow precision pass — fire-and-forget, 10% rollout
+    // Does not block the response; failures are logged only.
+    {
+      const SHADOW_ROLLOUT_PERCENT = 10
+      const shouldShadow = Math.random() * 100 < SHADOW_ROLLOUT_PERCENT
+      if (shouldShadow) {
+        ;(async () => {
+          try {
+            await startPrecisionPass({
+              predictionId: prediction.id,
+              requestedByUserId: userId ?? null,
+            })
+          } catch (shadowErr) {
+            console.error('[score] Phase 50 shadow precision pass enqueue failed (non-blocking):', shadowErr)
+          }
+        })()
+      }
+    }
 
     // Return result
     return NextResponse.json({
