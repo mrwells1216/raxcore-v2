@@ -3,7 +3,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Eye, Calendar, Antlers, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Eye, Calendar, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -18,7 +18,7 @@ import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
 const formSchema = z.object({
   state: z.string().min(1, 'State is required'),
@@ -184,45 +184,56 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
             <span className="text-xs text-muted-foreground">(improves accuracy)</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField
-              control={form.control}
-              name="source_type"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Photo Source</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What are these photos of?" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {SOURCE_TYPES.map((source) => <SelectItem key={source.value} value={source.value}>{source.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+          {/* Photo source — chip group */}
+          <FormField
+            control={form.control}
+            name="source_type"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Photo Source</FormLabel>
+                <FormControl>
+                  <div className="flex flex-wrap gap-2">
+                    {SOURCE_TYPES.map((source) => (
+                      <button
+                        key={source.value}
+                        type="button"
+                        onClick={() => field.onChange(field.value === source.value ? undefined : source.value)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px]',
+                          field.value === source.value
+                            ? 'bg-primary/15 text-primary border-primary/30'
+                            : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
+                        )}
+                      >
+                        {source.label}
+                      </button>
+                    ))}
+                  </div>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name="capture_device"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Capture Device</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What took these photos?" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+          {/* Capture device — kept as select */}
+          <FormField
+            control={form.control}
+            name="capture_device"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Capture Device</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                  <FormControl>
+                    <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What took these photos?" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <FormField
             control={form.control}
@@ -564,24 +575,30 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
           </div>
         )}
 
-        <div className="flex gap-3 pt-4 border-t border-border">
-          <Button type="button" variant="outline" onClick={onBack} className="min-h-[48px] gap-2" disabled={isSubmitting}>
-            <ArrowLeft className="h-4 w-4" />Back
-          </Button>
-          <Button type="submit" className="flex-1 min-h-[48px] gap-2" disabled={isSubmitting}>
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Analyzing...
-              </>
-            ) : (
-              <>
-                Analyze Buck
-                <ArrowRight className="h-4 w-4" />
-              </>
+        {(!hideBackButton || !hideSubmitButton) && (
+          <div className="flex gap-3 pt-4 border-t border-border">
+            {!hideBackButton && (
+              <Button type="button" variant="outline" onClick={onBack} className="min-h-[48px] gap-2" disabled={isSubmitting}>
+                <ArrowLeft className="h-4 w-4" />Back
+              </Button>
             )}
-          </Button>
-        </div>
+            {!hideSubmitButton && (
+              <Button type="submit" className="flex-1 min-h-[48px] gap-2" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    Analyze Buck
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        )}
       </form>
     </Form>
   )
