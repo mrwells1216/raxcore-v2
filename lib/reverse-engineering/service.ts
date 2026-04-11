@@ -132,6 +132,8 @@ const DEV_ANON_USER_ID = 'dev-anonymous-user'
 export async function startPrecisionPass(params: {
   predictionId: string
   requestedByUserId: string
+  /** Optional manual overrides — fields corrected by the user before re-running. */
+  manualOverrides?: Record<string, unknown> | null
 }): Promise<{ run: ReverseRunRow; jobId: string }> {
   const supabase = await getServiceSupabase()
 
@@ -210,7 +212,12 @@ export async function startPrecisionPass(params: {
     .from('durable_jobs')
     .insert({
       job_type: 'reverse_precision_pass',
-      payload: { reverseRunId: run.id },
+      payload: {
+        reverseRunId: run.id,
+        ...(params.manualOverrides && Object.keys(params.manualOverrides).length > 0
+          ? { manualOverrides: params.manualOverrides }
+          : {}),
+      },
       priority: 'high',
       max_retries: 1,
       requested_by_user_id: params.requestedByUserId,
@@ -326,7 +333,48 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
 
     if (!pred || !buck) throw new Error('Missing prediction or buck')
 
-    const measurements = pickMeasurements(pred as Prediction)
+    let measurements = pickMeasurements(pred as Prediction)
+
+    // ── Apply manual overrides if present in the job payload ────────────────
+    // Look up the durable_job for this run to retrieve any manualOverrides that
+    // were submitted with the precision-pass request.
+    {
+      const { data: jobRow } = await supabase
+        .from('durable_jobs')
+        .select('payload')
+        .contains('payload', { reverseRunId })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      const overrides =
+        (jobRow?.payload as Record<string, unknown> | undefined)?.manualOverrides as
+          | Record<string, unknown>
+          | undefined
+
+      if (overrides && Object.keys(overrides).length > 0) {
+        console.log('[precision-pass] Measurement source: manual_override + raw_ai_response.measurements')
+        const overrideKeys = Object.keys(overrides)
+        const allKeys = Object.keys(measurements) as Array<keyof Measurements>
+
+        for (const k of allKeys) {
+          const source = overrideKeys.includes(k) ? 'manual_override' : 'raw_ai_response'
+          console.log(`[precision-pass]   - ${k}: ${source}`)
+        }
+
+        // Apply overrides to the baseline measurements object
+        for (const [key, entry] of Object.entries(overrides)) {
+          const overrideValue =
+            entry !== null && typeof entry === 'object' && 'value' in (entry as object)
+              ? (entry as { value: unknown }).value
+              : entry
+          if (typeof overrideValue === 'number' && key in measurements) {
+            ;(measurements as unknown as Record<string, unknown>)[key] = overrideValue
+          }
+        }
+      }
+    }
+
     const { gross: baseGross, net: baseNet } = calculateGrossNet(measurements)
 
     // Build baseline bundle

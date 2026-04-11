@@ -984,6 +984,12 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               : extractFieldProvenance(result)
           }
           precisionRunId={precisionPassOverride?.runId ?? null}
+          imageUrl={imageUrls[0] ?? null}
+          landmarks={
+            (result?.prediction?.raw_ai_response as any)?.landmarks ??
+            (result?.rawAiResponse as any)?.landmarks ??
+            null
+          }
         />
       )}
       {/* Measurements Breakdown (Legacy) */}

@@ -15,6 +15,8 @@ const fetcher = (url: string) => fetch(url).then(r => r.json())
 interface PrecisionPassCardProps {
   predictionId: string
   className?: string
+  /** Optional manual overrides to include in the precision-pass request body */
+  manualOverrides?: Record<string, unknown> | null
   onPrecisionPassComplete?: (payload: {
     grossScore: number | null
     netScore: number | null
@@ -27,6 +29,7 @@ interface PrecisionPassCardProps {
 export function PrecisionPassCard({
   predictionId,
   className,
+  manualOverrides,
   onPrecisionPassComplete,
 }: PrecisionPassCardProps) {
   const [runId, setRunId] = useState<string | null>(null)
@@ -124,8 +127,14 @@ export function PrecisionPassCard({
     }
     
     try {
-      const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, { 
-        method: 'POST' 
+      const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(manualOverrides && Object.keys(manualOverrides).length > 0
+            ? { manualOverrides }
+            : {}),
+        }),
       })
       const json = await res.json()
       

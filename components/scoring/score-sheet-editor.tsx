@@ -30,7 +30,15 @@ import {
   GraduationCap,
   ChevronDown,
   ChevronUp,
+  Pencil,
 } from 'lucide-react'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { ManualCorrectionPanel } from './manual-correction-panel'
+import {
+  getMeasurementDisplayConfidence,
+} from '@/lib/scoring/measurement-display-confidence'
+import { getOverrideFieldLabel } from '@/lib/scoring/manual-overrides'
+import type { ManualOverrideFieldKey } from '@/lib/scoring/manual-overrides'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { CorrectedMeasurements } from '@/lib/review/types'
 import {
@@ -82,6 +90,10 @@ interface ScoreSheetEditorProps {
    * lands, but not on every re-render caused by object-reference churn.
    */
   precisionRunId?: string | null
+  /** Primary image URL used for the manual correction overlay */
+  imageUrl?: string | null
+  /** Raw landmarks from the scoring payload for handle initialization */
+  landmarks?: Record<string, unknown> | null
   /** Callback when review is saved */
   onSave?: () => void
   /** Callback when review is finalized */
@@ -149,6 +161,7 @@ function MeasurementInput({
   disabled,
   field,
   isFallbackSource = false,
+  onRequestCorrection,
 }: {
   label: string
   aiValue: number | null
@@ -157,41 +170,76 @@ function MeasurementInput({
   disabled?: boolean
   field?: MeasuredField | null
   isFallbackSource?: boolean
+  onRequestCorrection?: () => void
 }) {
   const displayField = getDisplayField(field, value, aiValue, isFallbackSource)
   const diff = (value ?? 0) - (aiValue ?? 0)
   const hasChanged = displayField.wasEdited === true
 
+  // Derive display confidence for correction CTA visibility
+  const displayConf = getMeasurementDisplayConfidence(field ?? undefined)
+  const showReview = displayConf === 'low'
+  const showAdjust = displayConf === 'medium' || displayConf === 'unknown'
+  const isHumanReviewed = displayField.provenance === 'human_review'
+
   return (
-    <div className="grid grid-cols-[1fr_auto_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50 last:border-0">
-      <Label className="text-sm font-medium">{label}</Label>
-      <ProvenanceBadge
-        provenance={displayField.provenance}
-        confidence={displayField.confidence}
-        wasEdited={displayField.wasEdited}
-        originalValue={displayField.originalValue}
-        currentValue={displayField.value}
-        size="sm"
-      />
-      <div className="text-sm text-muted-foreground text-right tabular-nums">
-        {aiValue !== null ? aiValue.toFixed(2) : '—'}
+    <div className="border-b border-border/50 last:border-0">
+      <div className="grid grid-cols-[1fr_auto_80px_100px_60px] gap-2 items-center py-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Label className="text-sm font-medium truncate">{label}</Label>
+          {isHumanReviewed && (
+            <span className="shrink-0 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700 rounded px-1 py-0 leading-4">
+              Corrected
+            </span>
+          )}
+        </div>
+        <ProvenanceBadge
+          provenance={displayField.provenance}
+          confidence={displayField.confidence}
+          wasEdited={displayField.wasEdited}
+          originalValue={displayField.originalValue}
+          currentValue={displayField.value}
+          size="sm"
+        />
+        <div className="text-sm text-muted-foreground text-right tabular-nums">
+          {aiValue !== null ? aiValue.toFixed(2) : '—'}
+        </div>
+        <Input
+          type="number"
+          step="0.125"
+          min="0"
+          max="50"
+          value={value ?? ''}
+          onChange={(e) => {
+            const raw = e.target.value
+            onChange(raw === '' ? null : Number(raw))
+          }}
+          disabled={disabled}
+          className="h-9"
+        />
+        <div className="text-xs tabular-nums text-right text-muted-foreground">
+          {hasChanged ? `${diff > 0 ? '+' : ''}${diff.toFixed(2)}` : '—'}
+        </div>
       </div>
-      <Input
-        type="number"
-        step="0.125"
-        min="0"
-        max="50"
-        value={value ?? ''}
-        onChange={(e) => {
-          const raw = e.target.value
-          onChange(raw === '' ? null : Number(raw))
-        }}
-        disabled={disabled}
-        className="h-9"
-      />
-      <div className="text-xs tabular-nums text-right text-muted-foreground">
-        {hasChanged ? `${diff > 0 ? '+' : ''}${diff.toFixed(2)}` : '—'}
-      </div>
+
+      {/* Correction CTA — only visible for low/medium confidence, not already human-reviewed */}
+      {onRequestCorrection && !isHumanReviewed && (showReview || showAdjust) && (
+        <div className="pb-1.5 pl-0">
+          <button
+            type="button"
+            onClick={onRequestCorrection}
+            className={cn(
+              'inline-flex items-center gap-1 text-[10px] font-medium rounded px-1.5 py-0.5 transition-colors',
+              showReview
+                ? 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50 border border-red-200 dark:border-red-800/50'
+                : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 border border-transparent hover:border-zinc-300 dark:hover:border-zinc-700'
+            )}
+          >
+            <Pencil className="h-2.5 w-2.5" />
+            {showReview ? 'Review measurement' : 'Adjust'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -206,6 +254,8 @@ export function ScoreSheetEditor({
   isFallback = false,
   aiFieldProvenance = null,
   precisionRunId = null,
+  imageUrl = null,
+  landmarks = null,
   onSave,
   onFinalize,
 }: ScoreSheetEditorProps) {
@@ -251,6 +301,41 @@ export function ScoreSheetEditor({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [hasSaved, setHasSaved] = useState(false)
+
+  // Manual correction sheet state
+  const [correctionField, setCorrectionField] = useState<{
+    fieldKey: string
+    fieldLabel: string
+    currentValue: number | null
+    aiValue: number | null
+    provenance: string | null
+    confidence: string | null
+    measurementKey: keyof CorrectedMeasurements
+  } | null>(null)
+
+  const openCorrection = useCallback((
+    fieldKey: string,
+    fieldLabel: string,
+    currentValue: number | null,
+    aiValue: number | null,
+    provenance: string | null,
+    confidence: string | null,
+    measurementKey: keyof CorrectedMeasurements,
+  ) => {
+    setCorrectionField({ fieldKey, fieldLabel, currentValue, aiValue, provenance, confidence, measurementKey })
+  }, [])
+
+  const handleCorrectionSave = useCallback((override: {
+    fieldKey: string
+    value: number | null
+    geometry?: unknown
+  }) => {
+    if (!correctionField) return
+    if (override.value !== null) {
+      updateMeasurement(correctionField.measurementKey, override.value)
+    }
+    setCorrectionField(null)
+  }, [correctionField, updateMeasurement])
 
   // Re-hydrate editor state only when the effective editor key changes.
   // Using a ref-based guard means the effect body can safely read aiScoreSheet
@@ -529,6 +614,7 @@ export function ScoreSheetEditor({
                 value={measurements.inside_spread}
                 onChange={(v) => updateMeasurement('inside_spread', v)}
                 field={aiFieldProvenance?.insideSpread}
+                onRequestCorrection={() => openCorrection('inside_spread', 'Inside Spread', measurements.inside_spread, aiScoreSheet.spread.inside.value, aiFieldProvenance?.insideSpread?.provenance ?? null, aiFieldProvenance?.insideSpread?.confidence ?? null, 'inside_spread')}
               />
               <MeasurementInput
                 label="Main Beam (L)"
@@ -536,6 +622,7 @@ export function ScoreSheetEditor({
                 value={measurements.main_beam_left}
                 onChange={(v) => updateMeasurement('main_beam_left', v)}
                 field={aiFieldProvenance?.leftMainBeam}
+                onRequestCorrection={() => openCorrection('left_beam_length', 'Left Main Beam', measurements.main_beam_left, aiScoreSheet.left.main_beam.value, aiFieldProvenance?.leftMainBeam?.provenance ?? null, aiFieldProvenance?.leftMainBeam?.confidence ?? null, 'main_beam_left')}
               />
               <MeasurementInput
                 label="Main Beam (R)"
@@ -543,139 +630,32 @@ export function ScoreSheetEditor({
                 value={measurements.main_beam_right}
                 onChange={(v) => updateMeasurement('main_beam_right', v)}
                 field={aiFieldProvenance?.rightMainBeam}
+                onRequestCorrection={() => openCorrection('right_beam_length', 'Right Main Beam', measurements.main_beam_right, aiScoreSheet.right.main_beam.value, aiFieldProvenance?.rightMainBeam?.provenance ?? null, aiFieldProvenance?.rightMainBeam?.confidence ?? null, 'main_beam_right')}
               />
             </TabsContent>
 
             <TabsContent value="tines" className="mt-3 space-y-1">
-              <MeasurementInput
-                label="G1 (L)"
-                aiValue={aiScoreSheet.left.g1.value}
-                value={measurements.g1_left}
-                onChange={(v) => updateMeasurement('g1_left', v)}
-                field={aiFieldProvenance?.leftTines?.[1]}
-              />
-              <MeasurementInput
-                label="G1 (R)"
-                aiValue={aiScoreSheet.right.g1.value}
-                value={measurements.g1_right}
-                onChange={(v) => updateMeasurement('g1_right', v)}
-                field={aiFieldProvenance?.rightTines?.[1]}
-              />
-              <MeasurementInput
-                label="G2 (L)"
-                aiValue={aiScoreSheet.left.g2.value}
-                value={measurements.g2_left}
-                onChange={(v) => updateMeasurement('g2_left', v)}
-                field={aiFieldProvenance?.leftTines?.[2]}
-              />
-              <MeasurementInput
-                label="G2 (R)"
-                aiValue={aiScoreSheet.right.g2.value}
-                value={measurements.g2_right}
-                onChange={(v) => updateMeasurement('g2_right', v)}
-                field={aiFieldProvenance?.rightTines?.[2]}
-              />
-              <MeasurementInput
-                label="G3 (L)"
-                aiValue={aiScoreSheet.left.g3.value}
-                value={measurements.g3_left}
-                onChange={(v) => updateMeasurement('g3_left', v)}
-                field={aiFieldProvenance?.leftTines?.[3]}
-              />
-              <MeasurementInput
-                label="G3 (R)"
-                aiValue={aiScoreSheet.right.g3.value}
-                value={measurements.g3_right}
-                onChange={(v) => updateMeasurement('g3_right', v)}
-                field={aiFieldProvenance?.rightTines?.[3]}
-              />
-              <MeasurementInput
-                label="G4 (L)"
-                aiValue={aiScoreSheet.left.g4.value}
-                value={measurements.g4_left}
-                onChange={(v) => updateMeasurement('g4_left', v)}
-                field={aiFieldProvenance?.leftTines?.[4]}
-              />
-              <MeasurementInput
-                label="G4 (R)"
-                aiValue={aiScoreSheet.right.g4.value}
-                value={measurements.g4_right}
-                onChange={(v) => updateMeasurement('g4_right', v)}
-                field={aiFieldProvenance?.rightTines?.[4]}
-              />
-              <MeasurementInput
-                label="G5 (L)"
-                aiValue={aiScoreSheet.left.g5.value}
-                value={measurements.g5_left}
-                onChange={(v) => updateMeasurement('g5_left', v)}
-                field={aiFieldProvenance?.leftTines?.[5]}
-              />
-              <MeasurementInput
-                label="G5 (R)"
-                aiValue={aiScoreSheet.right.g5.value}
-                value={measurements.g5_right}
-                onChange={(v) => updateMeasurement('g5_right', v)}
-                field={aiFieldProvenance?.rightTines?.[5]}
-              />
+              <MeasurementInput label="G1 (L)" aiValue={aiScoreSheet.left.g1.value} value={measurements.g1_left} onChange={(v) => updateMeasurement('g1_left', v)} field={aiFieldProvenance?.leftTines?.[1]} onRequestCorrection={() => openCorrection('g1_left', 'G1 Left', measurements.g1_left, aiScoreSheet.left.g1.value, aiFieldProvenance?.leftTines?.[1]?.provenance ?? null, aiFieldProvenance?.leftTines?.[1]?.confidence ?? null, 'g1_left')} />
+              <MeasurementInput label="G1 (R)" aiValue={aiScoreSheet.right.g1.value} value={measurements.g1_right} onChange={(v) => updateMeasurement('g1_right', v)} field={aiFieldProvenance?.rightTines?.[1]} onRequestCorrection={() => openCorrection('g1_right', 'G1 Right', measurements.g1_right, aiScoreSheet.right.g1.value, aiFieldProvenance?.rightTines?.[1]?.provenance ?? null, aiFieldProvenance?.rightTines?.[1]?.confidence ?? null, 'g1_right')} />
+              <MeasurementInput label="G2 (L)" aiValue={aiScoreSheet.left.g2.value} value={measurements.g2_left} onChange={(v) => updateMeasurement('g2_left', v)} field={aiFieldProvenance?.leftTines?.[2]} onRequestCorrection={() => openCorrection('g2_left', 'G2 Left', measurements.g2_left, aiScoreSheet.left.g2.value, aiFieldProvenance?.leftTines?.[2]?.provenance ?? null, aiFieldProvenance?.leftTines?.[2]?.confidence ?? null, 'g2_left')} />
+              <MeasurementInput label="G2 (R)" aiValue={aiScoreSheet.right.g2.value} value={measurements.g2_right} onChange={(v) => updateMeasurement('g2_right', v)} field={aiFieldProvenance?.rightTines?.[2]} onRequestCorrection={() => openCorrection('g2_right', 'G2 Right', measurements.g2_right, aiScoreSheet.right.g2.value, aiFieldProvenance?.rightTines?.[2]?.provenance ?? null, aiFieldProvenance?.rightTines?.[2]?.confidence ?? null, 'g2_right')} />
+              <MeasurementInput label="G3 (L)" aiValue={aiScoreSheet.left.g3.value} value={measurements.g3_left} onChange={(v) => updateMeasurement('g3_left', v)} field={aiFieldProvenance?.leftTines?.[3]} onRequestCorrection={() => openCorrection('g3_left', 'G3 Left', measurements.g3_left, aiScoreSheet.left.g3.value, aiFieldProvenance?.leftTines?.[3]?.provenance ?? null, aiFieldProvenance?.leftTines?.[3]?.confidence ?? null, 'g3_left')} />
+              <MeasurementInput label="G3 (R)" aiValue={aiScoreSheet.right.g3.value} value={measurements.g3_right} onChange={(v) => updateMeasurement('g3_right', v)} field={aiFieldProvenance?.rightTines?.[3]} onRequestCorrection={() => openCorrection('g3_right', 'G3 Right', measurements.g3_right, aiScoreSheet.right.g3.value, aiFieldProvenance?.rightTines?.[3]?.provenance ?? null, aiFieldProvenance?.rightTines?.[3]?.confidence ?? null, 'g3_right')} />
+              <MeasurementInput label="G4 (L)" aiValue={aiScoreSheet.left.g4.value} value={measurements.g4_left} onChange={(v) => updateMeasurement('g4_left', v)} field={aiFieldProvenance?.leftTines?.[4]} onRequestCorrection={() => openCorrection('g4_left', 'G4 Left', measurements.g4_left, aiScoreSheet.left.g4.value, aiFieldProvenance?.leftTines?.[4]?.provenance ?? null, aiFieldProvenance?.leftTines?.[4]?.confidence ?? null, 'g4_left')} />
+              <MeasurementInput label="G4 (R)" aiValue={aiScoreSheet.right.g4.value} value={measurements.g4_right} onChange={(v) => updateMeasurement('g4_right', v)} field={aiFieldProvenance?.rightTines?.[4]} onRequestCorrection={() => openCorrection('g4_right', 'G4 Right', measurements.g4_right, aiScoreSheet.right.g4.value, aiFieldProvenance?.rightTines?.[4]?.provenance ?? null, aiFieldProvenance?.rightTines?.[4]?.confidence ?? null, 'g4_right')} />
+              <MeasurementInput label="G5 (L)" aiValue={aiScoreSheet.left.g5.value} value={measurements.g5_left} onChange={(v) => updateMeasurement('g5_left', v)} field={aiFieldProvenance?.leftTines?.[5]} onRequestCorrection={() => openCorrection('g5_left', 'G5 Left', measurements.g5_left, aiScoreSheet.left.g5.value, aiFieldProvenance?.leftTines?.[5]?.provenance ?? null, aiFieldProvenance?.leftTines?.[5]?.confidence ?? null, 'g5_left')} />
+              <MeasurementInput label="G5 (R)" aiValue={aiScoreSheet.right.g5.value} value={measurements.g5_right} onChange={(v) => updateMeasurement('g5_right', v)} field={aiFieldProvenance?.rightTines?.[5]} onRequestCorrection={() => openCorrection('g5_right', 'G5 Right', measurements.g5_right, aiScoreSheet.right.g5.value, aiFieldProvenance?.rightTines?.[5]?.provenance ?? null, aiFieldProvenance?.rightTines?.[5]?.confidence ?? null, 'g5_right')} />
             </TabsContent>
 
             <TabsContent value="mass" className="mt-3 space-y-1">
-              <MeasurementInput
-                label="H1 (L)"
-                aiValue={aiScoreSheet.left.h1.value}
-                value={measurements.h1_left}
-                onChange={(v) => updateMeasurement('h1_left', v)}
-                field={aiFieldProvenance?.leftMasses?.[1]}
-              />
-              <MeasurementInput
-                label="H1 (R)"
-                aiValue={aiScoreSheet.right.h1.value}
-                value={measurements.h1_right}
-                onChange={(v) => updateMeasurement('h1_right', v)}
-                field={aiFieldProvenance?.rightMasses?.[1]}
-              />
-              <MeasurementInput
-                label="H2 (L)"
-                aiValue={aiScoreSheet.left.h2.value}
-                value={measurements.h2_left}
-                onChange={(v) => updateMeasurement('h2_left', v)}
-                field={aiFieldProvenance?.leftMasses?.[2]}
-              />
-              <MeasurementInput
-                label="H2 (R)"
-                aiValue={aiScoreSheet.right.h2.value}
-                value={measurements.h2_right}
-                onChange={(v) => updateMeasurement('h2_right', v)}
-                field={aiFieldProvenance?.rightMasses?.[2]}
-              />
-              <MeasurementInput
-                label="H3 (L)"
-                aiValue={aiScoreSheet.left.h3.value}
-                value={measurements.h3_left}
-                onChange={(v) => updateMeasurement('h3_left', v)}
-                field={aiFieldProvenance?.leftMasses?.[3]}
-              />
-              <MeasurementInput
-                label="H3 (R)"
-                aiValue={aiScoreSheet.right.h3.value}
-                value={measurements.h3_right}
-                onChange={(v) => updateMeasurement('h3_right', v)}
-                field={aiFieldProvenance?.rightMasses?.[3]}
-              />
-              <MeasurementInput
-                label="H4 (L)"
-                aiValue={aiScoreSheet.left.h4.value}
-                value={measurements.h4_left}
-                onChange={(v) => updateMeasurement('h4_left', v)}
-                field={aiFieldProvenance?.leftMasses?.[4]}
-              />
-              <MeasurementInput
-                label="H4 (R)"
-                aiValue={aiScoreSheet.right.h4.value}
-                value={measurements.h4_right}
-                onChange={(v) => updateMeasurement('h4_right', v)}
-                field={aiFieldProvenance?.rightMasses?.[4]}
-              />
+              <MeasurementInput label="H1 (L)" aiValue={aiScoreSheet.left.h1.value} value={measurements.h1_left} onChange={(v) => updateMeasurement('h1_left', v)} field={aiFieldProvenance?.leftMasses?.[1]} onRequestCorrection={() => openCorrection('h1_left', 'H1 Left', measurements.h1_left, aiScoreSheet.left.h1.value, aiFieldProvenance?.leftMasses?.[1]?.provenance ?? null, aiFieldProvenance?.leftMasses?.[1]?.confidence ?? null, 'h1_left')} />
+              <MeasurementInput label="H1 (R)" aiValue={aiScoreSheet.right.h1.value} value={measurements.h1_right} onChange={(v) => updateMeasurement('h1_right', v)} field={aiFieldProvenance?.rightMasses?.[1]} onRequestCorrection={() => openCorrection('h1_right', 'H1 Right', measurements.h1_right, aiScoreSheet.right.h1.value, aiFieldProvenance?.rightMasses?.[1]?.provenance ?? null, aiFieldProvenance?.rightMasses?.[1]?.confidence ?? null, 'h1_right')} />
+              <MeasurementInput label="H2 (L)" aiValue={aiScoreSheet.left.h2.value} value={measurements.h2_left} onChange={(v) => updateMeasurement('h2_left', v)} field={aiFieldProvenance?.leftMasses?.[2]} onRequestCorrection={() => openCorrection('h2_left', 'H2 Left', measurements.h2_left, aiScoreSheet.left.h2.value, aiFieldProvenance?.leftMasses?.[2]?.provenance ?? null, aiFieldProvenance?.leftMasses?.[2]?.confidence ?? null, 'h2_left')} />
+              <MeasurementInput label="H2 (R)" aiValue={aiScoreSheet.right.h2.value} value={measurements.h2_right} onChange={(v) => updateMeasurement('h2_right', v)} field={aiFieldProvenance?.rightMasses?.[2]} onRequestCorrection={() => openCorrection('h2_right', 'H2 Right', measurements.h2_right, aiScoreSheet.right.h2.value, aiFieldProvenance?.rightMasses?.[2]?.provenance ?? null, aiFieldProvenance?.rightMasses?.[2]?.confidence ?? null, 'h2_right')} />
+              <MeasurementInput label="H3 (L)" aiValue={aiScoreSheet.left.h3.value} value={measurements.h3_left} onChange={(v) => updateMeasurement('h3_left', v)} field={aiFieldProvenance?.leftMasses?.[3]} onRequestCorrection={() => openCorrection('h3_left', 'H3 Left', measurements.h3_left, aiScoreSheet.left.h3.value, aiFieldProvenance?.leftMasses?.[3]?.provenance ?? null, aiFieldProvenance?.leftMasses?.[3]?.confidence ?? null, 'h3_left')} />
+              <MeasurementInput label="H3 (R)" aiValue={aiScoreSheet.right.h3.value} value={measurements.h3_right} onChange={(v) => updateMeasurement('h3_right', v)} field={aiFieldProvenance?.rightMasses?.[3]} onRequestCorrection={() => openCorrection('h3_right', 'H3 Right', measurements.h3_right, aiScoreSheet.right.h3.value, aiFieldProvenance?.rightMasses?.[3]?.provenance ?? null, aiFieldProvenance?.rightMasses?.[3]?.confidence ?? null, 'h3_right')} />
+              <MeasurementInput label="H4 (L)" aiValue={aiScoreSheet.left.h4.value} value={measurements.h4_left} onChange={(v) => updateMeasurement('h4_left', v)} field={aiFieldProvenance?.leftMasses?.[4]} onRequestCorrection={() => openCorrection('h4_left', 'H4 Left', measurements.h4_left, aiScoreSheet.left.h4.value, aiFieldProvenance?.leftMasses?.[4]?.provenance ?? null, aiFieldProvenance?.leftMasses?.[4]?.confidence ?? null, 'h4_left')} />
+              <MeasurementInput label="H4 (R)" aiValue={aiScoreSheet.right.h4.value} value={measurements.h4_right} onChange={(v) => updateMeasurement('h4_right', v)} field={aiFieldProvenance?.rightMasses?.[4]} onRequestCorrection={() => openCorrection('h4_right', 'H4 Right', measurements.h4_right, aiScoreSheet.right.h4.value, aiFieldProvenance?.rightMasses?.[4]?.provenance ?? null, aiFieldProvenance?.rightMasses?.[4]?.confidence ?? null, 'h4_right')} />
             </TabsContent>
 
             <TabsContent value="deductions" className="mt-3 space-y-1">
@@ -685,6 +665,7 @@ export function ScoreSheetEditor({
                 value={measurements.abnormal_points}
                 onChange={(v) => updateMeasurement('abnormal_points', v)}
                 field={aiFieldProvenance?.abnormalPoints}
+                onRequestCorrection={() => openCorrection('abnormal_points', 'Abnormal Points', measurements.abnormal_points, aiScoreSheet.abnormal_points.total_length.value, aiFieldProvenance?.abnormalPoints?.provenance ?? null, aiFieldProvenance?.abnormalPoints?.confidence ?? null, 'abnormal_points')}
               />
               <div className="grid grid-cols-[1fr_80px_100px_60px] gap-2 items-center py-1.5 border-b border-border/50">
                 <Label className="text-sm font-medium">Symmetry Deductions</Label>
@@ -817,6 +798,29 @@ export function ScoreSheetEditor({
           </div>
         </CardContent>
       )}
+
+      {/* Manual Correction Sheet */}
+      <Sheet open={!!correctionField} onOpenChange={(open) => { if (!open) setCorrectionField(null) }}>
+        <SheetContent
+          side="bottom"
+          className="h-[90dvh] p-0 bg-zinc-950 border-zinc-800"
+        >
+          {correctionField && (
+            <ManualCorrectionPanel
+              imageUrl={imageUrl ?? ''}
+              fieldKey={correctionField.fieldKey}
+              fieldLabel={correctionField.fieldLabel}
+              currentValue={correctionField.currentValue}
+              aiValue={correctionField.aiValue}
+              provenance={correctionField.provenance}
+              confidence={correctionField.confidence}
+              landmarks={landmarks}
+              onCancel={() => setCorrectionField(null)}
+              onSave={handleCorrectionSave}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </Card>
   )
 }

@@ -18,7 +18,7 @@ const DEV_ANON_USER_ID = 'dev-anonymous-user'
  * In development, executes the pipeline inline immediately instead of waiting for a worker.
  */
 export async function POST(
-  _: Request, 
+  req: Request, 
   { params }: { params: Promise<{ predictionId: string }> }
 ) {
   const { predictionId } = await params
@@ -34,17 +34,31 @@ export async function POST(
 
   const requesterId = user?.id ?? DEV_ANON_USER_ID
 
+  // Parse optional body — manualOverrides may be included when user has corrected fields
+  let manualOverrides: Record<string, unknown> | undefined
+  try {
+    const body = await req.json().catch(() => ({}))
+    if (body?.manualOverrides && typeof body.manualOverrides === 'object') {
+      manualOverrides = body.manualOverrides as Record<string, unknown>
+    }
+  } catch {
+    // No body or non-JSON body — fine, overrides are optional
+  }
+
   try {
     console.log('[precision-pass] Starting precision pass', {
       predictionId,
       requesterId,
       isDev: IS_DEV,
       hasUser: !!user,
+      hasManualOverrides: !!manualOverrides,
+      overrideFields: manualOverrides ? Object.keys(manualOverrides) : [],
     })
 
     const { run, jobId } = await startPrecisionPass({
       predictionId,
       requestedByUserId: requesterId,
+      manualOverrides,
     })
     
     console.log('[precision-pass] Reverse run and job created', {
