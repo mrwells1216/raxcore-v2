@@ -311,30 +311,6 @@ export function ScoreSheetEditor({
     measurementKey: keyof CorrectedMeasurements
   } | null>(null)
 
-  const openCorrection = useCallback((
-    fieldKey: string,
-    fieldLabel: string,
-    currentValue: number | null,
-    aiValue: number | null,
-    provenance: string | null,
-    confidence: string | null,
-    measurementKey: keyof CorrectedMeasurements,
-  ) => {
-    setCorrectionField({ fieldKey, fieldLabel, currentValue, aiValue, provenance, confidence, measurementKey })
-  }, [])
-
-  const handleCorrectionSave = useCallback((override: {
-    fieldKey: string
-    value: number | null
-    geometry?: unknown
-  }) => {
-    if (!correctionField) return
-    if (override.value !== null) {
-      updateMeasurement(correctionField.measurementKey, override.value)
-    }
-    setCorrectionField(null)
-  }, [correctionField, updateMeasurement])
-
   // Re-hydrate editor state only when the effective editor key changes.
   // Using a ref-based guard means the effect body can safely read aiScoreSheet
   // without listing it as a dependency (avoiding re-fires on every render).
@@ -366,9 +342,34 @@ export function ScoreSheetEditor({
     setMeasurements(prev => ({ ...prev, deductions: correctedDeductions }))
   }, [correctedDeductions])
 
+  // Defined before any callback that references it to avoid temporal dead zone.
   const updateMeasurement = useCallback((key: keyof CorrectedMeasurements, value: number | null) => {
     setMeasurements(prev => ({ ...prev, [key]: value }))
   }, [])
+
+  const openCorrection = useCallback((
+    fieldKey: string,
+    fieldLabel: string,
+    currentValue: number | null,
+    aiValue: number | null,
+    provenance: string | null,
+    confidence: string | null,
+    measurementKey: keyof CorrectedMeasurements,
+  ) => {
+    setCorrectionField({ fieldKey, fieldLabel, currentValue, aiValue, provenance, confidence, measurementKey })
+  }, [])
+
+  const handleCorrectionSave = useCallback((override: {
+    fieldKey: string
+    value: number | null
+    geometry?: unknown
+  }) => {
+    if (!correctionField) return
+    if (override.value !== null) {
+      updateMeasurement(correctionField.measurementKey, override.value)
+    }
+    setCorrectionField(null)
+  }, [correctionField, updateMeasurement])
 
   const resetToAiValues = useCallback(() => {
     setMeasurements(buildInitialMeasurements(aiScoreSheet))
