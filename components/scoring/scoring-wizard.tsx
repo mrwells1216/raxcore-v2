@@ -287,7 +287,14 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
       {/* ── 1. Mode selector ────────────────────────────────────────────── */}
       <Section>
-        <div className="flex gap-1 p-1 bg-secondary/40 rounded-2xl border border-border/30">
+        <div
+          className="flex gap-1 p-1 rounded"
+          style={{
+            background: '#131110',
+            border: '1px solid var(--bronze-dark)',
+            boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.55), inset 0 -1px 0 rgba(212,168,75,0.06)',
+          }}
+        >
           <ModeTab
             active={inputMode === 'upload'}
             onClick={() => setInputMode('upload')}
@@ -442,7 +449,14 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       )}
 
       {/* ── 6. Scoring options (collapsible) ────────────────────────────── */}
-      <div className="rounded-2xl border border-border/50 bg-card overflow-hidden">
+      <div
+        className="rounded overflow-hidden"
+        style={{
+          border: '1px solid var(--bronze-dark)',
+          background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
+          boxShadow: '0 1px 0 rgba(212,168,75,0.07), 0 4px 16px rgba(0,0,0,0.35)',
+        }}
+      >
         <button
           type="button"
           onClick={() => setDetailsOpen(v => !v)}
@@ -450,21 +464,29 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
           aria-expanded={detailsOpen}
         >
           <div>
-            <span className="text-sm font-semibold">Scoring Options</span>
+            <span
+              className="text-[10px] font-black tracking-[0.22em] uppercase"
+              style={{ color: 'var(--bronze-light)' }}
+            >
+              Scoring Options
+            </span>
             {!detailsOpen && (
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
                 State, rack type, image context
               </p>
             )}
           </div>
           {detailsOpen
-            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-            : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ? <ChevronUp className="h-4 w-4" style={{ color: 'var(--bronze-mid)' }} />
+            : <ChevronDown className="h-4 w-4" style={{ color: 'var(--bronze-mid)' }} />
           }
         </button>
 
         {detailsOpen && (
-          <div className="px-5 pb-5 border-t border-border/40">
+          <div
+            className="px-5 pb-5"
+            style={{ borderTop: '1px solid var(--bronze-dark)' }}
+          >
             <ScoringForm
               ref={scoringFormRef}
               onSubmit={handleFormSubmit}
@@ -482,10 +504,20 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       </div>
 
       {/* ── 7. Sticky bottom CTA ────────────────────────────────────────── */}
-      <div className="fixed bottom-0 inset-x-0 z-50">
-        {/* Blur backdrop */}
-        <div className="bg-background/85 backdrop-blur-md border-t border-border/40">
-          <div className="max-w-2xl mx-auto px-4 py-3 pb-safe">
+      <div
+        className="fixed bottom-0 inset-x-0 z-40 md:z-40"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div
+          className="border-t"
+          style={{
+            background: 'linear-gradient(0deg, #1c1814 0%, #161412 100%)',
+            borderColor: 'var(--bronze-dark)',
+            boxShadow: '0 -1px 0 rgba(212,168,75,0.08), 0 -8px 24px rgba(0,0,0,0.55)',
+          }}
+        >
+          {/* On mobile add space for bottom nav (56px) */}
+          <div className="max-w-2xl mx-auto px-4 py-3 md:pb-3 pb-[4.75rem]">
             <button
               type="button"
               disabled={!canSubmit || isAnalyzing}
@@ -505,23 +537,33 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                   } as ScoringFormData)
                 }
               }}
-              className={cn(
-                'w-full flex items-center justify-center gap-2.5',
-                'min-h-[54px] rounded-2xl text-base font-semibold',
-                'transition-all duration-150 touch-manipulation',
-                canSubmit && !isAnalyzing
-                  ? 'bg-primary text-primary-foreground hover:brightness-110 active:brightness-95 shadow-lg shadow-primary/20'
-                  : 'bg-secondary text-muted-foreground cursor-not-allowed'
-              )}
+              className="w-full flex items-center justify-center gap-2.5 min-h-[52px] rounded text-sm font-black tracking-widest uppercase transition-all duration-150 touch-manipulation active:scale-[0.98]"
+              style={canSubmit && !isAnalyzing ? {
+                background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 55%, var(--bronze-dark) 100%)',
+                color: '#161412',
+                boxShadow: '0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 3px 14px rgba(0,0,0,0.55)',
+              } : {
+                background: '#252118',
+                color: 'var(--muted-foreground)',
+                cursor: 'not-allowed',
+                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.40)',
+              }}
             >
               {isAnalyzing ? (
-                <><Loader2 className="h-5 w-5 animate-spin" /> Analyzing...</>
+                <><Loader2 className="h-4 w-4 animate-spin" />Analyzing...</>
               ) : (
-                <>Analyze Rack <ArrowRight className="h-5 w-5" /></>
+                <>
+                  <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" aria-hidden>
+                    <path d="M8 13 L6.5 9 L4 7.5 L3 5 L4.5 3 L6 5 L6.5 2.5 L5.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M8 13 L9.5 9 L12 7.5 L13 5 L11.5 3 L10 5 L9.5 2.5 L10.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  AI Score
+                  <ArrowRight className="h-4 w-4" />
+                </>
               )}
             </button>
             {!canSubmit && gridImages.length === 0 && (
-              <p className="text-center text-xs text-muted-foreground mt-2">
+              <p className="text-center text-[11px] font-mono text-muted-foreground mt-2">
                 Add at least one photo to continue
               </p>
             )}
@@ -544,11 +586,30 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-2xl border border-border/50 bg-card overflow-hidden">
+    <div
+      className="rounded overflow-hidden"
+      style={{
+        border: '1px solid var(--bronze-dark)',
+        background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
+        boxShadow: '0 1px 0 rgba(212,168,75,0.07), 0 4px 16px rgba(0,0,0,0.35)',
+      }}
+    >
       {(label || sublabel) && (
-        <div className="px-5 pt-4 pb-3">
-          {label && <h2 className="text-sm font-semibold text-foreground">{label}</h2>}
-          {sublabel && <p className="text-xs text-muted-foreground mt-0.5">{sublabel}</p>}
+        <div
+          className="px-5 pt-4 pb-3"
+          style={{ borderBottom: '1px solid var(--bronze-dark)' }}
+        >
+          {label && (
+            <h2
+              className="text-[10px] font-black tracking-[0.22em] uppercase"
+              style={{ color: 'var(--bronze-light)' }}
+            >
+              {label}
+            </h2>
+          )}
+          {sublabel && (
+            <p className="text-[11px] font-mono text-muted-foreground mt-0.5">{sublabel}</p>
+          )}
         </div>
       )}
       <div className={cn('px-4 pb-4', !label && !sublabel && 'pt-4')}>
@@ -577,21 +638,25 @@ function ModeTab({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium',
-        'transition-all duration-150 touch-manipulation',
-        active
-          ? 'bg-card text-foreground shadow-sm border border-border/50'
-          : 'text-muted-foreground hover:text-foreground'
-      )}
+      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded text-xs font-black tracking-widest uppercase transition-all duration-150 touch-manipulation"
+      style={active ? {
+        background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 55%, var(--bronze-dark) 100%)',
+        color: '#161412',
+        boxShadow: '0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 2px 8px rgba(0,0,0,0.45)',
+      } : {
+        color: 'var(--muted-foreground)',
+      }}
     >
       {icon}
       {label}
       {badge && (
-        <span className={cn(
-          'text-[10px] px-1.5 py-0.5 rounded-md font-semibold leading-none',
-          active ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
-        )}>
+        <span
+          className="text-[9px] px-1.5 py-0.5 rounded font-bold leading-none tracking-widest"
+          style={active
+            ? { background: 'rgba(0,0,0,0.20)', color: '#161412' }
+            : { background: 'rgba(160,120,40,0.15)', color: 'var(--bronze-mid)' }
+          }
+        >
           {badge}
         </span>
       )}
