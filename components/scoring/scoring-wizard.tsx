@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { ArrowRight, Loader2, Camera, Upload, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { ArrowRight, Loader2, Camera, Upload, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { ScoringForm } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
@@ -46,13 +45,11 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
   const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
 
-  // Normalise GridImage[] → CapturedImage[] for the pipeline
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
     imgs.map(({ id, url, file, angleType, width, height }) => ({
       id, url, file, angleType, width, height,
     }))
 
-  // Recompute intake quality whenever grid changes
   const updateIntakeQuality = useCallback((imgs: GridImage[], earsVisible?: boolean, sourceType?: string) => {
     if (imgs.length === 0) { setIntakeQuality(null); return }
     const assessment = computeIntakeQuality({
@@ -74,31 +71,27 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
     updateIntakeQuality(imgs)
   }, [updateIntakeQuality])
 
-  // Handle scan mode files ready
   const handleScanFilesReady = useCallback(async (files: File[], angles: ScanAngle[]) => {
     const scanImages: GridImage[] = []
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       const angle = angles[i]
-      
-      // Convert File to data URL for preview
+
       const url = await new Promise<string>((resolve) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
         reader.readAsDataURL(file)
       })
-      
-      // Get image dimensions
+
       const { width, height } = await new Promise<{ width: number; height: number }>((resolve) => {
         const img = new Image()
         img.onload = () => resolve({ width: img.width, height: img.height })
         img.src = url
       })
-      
-      // Map scan angle to grid slot
+
       const slotKey = angle === 'front' ? 'front_center' : angle === 'left' ? 'left_side' : 'right_side'
-      
+
       scanImages.push({
         id: `scan-${angle}-${Date.now()}`,
         url,
@@ -107,9 +100,10 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         angleType: angle,
         width,
         height,
+        group: null,
       })
     }
-    
+
     setGridImages(scanImages)
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
     updateIntakeQuality(scanImages, undefined, 'live_deer')
@@ -124,7 +118,6 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   }
 
   const handleAnalyze = async (data: ScoringFormData) => {
-    // Re-compute intake quality with form data
     const finalQuality = computeIntakeQuality({
       images: gridImages.map(img => ({
         angleType: img.angleType,
@@ -139,7 +132,6 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
     setIsAnalyzing(true)
 
     try {
-      // Prepare form data for API
       const apiFormData = new FormData()
       apiFormData.append('state', data.state)
       apiFormData.append('rack_type', data.rack_type)
@@ -152,8 +144,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('ears_fully_visible', String(data.ears_fully_visible))
       }
       if (data.notes) apiFormData.append('notes', data.notes)
-      
-      // Phase 54: Abnormal/Irregular Points
+
       if (data.irregular_points_present) apiFormData.append('irregular_points_present', data.irregular_points_present)
       if (data.non_typical_traits_present) apiFormData.append('non_typical_traits_present', data.non_typical_traits_present)
       if (data.estimated_irregular_points_count !== undefined) {
@@ -163,11 +154,9 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       if (data.abnormal_point_tags?.length) {
         apiFormData.append('abnormal_point_tags', JSON.stringify(data.abnormal_point_tags))
       }
-      
-      // Pass authenticated user ID for notifications
+
       if (userId) apiFormData.append('user_id', userId)
 
-      // Include intake quality summary
       if (finalQuality) {
         const qualitySummary: IntakeQualitySummary = {
           tier: finalQuality.tier,
@@ -182,7 +171,6 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('intake_quality', JSON.stringify(qualitySummary))
       }
 
-      // Include capture quality (angle coverage check)
       const captureQuality = buildCaptureQualitySummary({
         images: gridImages.map(img => ({ name: `Image ${img.id}` })),
         selectedAngles: selectedImageAngles.map(a => a ?? undefined),
@@ -194,7 +182,6 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         recommendationReason: captureQuality.recommendationReason,
       }))
 
-      // Include precision mode metadata
       if (data.precision_mode_enabled) {
         const referenceModeSummary = buildReferenceModeSummary({
           precisionModeEnabled: data.precision_mode_enabled,
@@ -207,7 +194,6 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('reference_mode_summary', JSON.stringify(referenceModeSummary))
       }
 
-      // Include image diagnostics (quality analysis)
       if (imageDiagnostics.length > 0) {
         apiFormData.append('image_diagnostics', JSON.stringify(imageDiagnostics))
       }
@@ -215,25 +201,18 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('image_diagnostics_summary', JSON.stringify(imageDiagnosticsSummary))
       }
 
-      // Preprocess and add images (resize + compress to reduce payload)
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
         try {
-          // Get source - either file or data URL
           const source = img.file || img.url
-          
-          // Preprocess: resize to max 1200px, JPEG quality 0.7 to reduce payload
           const processed = await preprocessImage(source, {
             maxDimension: 1200,
             quality: 0.7,
           })
-          
-          // Send as data URL (smaller than raw file for large images)
           apiFormData.append(`image_data_${index}`, processed.dataUrl)
           apiFormData.append(`angle_${index}`, img.angleType)
         } catch (preprocessError) {
           console.error(`Failed to preprocess image ${index}:`, preprocessError)
-          // Fallback to original if preprocessing fails
           if (img.file) {
             apiFormData.append(`image_${index}`, img.file)
           } else {
@@ -251,15 +230,12 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       if (!response.ok) {
         const rawText = await response.text()
         let errorMessage = 'Scoring failed'
-
         try {
           const errorJson = JSON.parse(rawText)
-          // Prefer userMessage (user-friendly) over error (generic), include details if available
           errorMessage = errorJson.userMessage || errorJson.details || errorJson.error || JSON.stringify(errorJson)
         } catch {
           errorMessage = rawText || 'Scoring failed'
         }
-
         console.error('Scoring API error:', errorMessage, 'Raw:', rawText)
         throw new Error(errorMessage)
       }
@@ -275,6 +251,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   }
 
   const canSubmit = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
+
   const captureQuality = gridImages.length > 0
     ? buildCaptureQualitySummary({
         images: gridImages.map(img => ({ name: `Image ${img.id}` })),
@@ -282,107 +259,156 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       })
     : null
 
+  // ── Analyzing state ─────────────────────────────────────────────────────────
   if (isAnalyzing) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <Card>
-          <CardContent className="py-20">
-            <div className="flex flex-col items-center justify-center text-center gap-4">
-              <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              <div>
-                <h3 className="text-lg font-semibold">Analyzing Your Buck</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Detecting landmarks and calculating measurements...
-                </p>
-              </div>
+      <div className="max-w-2xl mx-auto px-4 pt-6">
+        <div className="rounded-2xl border border-border/60 bg-card p-10 flex flex-col items-center justify-center text-center gap-5">
+          <div className="relative">
+            <div className="h-16 w-16 rounded-full border-2 border-primary/20 flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-base font-semibold">Analyzing Your Buck</h3>
+            <p className="text-sm text-muted-foreground">
+              Detecting landmarks and calculating measurements...
+            </p>
+          </div>
+        </div>
       </div>
     )
   }
 
+  // ── Main flow ───────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-2xl mx-auto pb-28 space-y-4">
+    <div className="max-w-2xl mx-auto pb-32 space-y-3">
 
-      {/* ── Photos section ───────────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-5 space-y-4">
+      {/* ── 1. Mode selector ────────────────────────────────────────────── */}
+      <Section>
+        <div className="flex gap-1 p-1 bg-secondary/40 rounded-2xl border border-border/30">
+          <ModeTab
+            active={inputMode === 'upload'}
+            onClick={() => setInputMode('upload')}
+            icon={<Upload className="h-3.5 w-3.5" />}
+            label="Upload Photos"
+          />
+          <ModeTab
+            active={inputMode === 'scan'}
+            onClick={() => setInputMode('scan')}
+            icon={<Camera className="h-3.5 w-3.5" />}
+            label="Scan Rack"
+            badge="Best"
+          />
+        </div>
+      </Section>
 
-          {/* Mode pill toggle */}
-          <div className="flex gap-1.5 p-1 bg-secondary/60 rounded-xl border border-border/40">
-            <button
-              type="button"
-              onClick={() => setInputMode('upload')}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation ${
-                inputMode === 'upload'
-                  ? 'bg-card text-foreground shadow-sm border border-border/60'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Upload
-            </button>
-            <button
-              type="button"
-              onClick={() => setInputMode('scan')}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation ${
-                inputMode === 'scan'
-                  ? 'bg-card text-foreground shadow-sm border border-border/60'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Camera className="h-3.5 w-3.5" />
-              Scan Rack
-              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/15 text-primary font-semibold leading-none">
-                Best
-              </span>
-            </button>
+      {/* ── 2. Photo upload / scan ───────────────────────────────────────── */}
+      <Section label="Add Photos">
+        {inputMode === 'upload' && (
+          <PhotoGridUploader images={gridImages} onChange={handleGridChange} />
+        )}
+        {inputMode === 'scan' && (
+          <ScanModePanel onFilesReady={handleScanFilesReady} />
+        )}
+      </Section>
+
+      {/* ── 3. Organize photos (only when images exist) ─────────────────── */}
+      {inputMode === 'upload' && gridImages.length > 0 && (
+        <Section label="Organize Photos" sublabel="Optional — helps improve scoring accuracy">
+          <div className="grid grid-cols-3 gap-2">
+            {(['full_rack', 'left_antler', 'right_antler'] as const).map(group => {
+              const grouped = gridImages.filter(img => img.group === group)
+              const groupLabel = group === 'full_rack' ? 'Full Rack' : group === 'left_antler' ? 'Left Antler' : 'Right Antler'
+              const accent =
+                group === 'full_rack'    ? 'border-primary/30 bg-primary/5'    :
+                group === 'left_antler'  ? 'border-blue-500/25 bg-blue-500/5'  :
+                                           'border-amber-500/25 bg-amber-500/5'
+              const dot =
+                group === 'full_rack'    ? 'bg-primary'    :
+                group === 'left_antler'  ? 'bg-blue-500'   :
+                                           'bg-amber-500'
+
+              return (
+                <div key={group} className={cn('rounded-xl border p-2.5 space-y-2', accent)}>
+                  <div className="flex items-center gap-1.5">
+                    <span className={cn('h-2 w-2 rounded-full shrink-0', dot)} />
+                    <span className="text-[11px] font-semibold text-foreground leading-none">{groupLabel}</span>
+                  </div>
+                  {grouped.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-1">
+                      {grouped.map(img => (
+                        <div key={img.id} className="aspect-square rounded-lg overflow-hidden">
+                          <img src={img.url} alt={groupLabel} className="w-full h-full object-cover" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground leading-tight">
+                      Tap a photo &darr; to assign
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground text-center">
+            Tap the arrow on any photo above to assign it to a group
+          </p>
+        </Section>
+      )}
+
+      {/* ── 4. Capture quality feedback ─────────────────────────────────── */}
+      {inputMode === 'upload' && gridImages.length > 0 && captureQuality && (
+        <Section label="Coverage">
+          <div className="space-y-3">
+            {/* Coverage meter */}
+            <div className="flex items-center gap-3">
+              {[
+                { label: 'Front', ok: captureQuality.coverage.hasFront },
+                { label: 'Left',  ok: captureQuality.coverage.hasLeft  },
+                { label: 'Right', ok: captureQuality.coverage.hasRight },
+              ].map(({ label, ok }) => (
+                <div key={label} className="flex-1 flex flex-col items-center gap-1.5">
+                  <div className={cn(
+                    'w-full h-1.5 rounded-full',
+                    ok ? 'bg-primary' : 'bg-border'
+                  )} />
+                  <div className="flex items-center gap-1">
+                    <CheckCircle2 className={cn(
+                      'h-3 w-3',
+                      ok ? 'text-primary' : 'text-muted-foreground/40'
+                    )} />
+                    <span className={cn(
+                      'text-[11px] font-medium',
+                      ok ? 'text-foreground' : 'text-muted-foreground'
+                    )}>
+                      {label}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Overall coverage label */}
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Coverage: <span className="text-foreground font-medium">{captureQuality.coverage.coverageLabel}</span></span>
+              <span>{gridImages.length} photo{gridImages.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            {/* Weak coverage warning */}
+            {captureQuality.recommendation === 'needs_better_photos' && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/8 px-3 py-2.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Weak angle coverage — add a front or side view for better accuracy.
+                </p>
+              </div>
+            )}
           </div>
 
-          {inputMode === 'upload' && (
-            <PhotoGridUploader images={gridImages} onChange={handleGridChange} />
-          )}
-
-          {inputMode === 'scan' && (
-            <ScanModePanel onFilesReady={handleScanFilesReady} />
-          )}
-
-          {/* Coverage chips */}
-          {inputMode === 'upload' && gridImages.length > 0 && captureQuality && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { label: 'Front', ok: captureQuality.coverage.hasFront },
-                  { label: 'Left',  ok: captureQuality.coverage.hasLeft  },
-                  { label: 'Right', ok: captureQuality.coverage.hasRight },
-                ].map(({ label, ok }) => (
-                  <span
-                    key={label}
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${
-                      ok
-                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/40'
-                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/40'
-                    }`}
-                  >
-                    <CheckCircle2 className={`h-3 w-3 ${ok ? 'opacity-100' : 'opacity-30'}`} />
-                    {label}
-                  </span>
-                ))}
-                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs text-muted-foreground border border-border/40">
-                  {captureQuality.coverage.coverageLabel}
-                </span>
-              </div>
-              {captureQuality.recommendation === 'needs_better_photos' && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Weak angle coverage — results may be less accurate.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Intake quality display */}
-          {inputMode === 'upload' && intakeQuality && gridImages.length > 0 && (
+          {/* Intake quality */}
+          {intakeQuality && (
             <IntakeQualityDisplay
               quality={{
                 tier: intakeQuality.tier,
@@ -399,10 +425,10 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
               onAddPhoto={() => toast.info('Tap "Add more" to upload another photo')}
             />
           )}
-        </CardContent>
-      </Card>
+        </Section>
+      )}
 
-      {/* ── Editable carousel ───────────────────────────────────────────── */}
+      {/* ── 5. Editable carousel ────────────────────────────────────────── */}
       {gridImages.length > 0 && (
         <EditableImageCarousel
           images={gridImages}
@@ -414,20 +440,20 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         />
       )}
 
-      {/* ── Buck Details (collapsible) ───────────────────────────────────── */}
-      <Card>
+      {/* ── 6. Scoring options (collapsible) ────────────────────────────── */}
+      <div className="rounded-2xl border border-border/50 bg-card overflow-hidden">
         <button
           type="button"
           onClick={() => setDetailsOpen(v => !v)}
           className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
           aria-expanded={detailsOpen}
         >
-          <div className="flex items-center gap-2.5">
-            <span className="text-sm font-semibold">Buck Details</span>
-            {gridImages.length > 0 && !detailsOpen && (
-              <span className="text-xs text-muted-foreground font-normal">
-                tap to improve accuracy
-              </span>
+          <div>
+            <span className="text-sm font-semibold">Scoring Options</span>
+            {!detailsOpen && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                State, rack type, image context
+              </p>
             )}
           </div>
           {detailsOpen
@@ -437,7 +463,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         </button>
 
         {detailsOpen && (
-          <CardContent className="pt-0">
+          <div className="px-5 pb-5 border-t border-border/40">
             <ScoringForm
               onSubmit={handleFormSubmit}
               onBack={() => setDetailsOpen(false)}
@@ -449,31 +475,115 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                 setImageDiagnosticsSummary(summary)
               }}
             />
-          </CardContent>
+          </div>
         )}
-      </Card>
+      </div>
 
-      {/* ── Sticky bottom CTA ───────────────────────────────────────────── */}
-      <div className="fixed bottom-0 inset-x-0 z-40 bg-background/90 backdrop-blur-sm border-t border-border/50">
-        <div className="max-w-2xl mx-auto px-4 py-3">
-          <Button
-            form="scoring-details-form"
-            type="submit"
-            size="lg"
-            className="w-full min-h-[52px] text-base font-semibold gap-2 rounded-2xl"
-            disabled={!canSubmit || isAnalyzing}
-            onClick={(e) => {
-              if (!detailsOpen) {
-                e.preventDefault()
-                handleFormSubmit({} as any)
-              }
-            }}
-          >
-            Analyze Buck
-            <ArrowRight className="h-5 w-5" />
-          </Button>
+      {/* ── 7. Sticky bottom CTA ────────────────────────────────────────── */}
+      <div className="fixed bottom-0 inset-x-0 z-50">
+        {/* Blur backdrop */}
+        <div className="bg-background/85 backdrop-blur-md border-t border-border/40">
+          <div className="max-w-2xl mx-auto px-4 py-3 pb-safe">
+            <button
+              form="scoring-details-form"
+              type="submit"
+              disabled={!canSubmit || isAnalyzing}
+              onClick={(e) => {
+                if (!detailsOpen) {
+                  e.preventDefault()
+                  handleFormSubmit({} as any)
+                }
+              }}
+              className={cn(
+                'w-full flex items-center justify-center gap-2.5',
+                'min-h-[54px] rounded-2xl text-base font-semibold',
+                'transition-all duration-150 touch-manipulation',
+                canSubmit && !isAnalyzing
+                  ? 'bg-primary text-primary-foreground hover:brightness-110 active:brightness-95 shadow-lg shadow-primary/20'
+                  : 'bg-secondary text-muted-foreground cursor-not-allowed'
+              )}
+            >
+              {isAnalyzing ? (
+                <><Loader2 className="h-5 w-5 animate-spin" /> Analyzing...</>
+              ) : (
+                <>Analyze Rack <ArrowRight className="h-5 w-5" /></>
+              )}
+            </button>
+            {!canSubmit && gridImages.length === 0 && (
+              <p className="text-center text-xs text-muted-foreground mt-2">
+                Add at least one photo to continue
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── Section wrapper ─────────────────────────────────────────────────────────
+
+function Section({
+  label,
+  sublabel,
+  children,
+}: {
+  label?: string
+  sublabel?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card overflow-hidden">
+      {(label || sublabel) && (
+        <div className="px-5 pt-4 pb-3">
+          {label && <h2 className="text-sm font-semibold text-foreground">{label}</h2>}
+          {sublabel && <p className="text-xs text-muted-foreground mt-0.5">{sublabel}</p>}
+        </div>
+      )}
+      <div className={cn('px-4 pb-4', !label && !sublabel && 'pt-4')}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ─── Mode tab ────────────────────────────────────────────────────────────────
+
+function ModeTab({
+  active,
+  onClick,
+  icon,
+  label,
+  badge,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  badge?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium',
+        'transition-all duration-150 touch-manipulation',
+        active
+          ? 'bg-card text-foreground shadow-sm border border-border/50'
+          : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      {icon}
+      {label}
+      {badge && (
+        <span className={cn(
+          'text-[10px] px-1.5 py-0.5 rounded-md font-semibold leading-none',
+          active ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
+        )}>
+          {badge}
+        </span>
+      )}
+    </button>
   )
 }

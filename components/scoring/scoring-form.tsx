@@ -18,6 +18,7 @@ import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
+import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
 const formSchema = z.object({
@@ -106,7 +107,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
 
   return (
     <Form {...form}>
-      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 pt-4">
         {/* Section: Required Info */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -140,14 +141,25 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Rack Type *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="Typical or non-typical?" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {RACK_TYPES.map((type) => <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    <div className="flex gap-1.5 p-1 bg-secondary/40 rounded-xl border border-border/40">
+                      {RACK_TYPES.map((type) => (
+                        <button
+                          key={type.value}
+                          type="button"
+                          onClick={() => field.onChange(type.value)}
+                          className={cn(
+                            'flex-1 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation',
+                            field.value === type.value
+                              ? 'bg-card text-foreground shadow-sm border border-border/50'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )}
+                        >
+                          {type.label}
+                        </button>
+                      ))}
+                    </div>
+                  </FormControl>
                   <FormDescription>Affects scoring calculations</FormDescription>
                   <FormMessage />
                 </FormItem>
