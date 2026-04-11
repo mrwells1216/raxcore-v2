@@ -37,8 +37,6 @@ import { ManualCorrectionPanel } from './manual-correction-panel'
 import {
   getMeasurementDisplayConfidence,
 } from '@/lib/scoring/measurement-display-confidence'
-import { getOverrideFieldLabel } from '@/lib/scoring/manual-overrides'
-import type { ManualOverrideFieldKey } from '@/lib/scoring/manual-overrides'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { CorrectedMeasurements } from '@/lib/review/types'
 import {
@@ -803,8 +801,13 @@ export function ScoreSheetEditor({
       <Sheet open={!!correctionField} onOpenChange={(open) => { if (!open) setCorrectionField(null) }}>
         <SheetContent
           side="bottom"
-          className="h-[90dvh] p-0 bg-zinc-950 border-zinc-800"
+          className="h-[90dvh] p-0 bg-zinc-950 border-zinc-800 overflow-hidden flex flex-col"
+          aria-describedby={undefined}
         >
+          {/* Visually hidden title for screen readers */}
+          <span className="sr-only">
+            {correctionField ? `Correct measurement: ${correctionField.fieldLabel}` : 'Measurement correction'}
+          </span>
           {correctionField && (
             <ManualCorrectionPanel
               imageUrl={imageUrl ?? ''}
