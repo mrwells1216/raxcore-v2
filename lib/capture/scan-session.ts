@@ -1,5 +1,34 @@
 export type ScanAngle = 'front' | 'left' | 'right'
 
+export type ScanAutoCaptureInput = {
+  hasRackDetected?: boolean
+  hasDeerDetected?: boolean
+  isBlurry?: boolean
+  isClipped?: boolean
+  addsNewCoverage?: boolean
+  isStable?: boolean
+}
+
+export function shouldAutoCaptureFrame(input: ScanAutoCaptureInput): boolean {
+  const {
+    hasRackDetected = false,
+    hasDeerDetected = false,
+    isBlurry = false,
+    isClipped = false,
+    addsNewCoverage = false,
+    isStable = false,
+  } = input
+
+  if (!hasRackDetected) return false
+  if (!hasDeerDetected) return false
+  if (isBlurry) return false
+  if (isClipped) return false
+  if (!addsNewCoverage) return false
+  if (!isStable) return false
+
+  return true
+}
+
 export type ScanCaptureSlot = {
   angle: ScanAngle
   file: File | null
