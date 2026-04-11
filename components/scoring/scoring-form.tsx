@@ -47,9 +47,11 @@ interface ScoringFormProps {
   onBack: () => void
   isSubmitting: boolean
   onImageDiagnosticsComputed?: (diagnostics: ImageDiagnostics[], summary: ImageDiagnosticsSummary | null) => void
+  hideBackButton?: boolean
+  hideSubmitButton?: boolean
 }
 
-export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed }: ScoringFormProps) {
+export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed, hideBackButton, hideSubmitButton }: ScoringFormProps) {
   const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
   const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
   const form = useForm<ScoringFormData>({
@@ -104,7 +106,7 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
         {/* Section: Required Info */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">

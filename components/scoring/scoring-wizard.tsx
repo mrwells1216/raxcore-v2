@@ -1,17 +1,16 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { ArrowRight, Loader2, Camera, Upload } from 'lucide-react'
+import { ArrowRight, Loader2, Camera, Upload, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
+import { Card, CardContent } from '@/components/ui/card'
 import { ScoringForm } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
-import { buildCaptureQualitySummary, type CaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
+import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
@@ -36,15 +35,9 @@ interface ScoringWizardProps {
   onComplete: (result: ScoringResult, formData: ScoringFormData) => void
 }
 
-const STEPS = [
-  { id: 'capture', title: 'Add Photos', description: 'Capture or upload images' },
-  { id: 'details', title: 'Buck Details', description: 'State and rack type' },
-  { id: 'analyze', title: 'Analyze', description: 'Get your score' },
-]
-
 export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
   const [inputMode, setInputMode] = useState<ScoreInputMode>('upload')
-  const [step, setStep] = useState(0)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
   const [selectedImageAngles, setSelectedImageAngles] = useState<(CaptureAngle | null)[]>([])
   const [formData, setFormData] = useState<ScoringFormData | null>(null)
@@ -72,12 +65,10 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
   const handleGridChange = useCallback((imgs: GridImage[]) => {
     setGridImages(imgs)
-    // Sync selected angles array with image count
+    if (imgs.length > 0) setDetailsOpen(true)
     setSelectedImageAngles(prev => {
       const updated = [...prev]
-      while (updated.length < imgs.length) {
-        updated.push(null)
-      }
+      while (updated.length < imgs.length) updated.push(null)
       return updated.slice(0, imgs.length)
     })
     updateIntakeQuality(imgs)
@@ -122,10 +113,9 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
     setGridImages(scanImages)
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
     updateIntakeQuality(scanImages, undefined, 'live_deer')
-    setStep(1) // Move to details step
+    setDetailsOpen(true)
   }, [updateIntakeQuality])
 
-  const progress = ((step + 1) / STEPS.length) * 100
   const images = toCapturedImages(gridImages)
 
   const handleFormSubmit = (data: ScoringFormData) => {
@@ -146,9 +136,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       captureDevice: data.capture_device,
     })
     setIntakeQuality(finalQuality)
-
     setIsAnalyzing(true)
-    setStep(2)
 
     try {
       // Prepare form data for API
@@ -281,212 +269,24 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
     } catch (error) {
       console.error('Scoring error:', error)
       toast.error('Analysis failed. Please try again.')
-      setStep(1)
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-  const canProceedToDetails = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
+  const canSubmit = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
+  const captureQuality = gridImages.length > 0
+    ? buildCaptureQualitySummary({
+        images: gridImages.map(img => ({ name: `Image ${img.id}` })),
+        selectedAngles: selectedImageAngles.map(a => a ?? undefined),
+      })
+    : null
 
-  return (
-    <div className="max-w-2xl mx-auto">
-      {/* Progress */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">
-            Step {step + 1} of {STEPS.length}: {STEPS[step].title}
-          </span>
-          <span className="text-sm text-muted-foreground">
-            {gridImages.length} photo{gridImages.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <Progress value={progress} className="h-2" />
-      </div>
-
-      {/* Step Content */}
-      {step === 0 && (
+  if (isAnalyzing) {
+    return (
+      <div className="max-w-2xl mx-auto">
         <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>Add Buck Photos</CardTitle>
-            <CardDescription>
-              Choose how you want to capture photos for scoring
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Mode Chooser */}
-            <div className="flex gap-2 p-1 bg-secondary rounded-lg">
-              <button
-                onClick={() => setInputMode('upload')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-md font-medium text-sm transition-all ${
-                  inputMode === 'upload'
-                    ? 'bg-background shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Upload className="h-4 w-4" />
-                Upload Photos
-              </button>
-              <button
-                onClick={() => setInputMode('scan')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-md font-medium text-sm transition-all ${
-                  inputMode === 'scan'
-                    ? 'bg-background shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Camera className="h-4 w-4" />
-                Scan Rack
-                <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">
-                  Recommended
-                </span>
-              </button>
-            </div>
-
-            {/* Upload Mode */}
-            {inputMode === 'upload' && (
-              <>
-                <div className="text-sm text-muted-foreground">
-                  Tap any box to add a photo for that angle — front and sides give the best score
-                </div>
-                
-                {/* 3x3 photo grid — replaces dropdown + single uploader */}
-                <PhotoGridUploader
-                  images={gridImages}
-                  onChange={handleGridChange}
-                />
-              </>
-            )}
-
-            {/* Scan Mode */}
-            {inputMode === 'scan' && (
-              <ScanModePanel onFilesReady={handleScanFilesReady} />
-            )}
-
-            {/* Intake Quality Assessment - show when images exist (upload mode only) */}
-            {inputMode === 'upload' && intakeQuality && gridImages.length > 0 && (
-              <IntakeQualityDisplay
-                quality={{
-                  tier: intakeQuality.tier,
-                  overallScore: intakeQuality.overallScore,
-                  strongestFactors: intakeQuality.strongestFactors,
-                  weakestFactors: intakeQuality.weakestFactors,
-                  confidenceAdjustment: intakeQuality.confidenceAdjustment,
-                  errorBandWidening: intakeQuality.errorBandWidening,
-                  recommendations: intakeQuality.recommendations,
-                  summary: intakeQuality.summary,
-                }}
-                showRecommendations={true}
-                compact={true}
-                onAddPhoto={() => {
-                  toast.info('Tap an empty slot in the grid to add a photo')
-                }}
-              />
-            )}
-
-            {/* Capture Quality Check - angle coverage and labeling (upload mode only) */}
-            {inputMode === 'upload' && gridImages.length > 0 && (() => {
-              const captureQuality = buildCaptureQualitySummary({
-                images: gridImages.map(img => ({ name: `Image ${img.id}` })),
-                selectedAngles: selectedImageAngles.map(a => a ?? undefined),
-              })
-
-              return (
-                <div className="rounded-lg border px-4 py-3 space-y-3">
-                  <div className="text-sm font-medium">Photo coverage check</div>
-
-                  <div className="text-xs text-muted-foreground">
-                    {captureQuality.recommendationReason}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasFront ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
-                      Front: {captureQuality.coverage.hasFront ? 'yes' : 'missing'}
-                    </span>
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasLeft ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
-                      Left: {captureQuality.coverage.hasLeft ? 'yes' : 'missing'}
-                    </span>
-                    <span className={`rounded-full border px-2 py-1 ${captureQuality.coverage.hasRight ? 'bg-green-50 dark:bg-green-900/30' : 'bg-yellow-50 dark:bg-yellow-900/30'}`}>
-                      Right: {captureQuality.coverage.hasRight ? 'yes' : 'missing'}
-                    </span>
-                  </div>
-
-                  <div className="text-xs">
-                    Coverage: <span className="font-medium">{captureQuality.coverage.coverageLabel}</span>
-                  </div>
-
-                  {captureQuality.recommendation === 'ok_lower_confidence' && (
-                    <div className="rounded-md border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/30 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-200 mt-3">
-                      This rack can be scored, but missing angle coverage may reduce confidence.
-                    </div>
-                  )}
-
-                  {captureQuality.recommendation === 'needs_better_photos' && (
-                    <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/30 px-3 py-2 text-xs text-red-800 dark:text-red-200 mt-3">
-                      This image set is weak for reliable scoring. You can still continue, but results may be less accurate.
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* Navigation - only for upload mode (scan mode has its own flow) */}
-            {inputMode === 'upload' && (
-              <div className="flex justify-end pt-4 border-t border-border">
-                <Button
-                  onClick={() => setStep(1)}
-                  disabled={!canProceedToDetails}
-                  className="min-h-[48px] gap-2"
-                >
-                  Continue
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {step === 1 && (
-        <div className="space-y-4">
-          {/* Editable image carousel - crop/rotate before scoring */}
-          {gridImages.length > 0 && (
-            <EditableImageCarousel 
-              images={gridImages} 
-              onImageEdit={(index, newUrl) => {
-                // Update the image URL in gridImages
-                setGridImages(prev => prev.map((img, i) => 
-                  i === index ? { ...img, url: newUrl, file: undefined } : img
-                ))
-              }}
-            />
-          )}
-          
-          <Card>
-            <CardHeader className="pb-4">
-              <CardTitle>Buck Details</CardTitle>
-              <CardDescription>
-                Provide information to improve accuracy
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScoringForm 
-                onSubmit={handleFormSubmit}
-                onBack={() => setStep(0)}
-                isSubmitting={isAnalyzing}
-                onImageDiagnosticsComputed={(diags, summary) => {
-                  setImageDiagnostics(diags)
-                  setImageDiagnosticsSummary(summary)
-                }}
-              />
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {step === 2 && (
-        <Card>
-          <CardContent className="py-16">
+          <CardContent className="py-20">
             <div className="flex flex-col items-center justify-center text-center gap-4">
               <Loader2 className="h-12 w-12 animate-spin text-primary" />
               <div>
@@ -498,7 +298,182 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
             </div>
           </CardContent>
         </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto pb-28 space-y-4">
+
+      {/* ── Photos section ───────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5 space-y-4">
+
+          {/* Mode pill toggle */}
+          <div className="flex gap-1.5 p-1 bg-secondary/60 rounded-xl border border-border/40">
+            <button
+              type="button"
+              onClick={() => setInputMode('upload')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation ${
+                inputMode === 'upload'
+                  ? 'bg-card text-foreground shadow-sm border border-border/60'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Upload
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode('scan')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation ${
+                inputMode === 'scan'
+                  ? 'bg-card text-foreground shadow-sm border border-border/60'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Camera className="h-3.5 w-3.5" />
+              Scan Rack
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/15 text-primary font-semibold leading-none">
+                Best
+              </span>
+            </button>
+          </div>
+
+          {inputMode === 'upload' && (
+            <PhotoGridUploader images={gridImages} onChange={handleGridChange} />
+          )}
+
+          {inputMode === 'scan' && (
+            <ScanModePanel onFilesReady={handleScanFilesReady} />
+          )}
+
+          {/* Coverage chips */}
+          {inputMode === 'upload' && gridImages.length > 0 && captureQuality && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: 'Front', ok: captureQuality.coverage.hasFront },
+                  { label: 'Left',  ok: captureQuality.coverage.hasLeft  },
+                  { label: 'Right', ok: captureQuality.coverage.hasRight },
+                ].map(({ label, ok }) => (
+                  <span
+                    key={label}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${
+                      ok
+                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/40'
+                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/40'
+                    }`}
+                  >
+                    <CheckCircle2 className={`h-3 w-3 ${ok ? 'opacity-100' : 'opacity-30'}`} />
+                    {label}
+                  </span>
+                ))}
+                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs text-muted-foreground border border-border/40">
+                  {captureQuality.coverage.coverageLabel}
+                </span>
+              </div>
+              {captureQuality.recommendation === 'needs_better_photos' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Weak angle coverage — results may be less accurate.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Intake quality display */}
+          {inputMode === 'upload' && intakeQuality && gridImages.length > 0 && (
+            <IntakeQualityDisplay
+              quality={{
+                tier: intakeQuality.tier,
+                overallScore: intakeQuality.overallScore,
+                strongestFactors: intakeQuality.strongestFactors,
+                weakestFactors: intakeQuality.weakestFactors,
+                confidenceAdjustment: intakeQuality.confidenceAdjustment,
+                errorBandWidening: intakeQuality.errorBandWidening,
+                recommendations: intakeQuality.recommendations,
+                summary: intakeQuality.summary,
+              }}
+              showRecommendations={false}
+              compact={true}
+              onAddPhoto={() => toast.info('Tap "Add more" to upload another photo')}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Editable carousel ───────────────────────────────────────────── */}
+      {gridImages.length > 0 && (
+        <EditableImageCarousel
+          images={gridImages}
+          onImageEdit={(index, newUrl) => {
+            setGridImages(prev => prev.map((img, i) =>
+              i === index ? { ...img, url: newUrl, file: undefined } : img
+            ))
+          }}
+        />
       )}
+
+      {/* ── Buck Details (collapsible) ───────────────────────────────────── */}
+      <Card>
+        <button
+          type="button"
+          onClick={() => setDetailsOpen(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
+          aria-expanded={detailsOpen}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-semibold">Buck Details</span>
+            {gridImages.length > 0 && !detailsOpen && (
+              <span className="text-xs text-muted-foreground font-normal">
+                tap to improve accuracy
+              </span>
+            )}
+          </div>
+          {detailsOpen
+            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          }
+        </button>
+
+        {detailsOpen && (
+          <CardContent className="pt-0">
+            <ScoringForm
+              onSubmit={handleFormSubmit}
+              onBack={() => setDetailsOpen(false)}
+              isSubmitting={isAnalyzing}
+              hideBackButton
+              hideSubmitButton
+              onImageDiagnosticsComputed={(diags, summary) => {
+                setImageDiagnostics(diags)
+                setImageDiagnosticsSummary(summary)
+              }}
+            />
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ── Sticky bottom CTA ───────────────────────────────────────────── */}
+      <div className="fixed bottom-0 inset-x-0 z-40 bg-background/90 backdrop-blur-sm border-t border-border/50">
+        <div className="max-w-2xl mx-auto px-4 py-3">
+          <Button
+            form="scoring-details-form"
+            type="submit"
+            size="lg"
+            className="w-full min-h-[52px] text-base font-semibold gap-2 rounded-2xl"
+            disabled={!canSubmit || isAnalyzing}
+            onClick={(e) => {
+              if (!detailsOpen) {
+                e.preventDefault()
+                handleFormSubmit({} as any)
+              }
+            }}
+          >
+            Analyze Buck
+            <ArrowRight className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }
