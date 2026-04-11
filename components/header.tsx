@@ -43,14 +43,7 @@ function RaxcoreLogo({ size = 28 }: { size?: number }) {
       aria-hidden
       style={{ display: 'block' }}
     >
-      {/* Plate background */}
-      <rect
-        x="1" y="1" width="30" height="30" rx="4"
-        fill="url(#plate)"
-        stroke="url(#rim)"
-        strokeWidth="1"
-      />
-      {/* Antler silhouette */}
+      <rect x="1" y="1" width="30" height="30" rx="4" fill="url(#plate)" stroke="url(#rim)" strokeWidth="1" />
       <path
         d="M16 24 L14 19 L11 17 L9 13 L11 10 L13 12 L14 9 L13 6
            M16 24 L18 19 L21 17 L23 13 L21 10 L19 12 L18 9 L19 6"
@@ -60,7 +53,6 @@ function RaxcoreLogo({ size = 28 }: { size?: number }) {
         strokeLinejoin="round"
         fill="none"
       />
-      {/* Circuit trace accents */}
       <path
         d="M4 4 L7 4 M28 4 L25 4 M4 28 L7 28 M28 28 L25 28"
         stroke="url(#trace)"
@@ -186,24 +178,30 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1 flex-1 ml-2">
-            {fullNavigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold tracking-wider uppercase transition-colors rounded"
-                style={isActive(item.href) ? {
-                  background: 'rgba(160,120,40,0.18)',
-                  color: 'var(--bronze-light)',
-                  border: '1px solid var(--bronze-dark)',
-                } : {
-                  color: 'var(--muted-foreground)',
-                  border: '1px solid transparent',
-                }}
-              >
-                <item.icon className="h-3.5 w-3.5" />
-                {item.name}
-              </Link>
-            ))}
+            {fullNavigation.map((item) => {
+              const active = isActive(item.href)
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold tracking-wider uppercase transition-colors rounded"
+                  style={active ? {
+                    background: 'rgba(160,120,40,0.18)',
+                    color: 'var(--bronze-light)',
+                    border: '1px solid var(--bronze-dark)',
+                  } : {
+                    color: 'var(--muted-foreground)',
+                    border: '1px solid transparent',
+                  }}
+                >
+                  <item.icon
+                    className="h-3.5 w-3.5 shrink-0"
+                    style={{ color: active ? 'var(--bronze-light)' : 'var(--bronze-mid)' }}
+                  />
+                  {item.name}
+                </Link>
+              )
+            })}
           </nav>
 
           {/* Desktop right side */}
@@ -260,25 +258,31 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
                   </div>
 
                   <nav className="flex flex-col gap-1 p-4 flex-1">
-                    {fullNavigation.map((item) => (
-                      <Link
-                        key={item.name}
-                        href={item.href}
-                        onClick={() => setOpen(false)}
-                        className="flex items-center gap-3 px-3 py-3 rounded text-sm font-bold tracking-wider uppercase min-h-[48px] transition-colors"
-                        style={isActive(item.href) ? {
-                          background: 'rgba(160,120,40,0.18)',
-                          color: 'var(--bronze-light)',
-                          border: '1px solid var(--bronze-dark)',
-                        } : {
-                          color: 'var(--muted-foreground)',
-                          border: '1px solid transparent',
-                        }}
-                      >
-                        <item.icon className="h-5 w-5" />
-                        {item.name}
-                      </Link>
-                    ))}
+                    {fullNavigation.map((item) => {
+                      const active = isActive(item.href)
+                      return (
+                        <Link
+                          key={item.name}
+                          href={item.href}
+                          onClick={() => setOpen(false)}
+                          className="flex items-center gap-3 px-3 py-3 rounded text-sm font-bold tracking-wider uppercase min-h-[48px] transition-colors"
+                          style={active ? {
+                            background: 'rgba(160,120,40,0.18)',
+                            color: 'var(--bronze-light)',
+                            border: '1px solid var(--bronze-dark)',
+                          } : {
+                            color: 'var(--muted-foreground)',
+                            border: '1px solid transparent',
+                          }}
+                        >
+                          <item.icon
+                            className="h-5 w-5 shrink-0"
+                            style={{ color: active ? 'var(--bronze-light)' : 'var(--bronze-mid)' }}
+                          />
+                          {item.name}
+                        </Link>
+                      )
+                    })}
                   </nav>
 
                   {!user && (
@@ -342,7 +346,10 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
                 className="h-0.5 w-8 rounded-full mb-0.5 transition-all duration-200"
                 style={{ background: active ? 'var(--bronze-light)' : 'transparent' }}
               />
-              <item.icon className="h-5 w-5" />
+              <item.icon
+                className="h-5 w-5"
+                style={{ color: active ? 'var(--bronze-light)' : 'var(--bronze-mid)' }}
+              />
               <span className="text-[9px] font-bold tracking-widest uppercase">{item.name}</span>
             </Link>
           )
