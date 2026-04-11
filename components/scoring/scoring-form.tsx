@@ -19,7 +19,11 @@ import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
+import { useState, useRef, useImperativeHandle, forwardRef } from 'react'
+
+export interface ScoringFormHandle {
+  triggerSubmit: () => void
+}
 
 const formSchema = z.object({
   state: z.string().min(1, 'State is required'),
@@ -52,7 +56,11 @@ interface ScoringFormProps {
   hideSubmitButton?: boolean
 }
 
-export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed, hideBackButton, hideSubmitButton }: ScoringFormProps) {
+export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(function ScoringForm(
+  { onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed, hideBackButton, hideSubmitButton },
+  ref
+) {
+  const submitBtnRef = useRef<HTMLButtonElement>(null)
   const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
   const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
   const form = useForm<ScoringFormData>({
@@ -90,6 +98,10 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
     referenceType: watchReferenceType,
     referenceNotes: watchReferenceNotes,
   })
+
+  useImperativeHandle(ref, () => ({
+    triggerSubmit: () => submitBtnRef.current?.click(),
+  }))
 
   const handleComputeImageDiagnostics = async (files: File[]) => {
     try {
@@ -613,7 +625,9 @@ export function ScoringForm({ onSubmit, onBack, isSubmitting, onImageDiagnostics
             )}
           </div>
         )}
+        {/* Hidden submit button — triggered programmatically via ref */}
+        <button ref={submitBtnRef} type="submit" className="sr-only" aria-hidden tabIndex={-1} />
       </form>
     </Form>
   )
-}
+})

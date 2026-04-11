@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { ArrowRight, Loader2, Camera, Upload, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { ScoringForm } from './scoring-form'
+import { ScoringForm, type ScoringFormHandle } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { EditableImageCarousel } from './editable-image-carousel'
@@ -35,6 +35,7 @@ interface ScoringWizardProps {
 }
 
 export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
+  const scoringFormRef = useRef<ScoringFormHandle>(null)
   const [inputMode, setInputMode] = useState<ScoreInputMode>('upload')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
@@ -465,6 +466,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         {detailsOpen && (
           <div className="px-5 pb-5 border-t border-border/40">
             <ScoringForm
+              ref={scoringFormRef}
               onSubmit={handleFormSubmit}
               onBack={() => setDetailsOpen(false)}
               isSubmitting={isAnalyzing}
@@ -485,13 +487,22 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         <div className="bg-background/85 backdrop-blur-md border-t border-border/40">
           <div className="max-w-2xl mx-auto px-4 py-3 pb-safe">
             <button
-              form="scoring-details-form"
-              type="submit"
+              type="button"
               disabled={!canSubmit || isAnalyzing}
-              onClick={(e) => {
-                if (!detailsOpen) {
-                  e.preventDefault()
-                  handleFormSubmit({} as any)
+              onClick={() => {
+                if (detailsOpen) {
+                  scoringFormRef.current?.triggerSubmit()
+                } else {
+                  handleAnalyze({
+                    state: '',
+                    rack_type: 'typical',
+                    capture_device: 'unknown',
+                    ears_fully_visible: true,
+                    precision_mode_enabled: false,
+                    reference_type: 'none',
+                    reference_notes: '',
+                    abnormal_point_tags: [],
+                  } as ScoringFormData)
                 }
               }}
               className={cn(
