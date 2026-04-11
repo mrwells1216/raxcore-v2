@@ -51,12 +51,12 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background" suppressHydrationWarning>
+    <html lang="en" className="dark bg-background" suppressHydrationWarning>
       <body className="font-sans antialiased min-h-svh">
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
-          enableSystem
+          enableSystem={false}
           disableTransitionOnChange
         >
           {children}
