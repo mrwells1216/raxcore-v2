@@ -6,7 +6,7 @@ import { MeshOverlay, MeshData } from '@/components/admin/mesh-overlay';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-// Example mesh data - in production, this would come from an API
+// Example mesh data representing a measurement graph - in production, this comes from the API
 const EXAMPLE_MESH: MeshData = {
   beams: [
     {
@@ -80,6 +80,9 @@ const EXAMPLE_MESH: MeshData = {
   burrs: []
 };
 
+// In production, this would come from route params or state
+const EXAMPLE_RACK_ID = 'example-rack-id';
+
 export default function MeshReviewPage() {
   const [mesh, setMesh] = useState<MeshData>(EXAMPLE_MESH);
   const [isSaving, setIsSaving] = useState(false);
@@ -91,13 +94,31 @@ export default function MeshReviewPage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // In production, send to your API
-      console.log('Saving mesh:', mesh);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      toast.success('Mesh adjustments saved successfully');
+      // Convert MeshData to measurement_graphs format
+      const adjustedGraph = {
+        beams: mesh.beams,
+        tines: mesh.tines,
+        spreads: mesh.spreads,
+        burrs: mesh.burrs,
+        confidence: calculateOverallConfidence(mesh)
+      };
+
+      const response = await fetch('/api/admin/mesh-adjustments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rack_id: EXAMPLE_RACK_ID,
+          adjusted_graph: adjustedGraph,
+          notes: 'Manual adjustment via mesh review'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save');
+      }
+
+      const data = await response.json();
+      toast.success(`Saved as version ${data.version}`);
     } catch (error) {
       toast.error('Failed to save mesh adjustments');
       console.error('Save error:', error);
@@ -111,12 +132,25 @@ export default function MeshReviewPage() {
     toast.info('Mesh reset to original values');
   };
 
+  // Calculate overall confidence from all measurements
+  const calculateOverallConfidence = (meshData: MeshData): number => {
+    const allMeasurements = [
+      ...meshData.beams,
+      ...meshData.tines,
+      ...meshData.spreads,
+      ...meshData.burrs
+    ];
+    if (allMeasurements.length === 0) return 0;
+    const sum = allMeasurements.reduce((acc, m) => acc + m.confidence, 0);
+    return sum / allMeasurements.length;
+  };
+
   return (
     <div className="p-4 lg:p-6 space-y-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold">Mesh Review &amp; Adjustment</h1>
         <p className="text-muted-foreground">
-          Review AI-detected rack geometry and fine-tune measurements through interactive adjustment.
+          Review AI-detected rack geometry and fine-tune measurements. Changes create new graph versions.
         </p>
       </div>
 
@@ -167,10 +201,18 @@ export default function MeshReviewPage() {
               {/* Confidence summary */}
               <div className="pt-2 border-t space-y-2">
                 <p className="font-medium">Confidence Summary</p>
+                <div className="text-xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Overall:</span>
+                    <span className="font-medium">
+                      {(calculateOverallConfidence(mesh) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
                 {[
                   { name: 'High (0.75+)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence >= 0.75).length, color: 'bg-green-500' },
                   { name: 'Medium (0.5-0.75)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence >= 0.5 && m.confidence < 0.75).length, color: 'bg-blue-500' },
-                  { name: 'Low (&lt;0.5)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence < 0.5).length, color: 'bg-amber-500' }
+                  { name: 'Low (<0.5)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence < 0.5).length, color: 'bg-amber-500' }
                 ].map(({ name, count, color }) => (
                   <div key={name} className="flex items-center gap-2 text-xs">
                     <div className={`${color} w-3 h-3 rounded-full`} />
@@ -211,7 +253,7 @@ export default function MeshReviewPage() {
                 <li>Use arrow buttons to move by 1 pixel</li>
                 <li>Adjust until alignment is perfect</li>
                 <li>Click reset to deselect</li>
-                <li>Save when satisfied with all adjustments</li>
+                <li>Save creates a new versioned graph</li>
               </ol>
             </CardContent>
           </Card>
