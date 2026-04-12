@@ -1,10 +1,24 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import type { MeasurementGraph } from '@/lib/types';
 
-interface MeshAdjustment {
-  sheet_id: string;
-  adjusted_mesh: Record<string, unknown>;
+interface GraphAdjustmentRequest {
+  rack_id: string;
+  adjusted_graph: MeasurementGraph;
   notes?: string;
+}
+
+// Calculate overall confidence from a MeasurementGraph
+function calculateGraphConfidence(graph: MeasurementGraph): number {
+  const confidences = [
+    graph.beams.left.confidence,
+    graph.beams.right.confidence,
+    graph.spread.confidence,
+    ...graph.tines.map(t => t.confidence),
+    ...graph.circumferences.map(c => c.confidence)
+  ];
+  if (confidences.length === 0) return 0;
+  return confidences.reduce((a, b) => a + b, 0) / confidences.length;
 }
 
 export async function POST(request: NextRequest) {
@@ -38,62 +52,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body: MeshAdjustment = await request.json();
-    const { sheet_id, adjusted_mesh, notes } = body;
+    const body: GraphAdjustmentRequest = await request.json();
+    const { rack_id, adjusted_graph, notes } = body;
 
-    if (!sheet_id || !adjusted_mesh) {
+    if (!rack_id || !adjusted_graph) {
       return NextResponse.json(
-        { message: 'Missing required fields: sheet_id, adjusted_mesh' },
+        { message: 'Missing required fields: rack_id, adjusted_graph' },
         { status: 400 }
       );
     }
 
-    // Verify the sheet exists and user owns it
-    const { data: sheet, error: sheetError } = await supabase
-      .from('official_score_sheets')
-      .select('id, score_data')
-      .eq('id', sheet_id)
+    // Verify the rack exists
+    const { data: rack, error: rackError } = await supabase
+      .from('racks')
+      .select('id')
+      .eq('id', rack_id)
       .single();
 
-    if (sheetError || !sheet) {
+    if (rackError || !rack) {
       return NextResponse.json(
-        { message: 'Score sheet not found' },
+        { message: 'Rack not found' },
         { status: 404 }
       );
     }
 
-    // Save the adjusted mesh as a new version
-    // You might want to store this in a new table or as a JSON column update
-    const { error: updateError } = await supabase
-      .from('official_score_sheets')
-      .update({
-        score_data: {
-          ...sheet.score_data,
-          adjusted_mesh,
-          adjusted_at: new Date().toISOString(),
-          adjusted_by: user.id,
-          adjustment_notes: notes
-        }
-      })
-      .eq('id', sheet_id);
+    // Get the current highest version for this rack
+    const { data: existingGraphs, error: graphsError } = await supabase
+      .from('measurement_graphs')
+      .select('version')
+      .eq('rack_id', rack_id)
+      .order('version', { ascending: false })
+      .limit(1);
 
-    if (updateError) {
-      console.error('Update error:', updateError);
+    if (graphsError) {
+      console.error('Graphs fetch error:', graphsError);
       return NextResponse.json(
-        { message: 'Failed to save mesh adjustments' },
+        { message: 'Failed to check existing graphs' },
         { status: 500 }
       );
     }
 
+    const nextVersion = existingGraphs && existingGraphs.length > 0 
+      ? existingGraphs[0].version + 1 
+      : 1;
+
+    // Calculate confidence from the adjusted graph
+    const confidence = calculateGraphConfidence(adjusted_graph);
+
+    // Insert the new graph version
+    const { data: newGraph, error: insertError } = await supabase
+      .from('measurement_graphs')
+      .insert({
+        rack_id,
+        graph: adjusted_graph,
+        confidence,
+        version: nextVersion
+      })
+      .select('id, version')
+      .single();
+
+    if (insertError || !newGraph) {
+      console.error('Insert error:', insertError);
+      return NextResponse.json(
+        { message: 'Failed to save graph adjustments' },
+        { status: 500 }
+      );
+    }
+
+    // If there's a training example linked to this rack, we might want to track the adjustment
+    // This could be used for error analysis later
+    if (notes) {
+      // Optionally log the adjustment for audit purposes
+      console.log(`[Mesh Adjustment] Rack ${rack_id}, version ${nextVersion}: ${notes}`);
+    }
+
     return NextResponse.json(
       {
-        message: 'Mesh adjustments saved successfully',
-        sheet_id
+        message: 'Graph adjustments saved successfully',
+        graph_id: newGraph.id,
+        version: newGraph.version,
+        confidence
       },
       { status: 200 }
     );
   } catch (error) {
-    console.error('Mesh adjustment error:', error);
+    console.error('Graph adjustment error:', error);
     return NextResponse.json(
       { message: 'Internal server error' },
       { status: 500 }
@@ -101,7 +144,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET endpoint to retrieve saved mesh adjustments
+// GET endpoint to retrieve rack data with graphs and images
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -120,48 +163,98 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const sheetId = searchParams.get('sheet_id');
+    const rackId = searchParams.get('rack_id');
+    const version = searchParams.get('version');
 
-    if (!sheetId) {
+    if (!rackId) {
       return NextResponse.json(
-        { message: 'Missing sheet_id parameter' },
+        { message: 'Missing rack_id parameter' },
         { status: 400 }
       );
     }
 
-    // Get the sheet
-    const { data: sheet, error: sheetError } = await supabase
-      .from('official_score_sheets')
-      .select('id, score_data, scoring_system, created_at')
-      .eq('id', sheetId)
+    // Get the rack
+    const { data: rack, error: rackError } = await supabase
+      .from('racks')
+      .select('id, user_id, created_at')
+      .eq('id', rackId)
       .single();
 
-    if (sheetError || !sheet) {
+    if (rackError || !rack) {
       return NextResponse.json(
-        { message: 'Score sheet not found' },
+        { message: 'Rack not found' },
         { status: 404 }
       );
     }
 
     // Get associated images
     const { data: images, error: imagesError } = await supabase
-      .from('official_score_images')
-      .select('id, image_url, image_type, uploaded_at')
-      .eq('sheet_id', sheetId);
+      .from('rack_images')
+      .select('id, image_url, angle, quality_score, created_at')
+      .eq('rack_id', rackId)
+      .order('created_at', { ascending: true });
 
     if (imagesError) {
       console.error('Images fetch error:', imagesError);
     }
 
+    // Get measurement graph(s) - either specific version or latest
+    let graphQuery = supabase
+      .from('measurement_graphs')
+      .select('id, graph, confidence, version, created_at')
+      .eq('rack_id', rackId);
+
+    if (version) {
+      graphQuery = graphQuery.eq('version', parseInt(version, 10));
+    } else {
+      graphQuery = graphQuery.order('version', { ascending: false }).limit(1);
+    }
+
+    const { data: graphs, error: graphsError } = await graphQuery;
+
+    if (graphsError) {
+      console.error('Graphs fetch error:', graphsError);
+    }
+
+    // Get training examples linked to this rack's graphs
+    const graphIds = graphs?.map(g => g.id) || [];
+    let trainingExamples = null;
+
+    if (graphIds.length > 0) {
+      const { data: examples, error: examplesError } = await supabase
+        .from('training_examples')
+        .select('id, scoring_system, official_score, graph_id, created_at')
+        .in('graph_id', graphIds);
+
+      if (examplesError) {
+        console.error('Training examples fetch error:', examplesError);
+      } else {
+        trainingExamples = examples;
+      }
+    }
+
+    // Get all versions info for this rack
+    const { data: allVersions, error: versionsError } = await supabase
+      .from('measurement_graphs')
+      .select('version, confidence, created_at')
+      .eq('rack_id', rackId)
+      .order('version', { ascending: true });
+
+    if (versionsError) {
+      console.error('Versions fetch error:', versionsError);
+    }
+
     return NextResponse.json(
       {
-        sheet: {
-          id: sheet.id,
-          scoring_system: sheet.scoring_system,
-          score_data: sheet.score_data,
-          created_at: sheet.created_at
+        rack: {
+          id: rack.id,
+          user_id: rack.user_id,
+          created_at: rack.created_at
         },
-        images: images || []
+        images: images || [],
+        current_graph: graphs && graphs.length > 0 ? graphs[0] : null,
+        all_versions: allVersions || [],
+        training_examples: trainingExamples
       },
       { status: 200 }
     );

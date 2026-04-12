@@ -4,32 +4,23 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import type { MeasurementGraph, Vec2, Beam, Tine, Spread, CircumferencePoint } from '@/lib/types';
 
-export interface MeshPoint {
-  x: number;
-  y: number;
-}
-
-export interface MeshItem {
-  id: string;
-  points: MeshPoint[];
-  confidence: number;
-  label?: string;
-}
-
-export interface MeshData {
-  beams: MeshItem[];
-  tines: MeshItem[];
-  spreads: MeshItem[];
-  burrs: MeshItem[];
-}
+// Re-export for backward compatibility
+export type { MeasurementGraph, Vec2, Beam, Tine, Spread, CircumferencePoint };
 
 interface MeshOverlayProps {
   imageUrl: string;
-  mesh: MeshData;
-  onMeshChange: (newMesh: MeshData) => void;
+  graph: MeasurementGraph;
+  onGraphChange: (newGraph: MeasurementGraph) => void;
   readOnly?: boolean;
 }
+
+type SelectableItem = 
+  | { type: 'beam'; side: 'left' | 'right'; item: Beam }
+  | { type: 'tine'; index: number; item: Tine }
+  | { type: 'spread'; item: Spread }
+  | { type: 'circumference'; index: number; item: CircumferencePoint };
 
 const COLORS = {
   high: '#22c55e',    // green - high confidence
@@ -45,10 +36,23 @@ function getColorForConfidence(confidence: number, isSelected: boolean): string 
   return COLORS.low;
 }
 
+function getItemId(item: SelectableItem): string {
+  switch (item.type) {
+    case 'beam':
+      return `beam-${item.side}`;
+    case 'tine':
+      return item.item.id;
+    case 'spread':
+      return 'spread';
+    case 'circumference':
+      return item.item.id;
+  }
+}
+
 export function MeshOverlay({
   imageUrl,
-  mesh,
-  onMeshChange,
+  graph,
+  onGraphChange,
   readOnly = false
 }: MeshOverlayProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -71,69 +75,121 @@ export function MeshOverlay({
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
-  const findItemById = (id: string): { category: keyof MeshData; item: MeshItem } | null => {
-    for (const category of ['beams', 'tines', 'spreads', 'burrs'] as const) {
-      const item = mesh[category].find(m => m.id === id);
-      if (item) return { category, item };
+  const findItemById = (id: string): SelectableItem | null => {
+    // Check beams
+    if (id === 'beam-left') {
+      return { type: 'beam', side: 'left', item: graph.beams.left };
     }
+    if (id === 'beam-right') {
+      return { type: 'beam', side: 'right', item: graph.beams.right };
+    }
+
+    // Check spread
+    if (id === 'spread') {
+      return { type: 'spread', item: graph.spread };
+    }
+
+    // Check tines
+    const tineIndex = graph.tines.findIndex(t => t.id === id);
+    if (tineIndex !== -1) {
+      return { type: 'tine', index: tineIndex, item: graph.tines[tineIndex] };
+    }
+
+    // Check circumferences
+    const circIndex = graph.circumferences.findIndex(c => c.id === id);
+    if (circIndex !== -1) {
+      return { type: 'circumference', index: circIndex, item: graph.circumferences[circIndex] };
+    }
+
     return null;
   };
 
-  const movePart = (id: string, dx: number, dy: number) => {
+  const movePoint = (point: Vec2, dx: number, dy: number): Vec2 => ({
+    x: point.x + dx,
+    y: point.y + dy
+  });
+
+  const moveItem = (id: string, dx: number, dy: number) => {
     if (readOnly) return;
 
     const found = findItemById(id);
     if (!found) return;
 
-    const { category, item } = found;
-    const newItem = {
-      ...item,
-      points: item.points.map(p => ({
-        x: p.x + dx,
-        y: p.y + dy
-      }))
-    };
+    const newGraph = { ...graph };
 
-    const newMesh = { ...mesh };
-    const items = [...newMesh[category]];
-    const idx = items.findIndex(m => m.id === id);
-    items[idx] = newItem;
-    newMesh[category] = items;
+    switch (found.type) {
+      case 'beam': {
+        const newBeam: Beam = {
+          ...found.item,
+          points: found.item.points.map(p => movePoint(p, dx, dy))
+        };
+        newGraph.beams = {
+          ...newGraph.beams,
+          [found.side]: newBeam
+        };
+        break;
+      }
+      case 'tine': {
+        const newTine: Tine = {
+          ...found.item,
+          basePoint: movePoint(found.item.basePoint, dx, dy),
+          tipPoint: movePoint(found.item.tipPoint, dx, dy)
+        };
+        newGraph.tines = [...graph.tines];
+        newGraph.tines[found.index] = newTine;
+        break;
+      }
+      case 'spread': {
+        const newSpread: Spread = {
+          ...found.item,
+          leftPoint: movePoint(found.item.leftPoint, dx, dy),
+          rightPoint: movePoint(found.item.rightPoint, dx, dy)
+        };
+        newGraph.spread = newSpread;
+        break;
+      }
+      case 'circumference': {
+        const newCirc: CircumferencePoint = {
+          ...found.item,
+          position: movePoint(found.item.position, dx, dy)
+        };
+        newGraph.circumferences = [...graph.circumferences];
+        newGraph.circumferences[found.index] = newCirc;
+        break;
+      }
+    }
 
-    onMeshChange(newMesh);
+    onGraphChange(newGraph);
   };
 
-  const reset = () => {
+  const deselect = () => {
     if (readOnly) return;
     setSelectedId(null);
   };
 
-  const renderPolyline = (item: MeshItem, isSelected: boolean) => {
-    if (item.points.length < 2) return null;
+  const renderBeam = (beam: Beam, side: 'left' | 'right') => {
+    if (beam.points.length < 2) return null;
+    const id = `beam-${side}`;
+    const isSelected = selectedId === id;
 
-    const points = item.points
-      .map(p => `${p.x},${p.y}`)
-      .join(' ');
+    const points = beam.points.map(p => `${p.x},${p.y}`).join(' ');
 
     return (
-      <g key={item.id}>
-        {/* Main polyline */}
+      <g key={id}>
         <polyline
           points={points}
-          stroke={getColorForConfidence(item.confidence, isSelected)}
+          stroke={getColorForConfidence(beam.confidence, isSelected)}
           strokeWidth={isSelected ? 3 : 2}
           fill="none"
           strokeLinecap="round"
           strokeLinejoin="round"
-          onClick={() => !readOnly && setSelectedId(item.id)}
+          onClick={() => !readOnly && setSelectedId(id)}
           style={{ cursor: readOnly ? 'default' : 'pointer' }}
           opacity={isSelected ? 1 : 0.7}
         />
-
-        {/* Points on selected items */}
-        {isSelected && item.points.map((point, idx) => (
+        {isSelected && beam.points.map((point, idx) => (
           <circle
-            key={`${item.id}-point-${idx}`}
+            key={`${id}-point-${idx}`}
             cx={point.x}
             cy={point.y}
             r={4}
@@ -145,7 +201,129 @@ export function MeshOverlay({
     );
   };
 
+  const renderTine = (tine: Tine) => {
+    const isSelected = selectedId === tine.id;
+
+    return (
+      <g key={tine.id}>
+        <line
+          x1={tine.basePoint.x}
+          y1={tine.basePoint.y}
+          x2={tine.tipPoint.x}
+          y2={tine.tipPoint.y}
+          stroke={getColorForConfidence(tine.confidence, isSelected)}
+          strokeWidth={isSelected ? 3 : 2}
+          strokeLinecap="round"
+          onClick={() => !readOnly && setSelectedId(tine.id)}
+          style={{ cursor: readOnly ? 'default' : 'pointer' }}
+          opacity={isSelected ? 1 : 0.7}
+        />
+        {isSelected && (
+          <>
+            <circle cx={tine.basePoint.x} cy={tine.basePoint.y} r={4} fill={COLORS.selected} opacity={0.6} />
+            <circle cx={tine.tipPoint.x} cy={tine.tipPoint.y} r={4} fill={COLORS.selected} opacity={0.6} />
+          </>
+        )}
+        <text
+          x={(tine.basePoint.x + tine.tipPoint.x) / 2 + 5}
+          y={(tine.basePoint.y + tine.tipPoint.y) / 2}
+          fill="white"
+          fontSize="10"
+          className="pointer-events-none"
+        >
+          {tine.label}
+        </text>
+      </g>
+    );
+  };
+
+  const renderSpread = () => {
+    const isSelected = selectedId === 'spread';
+
+    return (
+      <g key="spread">
+        <line
+          x1={graph.spread.leftPoint.x}
+          y1={graph.spread.leftPoint.y}
+          x2={graph.spread.rightPoint.x}
+          y2={graph.spread.rightPoint.y}
+          stroke={getColorForConfidence(graph.spread.confidence, isSelected)}
+          strokeWidth={isSelected ? 3 : 2}
+          strokeDasharray="5,5"
+          strokeLinecap="round"
+          onClick={() => !readOnly && setSelectedId('spread')}
+          style={{ cursor: readOnly ? 'default' : 'pointer' }}
+          opacity={isSelected ? 1 : 0.7}
+        />
+        {isSelected && (
+          <>
+            <circle cx={graph.spread.leftPoint.x} cy={graph.spread.leftPoint.y} r={4} fill={COLORS.selected} opacity={0.6} />
+            <circle cx={graph.spread.rightPoint.x} cy={graph.spread.rightPoint.y} r={4} fill={COLORS.selected} opacity={0.6} />
+          </>
+        )}
+        <text
+          x={(graph.spread.leftPoint.x + graph.spread.rightPoint.x) / 2}
+          y={(graph.spread.leftPoint.y + graph.spread.rightPoint.y) / 2 - 8}
+          fill="white"
+          fontSize="10"
+          textAnchor="middle"
+          className="pointer-events-none"
+        >
+          {graph.spread.distance.toFixed(1)}&quot;
+        </text>
+      </g>
+    );
+  };
+
+  const renderCircumference = (circ: CircumferencePoint) => {
+    const isSelected = selectedId === circ.id;
+
+    return (
+      <g key={circ.id}>
+        <circle
+          cx={circ.position.x}
+          cy={circ.position.y}
+          r={8}
+          stroke={getColorForConfidence(circ.confidence, isSelected)}
+          strokeWidth={isSelected ? 3 : 2}
+          fill="none"
+          onClick={() => !readOnly && setSelectedId(circ.id)}
+          style={{ cursor: readOnly ? 'default' : 'pointer' }}
+          opacity={isSelected ? 1 : 0.7}
+        />
+        <text
+          x={circ.position.x + 12}
+          y={circ.position.y + 4}
+          fill="white"
+          fontSize="9"
+          className="pointer-events-none"
+        >
+          {circ.label} ({circ.circumference.toFixed(1)}&quot;)
+        </text>
+      </g>
+    );
+  };
+
   const selectedInfo = selectedId ? findItemById(selectedId) : null;
+
+  const getSelectedLabel = (): string => {
+    if (!selectedInfo) return '';
+    switch (selectedInfo.type) {
+      case 'beam':
+        return `${selectedInfo.side.charAt(0).toUpperCase() + selectedInfo.side.slice(1)} Beam`;
+      case 'tine':
+        return `${selectedInfo.item.label} (${selectedInfo.item.side})`;
+      case 'spread':
+        return 'Inside Spread';
+      case 'circumference':
+        return `${selectedInfo.item.label} (${selectedInfo.item.side})`;
+    }
+  };
+
+  const getSelectedConfidence = (): number => {
+    if (!selectedInfo) return 0;
+    return selectedInfo.item.confidence;
+  };
 
   return (
     <div className="space-y-4">
@@ -162,11 +340,18 @@ export function MeshOverlay({
           className="absolute inset-0 w-full h-full cursor-crosshair"
           preserveAspectRatio="none"
         >
-          {/* Render all mesh parts */}
-          {mesh.beams.map(b => renderPolyline(b, selectedId === b.id))}
-          {mesh.tines.map(t => renderPolyline(t, selectedId === t.id))}
-          {mesh.spreads.map(s => renderPolyline(s, selectedId === s.id))}
-          {mesh.burrs.map(b => renderPolyline(b, selectedId === b.id))}
+          {/* Render beams */}
+          {renderBeam(graph.beams.left, 'left')}
+          {renderBeam(graph.beams.right, 'right')}
+
+          {/* Render spread */}
+          {renderSpread()}
+
+          {/* Render tines */}
+          {graph.tines.map(t => renderTine(t))}
+
+          {/* Render circumferences */}
+          {graph.circumferences.map(c => renderCircumference(c))}
 
           {/* Confidence legend */}
           <g className="pointer-events-none">
@@ -190,10 +375,10 @@ export function MeshOverlay({
         <Card className="p-4 space-y-4 bg-secondary/30">
           <div>
             <p className="text-sm font-medium mb-2">
-              Selected: <span className="text-primary">{selectedInfo.item.label || selectedInfo.item.id}</span>
+              Selected: <span className="text-primary">{getSelectedLabel()}</span>
             </p>
             <p className="text-xs text-muted-foreground">
-              Confidence: {(selectedInfo.item.confidence * 100).toFixed(0)}%
+              Confidence: {(getSelectedConfidence() * 100).toFixed(0)}%
             </p>
           </div>
 
@@ -207,7 +392,7 @@ export function MeshOverlay({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => movePart(selectedId!, 0, -1)}
+                onClick={() => moveItem(selectedId!, 0, -1)}
                 className="w-10 h-10 p-0"
                 title="Move up"
               >
@@ -220,7 +405,7 @@ export function MeshOverlay({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => movePart(selectedId!, -1, 0)}
+                  onClick={() => moveItem(selectedId!, -1, 0)}
                   className="w-10 h-10 p-0"
                   title="Move left"
                 >
@@ -231,7 +416,7 @@ export function MeshOverlay({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={reset}
+                  onClick={deselect}
                   className="w-10 h-10 p-0"
                   title="Deselect"
                 >
@@ -242,7 +427,7 @@ export function MeshOverlay({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => movePart(selectedId!, 1, 0)}
+                  onClick={() => moveItem(selectedId!, 1, 0)}
                   className="w-10 h-10 p-0"
                   title="Move right"
                 >
@@ -255,7 +440,7 @@ export function MeshOverlay({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => movePart(selectedId!, 0, 1)}
+                onClick={() => moveItem(selectedId!, 0, 1)}
                 className="w-10 h-10 p-0"
                 title="Move down"
               >

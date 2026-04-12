@@ -4534,3 +4534,115 @@ export interface ListTrainingPacksOptions {
   order_by?: 'created_at' | 'updated_at' | 'item_count' | 'name'
   order_dir?: 'asc' | 'desc'
 }
+
+// ========================================
+// MEASUREMENT GRAPH TYPES (Training Import)
+// ========================================
+
+/** 2D vector for graph coordinates */
+export type Vec2 = {
+  x: number
+  y: number
+}
+
+/** Graph source angle for fused measurements */
+export type GraphSource = 'front' | 'left' | 'right' | 'fused'
+
+/** Tine label identifiers */
+export type TineLabel = 'G1' | 'G2' | 'G3' | 'G4' | 'unknown'
+
+/** Main beam geometry with confidence tracking */
+export interface Beam {
+  id: string
+  points: Vec2[]
+  length: number
+  confidence: number
+  source: GraphSource
+}
+
+/** Individual tine measurement */
+export interface Tine {
+  id: string
+  side: 'left' | 'right'
+  parentBeamId: string
+  basePoint: Vec2
+  tipPoint: Vec2
+  length: number
+  label: TineLabel
+  confidence: number
+}
+
+/** Spread measurement between antler tips */
+export interface Spread {
+  leftPoint: Vec2
+  rightPoint: Vec2
+  distance: number
+  confidence: number
+}
+
+/** Circumference measurement point (H1-H4) */
+export interface CircumferencePoint {
+  id: string
+  side: 'left' | 'right'
+  label: 'H1' | 'H2' | 'H3' | 'H4'
+  position: Vec2
+  circumference: number
+  confidence: number
+}
+
+/** Full measurement graph structure - core engine data */
+export interface MeasurementGraph {
+  beams: {
+    left: Beam
+    right: Beam
+  }
+  tines: Tine[]
+  spread: Spread
+  circumferences: CircumferencePoint[]
+}
+
+/** Database row type for racks table */
+export interface Rack {
+  id: string
+  user_id: string | null
+  created_at: string
+}
+
+/** Database row type for rack_images table */
+export interface RackImage {
+  id: string
+  rack_id: string
+  image_url: string
+  angle: 'front' | 'left' | 'right' | 'unknown' | null
+  quality_score: number | null
+  created_at: string
+}
+
+/** Database row type for measurement_graphs table */
+export interface MeasurementGraphRecord {
+  id: string
+  rack_id: string
+  graph: MeasurementGraph
+  confidence: number | null
+  version: number
+  created_at: string
+}
+
+/** Database row type for training_examples table */
+export interface OfficialTrainingExample {
+  id: string
+  scoring_system: string | null
+  official_score: Record<string, unknown>
+  graph_id: string | null
+  created_at: string
+}
+
+/** Database row type for measurement_errors table */
+export interface MeasurementError {
+  id: string
+  training_id: string
+  ai_values: Record<string, unknown>
+  official_values: Record<string, unknown>
+  delta: Record<string, unknown>
+  created_at: string
+}

@@ -2,113 +2,163 @@
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { MeshOverlay, MeshData } from '@/components/admin/mesh-overlay';
+import { MeshOverlay } from '@/components/admin/mesh-overlay';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import type { MeasurementGraph } from '@/lib/types';
 
-// Example mesh data representing a measurement graph - in production, this comes from the API
-const EXAMPLE_MESH: MeshData = {
-  beams: [
-    {
+// Example measurement graph - in production, this comes from the API
+const EXAMPLE_GRAPH: MeasurementGraph = {
+  beams: {
+    left: {
       id: 'beam-left',
-      label: 'Left Main Beam',
       points: [
         { x: 150, y: 450 },
-        { x: 180, y: 200 }
+        { x: 160, y: 350 },
+        { x: 180, y: 250 },
+        { x: 190, y: 180 }
       ],
-      confidence: 0.92
+      length: 24.5,
+      confidence: 0.92,
+      source: 'fused'
     },
-    {
+    right: {
       id: 'beam-right',
-      label: 'Right Main Beam',
       points: [
         { x: 350, y: 450 },
-        { x: 320, y: 200 }
+        { x: 340, y: 350 },
+        { x: 320, y: 250 },
+        { x: 310, y: 180 }
       ],
-      confidence: 0.88
+      length: 25.1,
+      confidence: 0.88,
+      source: 'fused'
     }
-  ],
+  },
   tines: [
     {
-      id: 'tine-left-1',
-      label: 'Left Tine 1',
-      points: [
-        { x: 140, y: 250 },
-        { x: 130, y: 180 }
-      ],
-      confidence: 0.75
+      id: 'g1-left',
+      side: 'left',
+      parentBeamId: 'beam-left',
+      basePoint: { x: 155, y: 400 },
+      tipPoint: { x: 120, y: 360 },
+      length: 4.8,
+      label: 'G1',
+      confidence: 0.85
     },
     {
-      id: 'tine-left-2',
-      label: 'Left Tine 2',
-      points: [
-        { x: 160, y: 280 },
-        { x: 155, y: 200 }
-      ],
-      confidence: 0.68
+      id: 'g2-left',
+      side: 'left',
+      parentBeamId: 'beam-left',
+      basePoint: { x: 165, y: 320 },
+      tipPoint: { x: 100, y: 240 },
+      length: 9.2,
+      label: 'G2',
+      confidence: 0.78
     },
     {
-      id: 'tine-right-1',
-      label: 'Right Tine 1',
-      points: [
-        { x: 360, y: 250 },
-        { x: 370, y: 180 }
-      ],
+      id: 'g3-left',
+      side: 'left',
+      parentBeamId: 'beam-left',
+      basePoint: { x: 175, y: 270 },
+      tipPoint: { x: 130, y: 180 },
+      length: 10.5,
+      label: 'G3',
+      confidence: 0.72
+    },
+    {
+      id: 'g1-right',
+      side: 'right',
+      parentBeamId: 'beam-right',
+      basePoint: { x: 345, y: 400 },
+      tipPoint: { x: 380, y: 360 },
+      length: 5.1,
+      label: 'G1',
       confidence: 0.82
     },
     {
-      id: 'tine-right-2',
-      label: 'Right Tine 2',
-      points: [
-        { x: 340, y: 280 },
-        { x: 345, y: 200 }
-      ],
-      confidence: 0.71
-    }
-  ],
-  spreads: [
+      id: 'g2-right',
+      side: 'right',
+      parentBeamId: 'beam-right',
+      basePoint: { x: 335, y: 320 },
+      tipPoint: { x: 400, y: 240 },
+      length: 8.9,
+      label: 'G2',
+      confidence: 0.75
+    },
     {
-      id: 'spread-base',
-      label: 'Spread',
-      points: [
-        { x: 150, y: 450 },
-        { x: 350, y: 450 }
-      ],
-      confidence: 0.85
+      id: 'g3-right',
+      side: 'right',
+      parentBeamId: 'beam-right',
+      basePoint: { x: 325, y: 270 },
+      tipPoint: { x: 370, y: 180 },
+      length: 10.2,
+      label: 'G3',
+      confidence: 0.68
     }
   ],
-  burrs: []
+  spread: {
+    leftPoint: { x: 150, y: 450 },
+    rightPoint: { x: 350, y: 450 },
+    distance: 18.5,
+    confidence: 0.90
+  },
+  circumferences: [
+    {
+      id: 'h1-left',
+      side: 'left',
+      label: 'H1',
+      position: { x: 155, y: 430 },
+      circumference: 4.2,
+      confidence: 0.65
+    },
+    {
+      id: 'h2-left',
+      side: 'left',
+      label: 'H2',
+      position: { x: 160, y: 360 },
+      circumference: 3.8,
+      confidence: 0.58
+    },
+    {
+      id: 'h1-right',
+      side: 'right',
+      label: 'H1',
+      position: { x: 345, y: 430 },
+      circumference: 4.3,
+      confidence: 0.62
+    },
+    {
+      id: 'h2-right',
+      side: 'right',
+      label: 'H2',
+      position: { x: 340, y: 360 },
+      circumference: 3.9,
+      confidence: 0.55
+    }
+  ]
 };
 
 // In production, this would come from route params or state
 const EXAMPLE_RACK_ID = 'example-rack-id';
 
 export default function MeshReviewPage() {
-  const [mesh, setMesh] = useState<MeshData>(EXAMPLE_MESH);
+  const [graph, setGraph] = useState<MeasurementGraph>(EXAMPLE_GRAPH);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleMeshChange = (newMesh: MeshData) => {
-    setMesh(newMesh);
+  const handleGraphChange = (newGraph: MeasurementGraph) => {
+    setGraph(newGraph);
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // Convert MeshData to measurement_graphs format
-      const adjustedGraph = {
-        beams: mesh.beams,
-        tines: mesh.tines,
-        spreads: mesh.spreads,
-        burrs: mesh.burrs,
-        confidence: calculateOverallConfidence(mesh)
-      };
-
       const response = await fetch('/api/admin/mesh-adjustments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rack_id: EXAMPLE_RACK_ID,
-          adjusted_graph: adjustedGraph,
+          adjusted_graph: graph,
           notes: 'Manual adjustment via mesh review'
         })
       });
@@ -128,22 +178,35 @@ export default function MeshReviewPage() {
   };
 
   const handleReset = () => {
-    setMesh(EXAMPLE_MESH);
+    setGraph(EXAMPLE_GRAPH);
     toast.info('Mesh reset to original values');
   };
 
   // Calculate overall confidence from all measurements
-  const calculateOverallConfidence = (meshData: MeshData): number => {
-    const allMeasurements = [
-      ...meshData.beams,
-      ...meshData.tines,
-      ...meshData.spreads,
-      ...meshData.burrs
+  const calculateOverallConfidence = (g: MeasurementGraph): number => {
+    const confidences = [
+      g.beams.left.confidence,
+      g.beams.right.confidence,
+      g.spread.confidence,
+      ...g.tines.map(t => t.confidence),
+      ...g.circumferences.map(c => c.confidence)
     ];
-    if (allMeasurements.length === 0) return 0;
-    const sum = allMeasurements.reduce((acc, m) => acc + m.confidence, 0);
-    return sum / allMeasurements.length;
+    if (confidences.length === 0) return 0;
+    const sum = confidences.reduce((acc, c) => acc + c, 0);
+    return sum / confidences.length;
   };
+
+  const allConfidences = [
+    graph.beams.left.confidence,
+    graph.beams.right.confidence,
+    graph.spread.confidence,
+    ...graph.tines.map(t => t.confidence),
+    ...graph.circumferences.map(c => c.confidence)
+  ];
+
+  const highConfCount = allConfidences.filter(c => c >= 0.75).length;
+  const medConfCount = allConfidences.filter(c => c >= 0.5 && c < 0.75).length;
+  const lowConfCount = allConfidences.filter(c => c < 0.5).length;
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -167,8 +230,8 @@ export default function MeshReviewPage() {
             <CardContent>
               <MeshOverlay
                 imageUrl="https://images.unsplash.com/photo-1559493676-04b0d2e201e9?w=800&h=600&fit=crop"
-                mesh={mesh}
-                onMeshChange={handleMeshChange}
+                graph={graph}
+                onGraphChange={handleGraphChange}
               />
             </CardContent>
           </Card>
@@ -183,19 +246,19 @@ export default function MeshReviewPage() {
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between py-2 border-b">
                 <span className="text-muted-foreground">Main Beams</span>
-                <span className="font-medium">{mesh.beams.length}</span>
+                <span className="font-medium">2</span>
               </div>
               <div className="flex justify-between py-2 border-b">
                 <span className="text-muted-foreground">Tines</span>
-                <span className="font-medium">{mesh.tines.length}</span>
+                <span className="font-medium">{graph.tines.length}</span>
               </div>
               <div className="flex justify-between py-2 border-b">
-                <span className="text-muted-foreground">Spreads</span>
-                <span className="font-medium">{mesh.spreads.length}</span>
+                <span className="text-muted-foreground">Spread</span>
+                <span className="font-medium">{graph.spread.distance.toFixed(1)}&quot;</span>
               </div>
               <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Burrs</span>
-                <span className="font-medium">{mesh.burrs.length}</span>
+                <span className="text-muted-foreground">Circumferences</span>
+                <span className="font-medium">{graph.circumferences.length}</span>
               </div>
 
               {/* Confidence summary */}
@@ -205,14 +268,14 @@ export default function MeshReviewPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">Overall:</span>
                     <span className="font-medium">
-                      {(calculateOverallConfidence(mesh) * 100).toFixed(1)}%
+                      {(calculateOverallConfidence(graph) * 100).toFixed(1)}%
                     </span>
                   </div>
                 </div>
                 {[
-                  { name: 'High (0.75+)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence >= 0.75).length, color: 'bg-green-500' },
-                  { name: 'Medium (0.5-0.75)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence >= 0.5 && m.confidence < 0.75).length, color: 'bg-blue-500' },
-                  { name: 'Low (<0.5)', count: [...mesh.beams, ...mesh.tines, ...mesh.spreads, ...mesh.burrs].filter(m => m.confidence < 0.5).length, color: 'bg-amber-500' }
+                  { name: 'High (0.75+)', count: highConfCount, color: 'bg-green-500' },
+                  { name: 'Medium (0.5-0.75)', count: medConfCount, color: 'bg-blue-500' },
+                  { name: 'Low (<0.5)', count: lowConfCount, color: 'bg-amber-500' }
                 ].map(({ name, count, color }) => (
                   <div key={name} className="flex items-center gap-2 text-xs">
                     <div className={`${color} w-3 h-3 rounded-full`} />
