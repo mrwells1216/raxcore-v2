@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { ScoringForm, type ScoringFormHandle } from './scoring-form'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
+import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
@@ -17,7 +18,7 @@ import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } 
 import type { ScanAngle } from '@/lib/capture/scan-session'
 import { toast } from 'sonner'
 
-type ScoreInputMode = 'upload' | 'scan'
+type ScoreInputMode = 'guided-upload' | 'smart-scan'
 
 interface CapturedImage {
   id: string
@@ -36,7 +37,7 @@ interface ScoringWizardProps {
 
 export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
   const scoringFormRef = useRef<ScoringFormHandle>(null)
-  const [inputMode, setInputMode] = useState<ScoreInputMode>('upload')
+  const [inputMode, setInputMode] = useState<ScoreInputMode>('smart-scan')
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
   const [selectedImageAngles, setSelectedImageAngles] = useState<(CaptureAngle | null)[]>([])
@@ -296,78 +297,36 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
           }}
         >
           <ModeTab
-            active={inputMode === 'upload'}
-            onClick={() => setInputMode('upload')}
-            icon={<Upload className="h-3.5 w-3.5" />}
-            label="Upload Photos"
+            active={inputMode === 'smart-scan'}
+            onClick={() => setInputMode('smart-scan')}
+            icon={<Camera className="h-3.5 w-3.5" />}
+            label="Smart Scan"
+            badge="Best"
           />
           <ModeTab
-            active={inputMode === 'scan'}
-            onClick={() => setInputMode('scan')}
-            icon={<Camera className="h-3.5 w-3.5" />}
-            label="Scan Rack"
-            badge="Best"
+            active={inputMode === 'guided-upload'}
+            onClick={() => setInputMode('guided-upload')}
+            icon={<Upload className="h-3.5 w-3.5" />}
+            label="Guided Upload"
           />
         </div>
       </Section>
 
       {/* ── 2. Photo upload / scan ───────────────────────────────────────── */}
-      <Section label="Add Photos">
-        {inputMode === 'upload' && (
-          <PhotoGridUploader images={gridImages} onChange={handleGridChange} />
+      <Section label={inputMode === 'smart-scan' ? 'Capture' : 'Add Photos'}>
+        {inputMode === 'guided-upload' && (
+          <GuidedUploadPanel onChange={handleGridChange} initialImages={gridImages} />
         )}
-        {inputMode === 'scan' && (
-          <ScanModePanel onFilesReady={handleScanFilesReady} />
+        {inputMode === 'smart-scan' && (
+          <ScanModePanel
+            onFilesReady={handleScanFilesReady}
+            onFallbackToUpload={() => setInputMode('guided-upload')}
+          />
         )}
       </Section>
 
-      {/* ── 3. Organize photos (only when images exist) ─────────────────── */}
-      {inputMode === 'upload' && gridImages.length > 0 && (
-        <Section label="Organize Photos" sublabel="Optional — helps improve scoring accuracy">
-          <div className="grid grid-cols-3 gap-2">
-            {(['full_rack', 'left_antler', 'right_antler'] as const).map(group => {
-              const grouped = gridImages.filter(img => img.group === group)
-              const groupLabel = group === 'full_rack' ? 'Full Rack' : group === 'left_antler' ? 'Left Antler' : 'Right Antler'
-              const accent =
-                group === 'full_rack'    ? 'border-primary/30 bg-primary/5'    :
-                group === 'left_antler'  ? 'border-blue-500/25 bg-blue-500/5'  :
-                                           'border-amber-500/25 bg-amber-500/5'
-              const dot =
-                group === 'full_rack'    ? 'bg-primary'    :
-                group === 'left_antler'  ? 'bg-blue-500'   :
-                                           'bg-amber-500'
-
-              return (
-                <div key={group} className={cn('rounded-xl border p-2.5 space-y-2', accent)}>
-                  <div className="flex items-center gap-1.5">
-                    <span className={cn('h-2 w-2 rounded-full shrink-0', dot)} />
-                    <span className="text-[11px] font-semibold text-foreground leading-none">{groupLabel}</span>
-                  </div>
-                  {grouped.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-1">
-                      {grouped.map(img => (
-                        <div key={img.id} className="aspect-square rounded-lg overflow-hidden">
-                          <img src={img.url} alt={groupLabel} className="w-full h-full object-cover" />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-muted-foreground leading-tight">
-                      Tap a photo &darr; to assign
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground text-center">
-            Tap the arrow on any photo above to assign it to a group
-          </p>
-        </Section>
-      )}
-
-      {/* ── 4. Capture quality feedback ─────────────────────────────────── */}
-      {inputMode === 'upload' && gridImages.length > 0 && captureQuality && (
+      {/* ── 3. Capture quality feedback (guided upload mode only) ──────── */}
+      {inputMode === 'guided-upload' && gridImages.length > 0 && captureQuality && (
         <Section label="Coverage">
           <div className="space-y-3">
             {/* Coverage meter */}

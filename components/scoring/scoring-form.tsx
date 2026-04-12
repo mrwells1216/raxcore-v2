@@ -510,69 +510,77 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
         </Collapsible>
 
         {/* Precision Mode */}
-        <div className="rounded-lg border px-4 py-3 space-y-3">
-          <div>
-            <div className="text-sm font-medium">Precision mode</div>
-            <div className="text-xs text-muted-foreground">
-              Tell the app if your photos include a known-size reference object or scale marker.
+        <div className="rounded-xl border border-border/60 bg-card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-semibold text-foreground">Precision Mode</h3>
+              <p className="text-xs text-muted-foreground">
+                Include a known-size reference for improved accuracy
+              </p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Switch
               checked={!!watchPrecisionModeEnabled}
-              onChange={(e) => form.setValue('precision_mode_enabled', e.target.checked, { shouldDirty: true })}
-              className="rounded border"
+              onCheckedChange={(checked) => form.setValue('precision_mode_enabled', checked, { shouldDirty: true })}
             />
-            <label className="text-sm">I included a size reference in my photos</label>
           </div>
 
           {watchPrecisionModeEnabled && (
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Reference type</label>
-                <select
-                  className="w-full rounded-md border px-3 py-2 text-sm"
+            <div className="space-y-4 pt-2 border-t border-border/40">
+              {/* Reference type selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Reference Type</label>
+                <Select
                   value={watchReferenceType ?? 'none'}
-                  onChange={(e) =>
-                    form.setValue('reference_type', e.target.value as any, { shouldDirty: true })
-                  }
+                  onValueChange={(value) => form.setValue('reference_type', value as any, { shouldDirty: true })}
                 >
-                  <option value="none">None selected</option>
-                  <option value="ruler">Ruler / tape</option>
-                  <option value="credit_card">Credit card</option>
-                  <option value="coin">Coin</option>
-                  <option value="aruco_marker">Printed marker</option>
-                  <option value="other_known_object">Other known-size object</option>
-                </select>
+                  <SelectTrigger className="min-h-[48px]">
+                    <SelectValue placeholder="Select reference type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None selected</SelectItem>
+                    <SelectItem value="ruler">Ruler / tape measure</SelectItem>
+                    <SelectItem value="credit_card">Credit card</SelectItem>
+                    <SelectItem value="coin">Coin</SelectItem>
+                    <SelectItem value="aruco_marker">Printed marker</SelectItem>
+                    <SelectItem value="other_known_object">Other known-size object</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
-                <textarea
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  rows={2}
+              {/* Reference notes */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Notes (optional)</label>
+                <Textarea
                   placeholder="Example: standard credit card placed next to left beam"
+                  className="min-h-[60px] resize-none"
                   value={watchReferenceNotes ?? ''}
-                  onChange={(e) =>
-                    form.setValue('reference_notes', e.target.value, { shouldDirty: true })
-                  }
+                  onChange={(e) => form.setValue('reference_notes', e.target.value, { shouldDirty: true })}
                 />
               </div>
 
-              <div className="rounded-md border bg-neutral-50 px-3 py-2 text-xs">
+              {/* Status indicator */}
+              <div className={cn(
+                'rounded-xl border px-3 py-2.5 text-xs',
+                referenceModeSummary.referencePresent
+                  ? 'border-primary/25 bg-primary/5 text-foreground'
+                  : 'border-border/40 bg-secondary/30 text-muted-foreground'
+              )}>
                 {referenceModeSummary.referencePresent ? (
-                  <>
-                    Reference recorded: <span className="font-medium">{referenceModeSummary.referenceType}</span>
-                    {referenceModeSummary.shouldBoostConfidenceLater ? (
-                      <div className="mt-1 text-[11px] text-muted-foreground">
-                        This reference type is a strong candidate for future scale-aware confidence improvements.
-                      </div>
-                    ) : null}
-                  </>
+                  <div className="flex items-start gap-2">
+                    <div className="h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    </div>
+                    <div>
+                      <span className="font-medium">Reference: {referenceModeSummary.referenceType}</span>
+                      {referenceModeSummary.shouldBoostConfidenceLater && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Strong candidate for future scale-aware confidence improvements
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <>Precision mode is on, but no reference type has been selected yet.</>
+                  <span>Select a reference type above</span>
                 )}
               </div>
             </div>
