@@ -5,6 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { MeshOverlay } from '@/components/admin/mesh-overlay';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { 
+  scoreFromGraph, 
+  getGraphConfidence, 
+  getLowConfidenceMeasurements 
+} from '@/lib/scoring';
 import type { MeasurementGraph } from '@/lib/types';
 
 // Example measurement graph - in production, this comes from the API
@@ -144,6 +149,7 @@ const EXAMPLE_RACK_ID = 'example-rack-id';
 
 export default function MeshReviewPage() {
   const [graph, setGraph] = useState<MeasurementGraph>(EXAMPLE_GRAPH);
+  const [originalGraph] = useState<MeasurementGraph>(EXAMPLE_GRAPH);
   const [isSaving, setIsSaving] = useState(false);
 
   const handleGraphChange = (newGraph: MeasurementGraph) => {
@@ -182,19 +188,13 @@ export default function MeshReviewPage() {
     toast.info('Mesh reset to original values');
   };
 
-  // Calculate overall confidence from all measurements
-  const calculateOverallConfidence = (g: MeasurementGraph): number => {
-    const confidences = [
-      g.beams.left.confidence,
-      g.beams.right.confidence,
-      g.spread.confidence,
-      ...g.tines.map(t => t.confidence),
-      ...g.circumferences.map(c => c.confidence)
-    ];
-    if (confidences.length === 0) return 0;
-    const sum = confidences.reduce((acc, c) => acc + c, 0);
-    return sum / confidences.length;
-  };
+  // Calculate score and confidence using the scoring engine
+  const score = scoreFromGraph(graph);
+  const overallConfidence = getGraphConfidence(graph);
+  const lowConfMeasurements = getLowConfidenceMeasurements(graph, 0.5);
+  
+  // Check if graph has been modified
+  const hasChanges = JSON.stringify(graph) !== JSON.stringify(originalGraph);
 
   const allConfidences = [
     graph.beams.left.confidence,
@@ -213,7 +213,7 @@ export default function MeshReviewPage() {
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold">Mesh Review &amp; Adjustment</h1>
         <p className="text-muted-foreground">
-          Review AI-detected rack geometry and fine-tune measurements. Changes create new graph versions.
+          Review AI-detected rack geometry and fine-tune measurements. Score updates in real-time as you adjust control points.
         </p>
       </div>
 
@@ -224,7 +224,7 @@ export default function MeshReviewPage() {
             <CardHeader>
               <CardTitle>Rack Geometry Overlay</CardTitle>
               <CardDescription>
-                Click any measurement to adjust its position. Color intensity indicates confidence level.
+                Click any control point (white circles) to select it, then use arrow keys or buttons to adjust.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -232,6 +232,7 @@ export default function MeshReviewPage() {
                 imageUrl="https://images.unsplash.com/photo-1559493676-04b0d2e201e9?w=800&h=600&fit=crop"
                 graph={graph}
                 onGraphChange={handleGraphChange}
+                showScore={true}
               />
             </CardContent>
           </Card>
@@ -239,50 +240,107 @@ export default function MeshReviewPage() {
 
         {/* Stats sidebar */}
         <div className="space-y-4">
+          {/* Score breakdown */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Mesh Statistics</CardTitle>
+              <CardTitle className="text-base">Score Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-2">
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Left Beam</span>
+                  <span className="font-medium">{score.leftBeam.toFixed(1)}&quot;</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Right Beam</span>
+                  <span className="font-medium">{score.rightBeam.toFixed(1)}&quot;</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Inside Spread</span>
+                  <span className="font-medium">{score.spread.toFixed(1)}&quot;</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Left Tines ({score.tines.left.length})</span>
+                  <span className="font-medium">
+                    {score.tines.left.reduce((s, t) => s + t.length, 0).toFixed(1)}&quot;
+                  </span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Right Tines ({score.tines.right.length})</span>
+                  <span className="font-medium">
+                    {score.tines.right.reduce((s, t) => s + t.length, 0).toFixed(1)}&quot;
+                  </span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-muted-foreground">Circumferences</span>
+                  <span className="font-medium">
+                    {[...score.circumferences.left, ...score.circumferences.right]
+                      .reduce((s, c) => s + c.value, 0).toFixed(1)}&quot;
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t space-y-2">
+                <div className="flex justify-between py-1 text-base">
+                  <span className="font-medium">Gross Score</span>
+                  <span className="font-bold">{score.grossScore.toFixed(1)}</span>
+                </div>
+                <div className="flex justify-between py-1 text-destructive">
+                  <span>Deductions</span>
+                  <span>-{score.deductions.toFixed(1)}</span>
+                </div>
+                <div className="flex justify-between py-1 text-lg text-primary">
+                  <span className="font-bold">Net Score</span>
+                  <span className="font-bold">{score.netScore.toFixed(1)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Confidence summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Confidence Summary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between py-2 border-b">
-                <span className="text-muted-foreground">Main Beams</span>
-                <span className="font-medium">2</span>
+                <span className="text-muted-foreground">Overall Confidence</span>
+                <span className="font-medium">
+                  {(overallConfidence * 100).toFixed(1)}%
+                </span>
               </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-muted-foreground">Tines</span>
-                <span className="font-medium">{graph.tines.length}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b">
-                <span className="text-muted-foreground">Spread</span>
-                <span className="font-medium">{graph.spread.distance.toFixed(1)}&quot;</span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Circumferences</span>
-                <span className="font-medium">{graph.circumferences.length}</span>
-              </div>
+              
+              {[
+                { name: 'High (75%+)', count: highConfCount, color: 'bg-green-500' },
+                { name: 'Medium (50-75%)', count: medConfCount, color: 'bg-blue-500' },
+                { name: 'Low (<50%)', count: lowConfCount, color: 'bg-amber-500' }
+              ].map(({ name, count, color }) => (
+                <div key={name} className="flex items-center gap-2 text-xs">
+                  <div className={`${color} w-3 h-3 rounded-full`} />
+                  <span>{name}: {count}</span>
+                </div>
+              ))}
 
-              {/* Confidence summary */}
-              <div className="pt-2 border-t space-y-2">
-                <p className="font-medium">Confidence Summary</p>
-                <div className="text-xs space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Overall:</span>
-                    <span className="font-medium">
-                      {(calculateOverallConfidence(graph) * 100).toFixed(1)}%
-                    </span>
+              {/* Low confidence items that need review */}
+              {lowConfMeasurements.length > 0 && (
+                <div className="pt-2 border-t">
+                  <p className="text-xs font-medium text-amber-600 mb-2">
+                    Needs Review ({lowConfMeasurements.length})
+                  </p>
+                  <div className="space-y-1">
+                    {lowConfMeasurements.slice(0, 5).map((item) => (
+                      <div key={item.id} className="text-xs flex justify-between">
+                        <span className="text-muted-foreground capitalize">
+                          {item.type}: {item.id}
+                        </span>
+                        <span className="text-amber-600">
+                          {(item.confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                {[
-                  { name: 'High (0.75+)', count: highConfCount, color: 'bg-green-500' },
-                  { name: 'Medium (0.5-0.75)', count: medConfCount, color: 'bg-blue-500' },
-                  { name: 'Low (<0.5)', count: lowConfCount, color: 'bg-amber-500' }
-                ].map(({ name, count, color }) => (
-                  <div key={name} className="flex items-center gap-2 text-xs">
-                    <div className={`${color} w-3 h-3 rounded-full`} />
-                    <span>{name}: {count}</span>
-                  </div>
-                ))}
-              </div>
+              )}
             </CardContent>
           </Card>
 
@@ -290,15 +348,15 @@ export default function MeshReviewPage() {
           <div className="space-y-2">
             <Button 
               onClick={handleSave} 
-              disabled={isSaving}
+              disabled={isSaving || !hasChanges}
               className="w-full"
             >
-              {isSaving ? 'Saving...' : 'Save Adjustments'}
+              {isSaving ? 'Saving...' : hasChanges ? 'Save Adjustments' : 'No Changes'}
             </Button>
             <Button 
               variant="outline"
               onClick={handleReset}
-              disabled={isSaving}
+              disabled={isSaving || !hasChanges}
               className="w-full"
             >
               Reset to Original
@@ -312,12 +370,16 @@ export default function MeshReviewPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-xs text-muted-foreground">
               <ol className="list-decimal list-inside space-y-1">
-                <li>Click any measurement line to select it</li>
-                <li>Use arrow buttons to move by 1 pixel</li>
-                <li>Adjust until alignment is perfect</li>
-                <li>Click reset to deselect</li>
+                <li>Click any white control point to select it</li>
+                <li>Use arrow keys (1px) or Shift+Arrow (5px) to move</li>
+                <li>Score updates automatically as you adjust</li>
+                <li>Press Escape or click elsewhere to deselect</li>
                 <li>Save creates a new versioned graph</li>
               </ol>
+              <p className="pt-2 border-t">
+                Focus on low-confidence measurements (amber) first - 
+                they need the most human verification.
+              </p>
             </CardContent>
           </Card>
         </div>
