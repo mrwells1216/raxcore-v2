@@ -9,7 +9,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
-import { isOptionalTableError } from '@/lib/supabase/admin'
+
 
 // ============================================================
 // TYPES
@@ -156,12 +156,9 @@ export async function logEvent(input: RuntimeEventInput): Promise<void> {
     }
     const { error: evErr } = await supabase.from('runtime_events').insert(row)
     if (evErr) {
-      // Silently skip when table doesn't exist yet (schema cache miss).
-      // All other errors are downgraded to a console.warn so monitoring
-      // never throws into the calling code path.
-      if (!isOptionalTableError(evErr)) {
-        console.warn('[monitoring] runtime_events insert failed:', evErr.message)
-      }
+      // runtime_events is optional telemetry — silently discard all insert
+      // failures (missing table, schema mismatch, 4xx from PostgREST, etc.)
+      // so monitoring never pollutes the dev console or blocks the main path.
     }
   } catch {
     // Monitoring must never break the app

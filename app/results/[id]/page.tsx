@@ -4,6 +4,7 @@ import { AppHeader } from '@/components/app-header'
 import { ResultClient } from './result-client'
 import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ShareBuckButton } from '@/components/scoring/share-buck-button'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
@@ -12,13 +13,47 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   const { buck, images, prediction } = await getBuckBundle(id)
   if (!buck || !prediction) return notFound()
 
+  // Fetch latest completed precision pass run for this prediction
+  const supabase = await createServerSupabaseClient()
+  const { data: latestPrecisionPassRun } = await supabase
+    .from('reverse_runs')
+    .select('id,best_summary,completed_at,status')
+    .eq('prediction_id', prediction.id)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  // Fetch review data with completeness info
+  const { data: review } = await supabase
+    .from('reviewed_score_sheets')
+    .select('id,reviewed_gross,reviewed_net,is_training_truth,review_status,updated_at')
+    .eq('prediction_id', prediction.id)
+    .maybeSingle()
+
+  // Fetch training sample for official status
+  const { data: trainingSample } = await supabase
+    .from('training_samples')
+    .select('is_official,review_completeness,reviewed_at')
+    .eq('prediction_id', prediction.id)
+    .maybeSingle()
+
   // Extract scoring metadata from raw response if available
   const rawResponse = (prediction as unknown as { raw_response?: { scoringMethod?: string; visionModelUsed?: string | null; visionConfidence?: number | null; learningSummary?: unknown; confidenceExplanation?: string[]; scalingReferencesUsed?: string[] } }).raw_response
   const scoringMethod = rawResponse?.scoringMethod as ScoringResult['scoringMethod'] || 'heuristic'
   const visionModelUsed = rawResponse?.visionModelUsed || null
   const visionConfidence = rawResponse?.visionConfidence || null
 
-  const result: ScoringResult = {
+  const result: ScoringResult & { 
+    latestPrecisionPassRun?: typeof latestPrecisionPassRun
+    review?: {
+      reviewed_gross: number | null
+      reviewed_net: number | null
+      is_official: boolean
+      review_completeness: number
+    } | null
+    precisionPassGross?: number | null
+  } = {
     buck: { ...buck, property_id: (buck as any).property_id || null },
     images,
     prediction,
@@ -37,6 +72,14 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
     visionModelUsed,
     visionConfidence,
     learningSummary: rawResponse?.learningSummary as ScoringResult['learningSummary'],
+    latestPrecisionPassRun: latestPrecisionPassRun ?? undefined,
+    review: review && trainingSample ? {
+      reviewed_gross: review.reviewed_gross,
+      reviewed_net: review.reviewed_net,
+      is_official: trainingSample.is_official ?? false,
+      review_completeness: trainingSample.review_completeness ?? 0,
+    } : null,
+    precisionPassGross: latestPrecisionPassRun?.best_summary?.predicted_gross ?? null,
   }
 
   const formData: ScoringFormData = {

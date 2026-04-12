@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { hasRequiredServerEnv } from '@/lib/env'
 import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
+import { computeConfidence } from '@/lib/confidence/engine'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
 import { 
@@ -33,6 +34,9 @@ import {
 import { maybeNotifyLowCredits } from '@/lib/billing/notifications'
 import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
+import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
+import { getBestCalibrationProfile, applyCalibration } from '@/lib/calibration'
+import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -91,8 +95,16 @@ export async function POST(request: Request) {
     const nickname = formData.get('nickname') as string | null
     const location = formData.get('location') as string | null
     const harvestDate = formData.get('harvest_date') as string | null
-    const intakeQualityRaw = formData.get('intake_quality') as string | null
-    const userId = formData.get('user_id') as string | null
+  const intakeQualityRaw = formData.get('intake_quality') as string | null
+  const selectedImageAnglesRaw = formData.get('selected_image_angles') as string | null
+  const captureQualitySummaryRaw = formData.get('capture_quality_summary') as string | null
+  const precisionModeEnabledRaw = formData.get('precision_mode_enabled') as string | null
+  const referenceTypeRaw = formData.get('reference_type') as string | null
+  const referenceNotesRaw = formData.get('reference_notes') as string | null
+  const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
+  const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
+  const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
+  const userId = formData.get('user_id') as string | null
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -328,6 +340,73 @@ export async function POST(request: Request) {
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
+    // Log capture quality metadata
+    if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
+      let captureQualityData: any = {}
+      try {
+        if (selectedImageAnglesRaw) captureQualityData.selectedImageAngles = JSON.parse(selectedImageAnglesRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      try {
+        if (captureQualitySummaryRaw) captureQualityData.summary = JSON.parse(captureQualitySummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] capture quality check', captureQualityData)
+    }
+
+    // Log reference mode metadata (precision mode)
+    if (precisionModeEnabledRaw || referenceModeSummaryRaw) {
+      let referenceModeData: any = {}
+      referenceModeData.precisionModeEnabled = precisionModeEnabledRaw === 'true'
+      if (referenceTypeRaw) referenceModeData.referenceType = referenceTypeRaw
+      if (referenceNotesRaw) referenceModeData.referenceNotes = referenceNotesRaw
+      try {
+        if (referenceModeSummaryRaw) referenceModeData.summary = JSON.parse(referenceModeSummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] reference mode summary', referenceModeData)
+    }
+
+    // Log image diagnostics (quality analysis)
+    if (imageDiagnosticsRaw || imageDiagnosticsSummaryRaw) {
+      let imageDiagnosticsData: any = {}
+      try {
+        if (imageDiagnosticsRaw) imageDiagnosticsData.diagnostics = JSON.parse(imageDiagnosticsRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      try {
+        if (imageDiagnosticsSummaryRaw) imageDiagnosticsData.summary = JSON.parse(imageDiagnosticsSummaryRaw)
+      } catch (e) {
+        // ignore parse error
+      }
+      console.log('[score] image diagnostics', imageDiagnosticsData)
+    }
+
+    // Parse metadata for confidence engine
+    let captureQualitySummary: any = null
+    let imageDiagnosticsSummary: any = null
+    let referenceModeSummary: any = null
+
+    try {
+      if (captureQualitySummaryRaw) captureQualitySummary = JSON.parse(captureQualitySummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+    try {
+      if (imageDiagnosticsSummaryRaw) imageDiagnosticsSummary = JSON.parse(imageDiagnosticsSummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+    try {
+      if (referenceModeSummaryRaw) referenceModeSummary = JSON.parse(referenceModeSummaryRaw)
+    } catch (e) {
+      // ignore parse error
+    }
+
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
       images: resolvedImages,
@@ -367,8 +446,83 @@ export async function POST(request: Request) {
       }
     }
 
+    // Apply calibration from training data using unified calibration engine
+    const rawPredictedGross =
+      typeof scoringResult?.predictedGross === 'number'
+        ? scoringResult.predictedGross
+        : null
+
+    const rawPredictedNet =
+      typeof scoringResult?.predictedNet === 'number'
+        ? scoringResult.predictedNet
+        : null
+
+    const rawConfidence =
+      typeof scoringResult?.confidencePercent === 'number'
+        ? scoringResult.confidencePercent
+        : null
+
+    const calibrationProfile = await getBestCalibrationProfile({
+      state: state ?? null,
+      rackType: rackType ?? null,
+    })
+
+    const calibrated = applyCalibration({
+      rawGross: rawPredictedGross,
+      rawNet: rawPredictedNet,
+      rawConfidence,
+      profile: calibrationProfile,
+    })
+
+    // Preserve raw values
+    ;(scoringResult as any).rawPredictedGross = rawPredictedGross
+    ;(scoringResult as any).rawPredictedNet = rawPredictedNet
+    ;(scoringResult as any).rawConfidence = rawConfidence
+
+    // Apply calibrated values
+    scoringResult.predictedGross = calibrated.calibratedGross
+    scoringResult.predictedNet = calibrated.calibratedNet
+    scoringResult.confidencePercent = calibrated.calibratedConfidence
+
+    ;(scoringResult as any).calibrationApplied = calibrated.calibrationApplied
+    ;(scoringResult as any).calibrationMeta = calibrated.calibrationMeta
+
+    console.log('[score] calibration applied', {
+      applied: calibrated.calibrationApplied,
+      meta: calibrated.calibrationMeta,
+      rawGross: rawPredictedGross,
+      calibratedGross: calibrated.calibratedGross,
+    })
+
     // Get active model version
     const model = await getActiveModelVersion()
+
+    const fieldProvenance = buildFieldProvenanceFromMeasurements({
+      measurements: scoringResult.measurements,
+      source:
+        scoringResult.scoringMethod === 'vision'
+          ? 'ai_raw'
+          : 'fallback',
+      grossScore: scoringResult.predictedGross ?? null,
+      netScore: scoringResult.predictedNet ?? null,
+      confidence:
+        scoringResult.confidencePercent >= 75
+          ? 'high'
+          : scoringResult.confidencePercent >= 50
+            ? 'medium'
+            : 'low',
+      confidenceScore: scoringResult.confidencePercent ?? null,
+    })
+
+    console.log('[score] field provenance created', {
+      source:
+        scoringResult.scoringMethod === 'vision'
+          ? 'ai_raw'
+          : 'fallback',
+      hasMeasurements: !!scoringResult.measurements,
+      grossScore: scoringResult.predictedGross ?? null,
+      netScore: scoringResult.predictedNet ?? null,
+    })
 
     // Store prediction
     const prediction = await createPrediction({
@@ -412,6 +566,7 @@ export async function POST(request: Request) {
         ...scoringResult,
         state,
         rackType,
+        provenance: fieldProvenance,
         // B&C-style score sheet for measurement comparison
         scoreSheet: buildScoreSheet(scoringResult.measurements, {
           scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
@@ -420,7 +575,14 @@ export async function POST(request: Request) {
           mainFramePoints: scoringResult.mainFramePoints ?? 10,
         }),
       },
-      intakeQuality: intakeQuality as Record<string, unknown> | null
+      intakeQuality: intakeQuality as Record<string, unknown> | null,
+      imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
+        try {
+          return JSON.parse(imageDiagnosticsSummaryRaw)
+        } catch {
+          return null
+        }
+      })() : null
     })
 
     // Update status to completed
@@ -562,6 +724,66 @@ export async function POST(request: Request) {
       },
     })
 
+    // Compute final confidence using the confidence engine
+    const confidenceResult = computeConfidence({
+      rawConfidence:
+        typeof (scoringResult as any).rawConfidence === 'number'
+          ? (scoringResult as any).rawConfidence
+          : typeof scoringResult?.confidencePercent === 'number'
+            ? scoringResult.confidencePercent
+            : null,
+
+      captureQualitySummary: captureQualitySummary ?? null,
+      imageDiagnosticsSummary: imageDiagnosticsSummary ?? null,
+      referenceModeSummary: referenceModeSummary ?? null,
+
+      measurements:
+        scoringResult?.measurements ??
+        scoringResult?.rawAiResponse?.measurements ??
+        null,
+
+      isFallback: Boolean(scoringResult?.isFallback),
+      calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
+      calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
+    })
+
+    ;(scoringResult as any).rawConfidence =
+      typeof (scoringResult as any).rawConfidence === 'number'
+        ? (scoringResult as any).rawConfidence
+        : confidenceResult.rawConfidence
+
+    scoringResult.confidencePercent = confidenceResult.finalConfidence
+    ;(scoringResult as any).confidenceBand = confidenceResult.confidenceBand
+    ;(scoringResult as any).confidenceReasons = confidenceResult.reasons
+    ;(scoringResult as any).confidenceComponentScores = confidenceResult.componentScores
+
+    console.log('[score] confidence engine result', {
+      rawConfidence: confidenceResult.rawConfidence,
+      finalConfidence: confidenceResult.finalConfidence,
+      confidenceBand: confidenceResult.confidenceBand,
+      reasons: confidenceResult.reasons,
+      componentScores: confidenceResult.componentScores,
+    })
+
+    // Phase 50: Shadow precision pass — fire-and-forget, 10% rollout
+    // Does not block the response; failures are logged only.
+    {
+      const SHADOW_ROLLOUT_PERCENT = 10
+      const shouldShadow = Math.random() * 100 < SHADOW_ROLLOUT_PERCENT
+      if (shouldShadow) {
+        ;(async () => {
+          try {
+            await startPrecisionPass({
+              predictionId: prediction.id,
+              requestedByUserId: userId ?? null,
+            })
+          } catch (shadowErr) {
+            console.error('[score] Phase 50 shadow precision pass enqueue failed (non-blocking):', shadowErr)
+          }
+        })()
+      }
+    }
+
     // Return result
     return NextResponse.json({
       // Include buck object for UI to access id and property_id
@@ -578,8 +800,8 @@ export async function POST(request: Request) {
         low: adjustedErrorBandLow,
         high: adjustedErrorBandHigh
       },
-      confidence: adjustedConfidence >= 75 ? 'high' : adjustedConfidence >= 50 ? 'medium' : 'low',
-      confidencePercent: adjustedConfidence,
+      confidence: (scoringResult as any).confidenceBand ?? (scoringResult.confidencePercent >= 75 ? 'high' : scoringResult.confidencePercent >= 50 ? 'medium' : 'low'),
+      confidencePercent: scoringResult.confidencePercent,
       measurements: scoringResult.measurements,
       landmarks: scoringResult.landmarks,
       stateCalibration: scoringResult.stateCalibration,

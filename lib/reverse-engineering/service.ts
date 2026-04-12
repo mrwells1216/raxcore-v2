@@ -14,6 +14,8 @@ import { evaluateHypothesis } from './evaluate'
 import { buildErrorDecomposition } from './error-decomposition'
 import { onReversePassComplete } from '@/lib/supervision/hooks'
 import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
+import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
+import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 
 /**
  * Build a fallback Measurements object estimated from the prediction score.
@@ -130,6 +132,8 @@ const DEV_ANON_USER_ID = 'dev-anonymous-user'
 export async function startPrecisionPass(params: {
   predictionId: string
   requestedByUserId: string
+  /** Optional manual overrides — fields corrected by the user before re-running. */
+  manualOverrides?: Record<string, unknown> | null
 }): Promise<{ run: ReverseRunRow; jobId: string }> {
   const supabase = await getServiceSupabase()
 
@@ -208,7 +212,12 @@ export async function startPrecisionPass(params: {
     .from('durable_jobs')
     .insert({
       job_type: 'reverse_precision_pass',
-      payload: { reverseRunId: run.id },
+      payload: {
+        reverseRunId: run.id,
+        ...(params.manualOverrides && Object.keys(params.manualOverrides).length > 0
+          ? { manualOverrides: params.manualOverrides }
+          : {}),
+      },
       priority: 'high',
       max_retries: 1,
       requested_by_user_id: params.requestedByUserId,
@@ -324,7 +333,48 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
 
     if (!pred || !buck) throw new Error('Missing prediction or buck')
 
-    const measurements = pickMeasurements(pred as Prediction)
+    let measurements = pickMeasurements(pred as Prediction)
+
+    // ── Apply manual overrides if present in the job payload ────────────────
+    // Look up the durable_job for this run to retrieve any manualOverrides that
+    // were submitted with the precision-pass request.
+    {
+      const { data: jobRow } = await supabase
+        .from('durable_jobs')
+        .select('payload')
+        .contains('payload', { reverseRunId })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      const overrides =
+        (jobRow?.payload as Record<string, unknown> | undefined)?.manualOverrides as
+          | Record<string, unknown>
+          | undefined
+
+      if (overrides && Object.keys(overrides).length > 0) {
+        console.log('[precision-pass] Measurement source: manual_override + raw_ai_response.measurements')
+        const overrideKeys = Object.keys(overrides)
+        const allKeys = Object.keys(measurements) as Array<keyof Measurements>
+
+        for (const k of allKeys) {
+          const source = overrideKeys.includes(k) ? 'manual_override' : 'raw_ai_response'
+          console.log(`[precision-pass]   - ${k}: ${source}`)
+        }
+
+        // Apply overrides to the baseline measurements object
+        for (const [key, entry] of Object.entries(overrides)) {
+          const overrideValue =
+            entry !== null && typeof entry === 'object' && 'value' in (entry as object)
+              ? (entry as { value: unknown }).value
+              : entry
+          if (typeof overrideValue === 'number' && key in measurements) {
+            ;(measurements as unknown as Record<string, unknown>)[key] = overrideValue
+          }
+        }
+      }
+    }
+
     const { gross: baseGross, net: baseNet } = calculateGrossNet(measurements)
 
     // Build baseline bundle
@@ -406,6 +456,7 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
     // Step 3: Evaluate candidates
     const evalRows: unknown[] = []
     let best: { candidateId: string; score: number; summary: Record<string, unknown> } | null = null
+    let bestMeasurements: Measurements | null = null
 
     for (const c of (insertedCandidates ?? []) as HypothesisCandidateRow[]) {
       const res = evaluateHypothesis({
@@ -435,6 +486,7 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
       })
 
       if (!best || res.totalScore > best.score) {
+        bestMeasurements = res.measurements
         best = {
           candidateId: c.id,
           score: res.totalScore,
@@ -458,10 +510,40 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
 
     if (!best) throw new Error('No best hypothesis found')
 
+    if (!bestMeasurements) {
+      console.warn('[precision-pass] no bestMeasurements found, falling back to base measurements')
+      bestMeasurements = measurements
+    }
+
+    const precisionPassProvenance = bestMeasurements
+      ? buildFieldProvenanceFromMeasurements({
+          measurements: bestMeasurements,
+          source: 'precision_pass',
+          grossScore: Number(best.summary.predicted_gross ?? baseGross),
+          netScore: Number(best.summary.predicted_net ?? baseNet),
+          confidence: 'medium',
+          confidenceScore: null,
+        })
+      : null
+
+    const precisionPassScoreSheet = bestMeasurements
+      ? buildScoreSheet(bestMeasurements, {
+          scalingReference: 'precision_pass_refinement',
+          rackType: ((buck as Buck)?.rack_type as 'typical' | 'non-typical') ?? 'typical',
+          confidenceNotes: ['Generated from winning precision-pass hypothesis'],
+          mainFramePoints: (pred as Prediction)?.main_frame_points ?? 10,
+        })
+      : null
+
     // Step 4: Finalize
     await supabase.from('reverse_runs').update({
       best_hypothesis_id: best.candidateId,
-      best_summary: best.summary,
+      best_summary: {
+        ...best.summary,
+        measurements: bestMeasurements,
+        provenance: precisionPassProvenance,
+        scoreSheet: precisionPassScoreSheet,
+      },
       status: 'completed',
       completed_at: new Date().toISOString(),
     }).eq('id', reverseRunId)

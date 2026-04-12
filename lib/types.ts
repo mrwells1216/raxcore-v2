@@ -4,6 +4,7 @@ export type RackType = 'typical' | 'non-typical'
 export type HarvestMethod = 'bow' | 'rifle' | 'muzzleloader' | 'crossbow' | 'other'
 export type SourceType = 'live_deer' | 'mounted_photo' | 'european_mount' | 'trail_cam' | 'harvest_photo' | 'other'
 export type AngleType = 'front' | 'left' | 'right' | 'back' | 'other'
+export type CaptureAngle = 'front' | 'left' | 'right' | 'detail' | 'unknown'
 export type CaptureMethod = 'camera' | 'upload'
 export type CaptureDevice = 'iphone' | 'android' | 'digital_camera' | 'photo_of_photo' | 'vintage_photo' | 'unknown'
 export type BuckStatus = 'pending' | 'processing' | 'completed' | 'failed'
@@ -361,6 +362,12 @@ export interface ScoringFormData {
   estimated_irregular_points_count?: number
   abnormal_point_notes?: string
   abnormal_point_tags?: AbnormalPointTag[]
+  // Capture quality metadata
+  selected_image_angles?: CaptureAngle[]
+  // Precision mode: reference object / scale marker
+  precision_mode_enabled?: boolean
+  reference_type?: 'none' | 'ruler' | 'credit_card' | 'coin' | 'aruco_marker' | 'other_known_object'
+  reference_notes?: string
 }
 
 export interface GroundTruthFormData {

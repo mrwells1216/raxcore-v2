@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import useSWR from 'swr'
 import { 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
   RefreshCw, Plus, Check, Ruler, Box, Cpu, Calculator,
@@ -17,6 +18,7 @@ import { GroundTruthForm } from './ground-truth-form'
 import { ConfidenceIndicator, ConfidenceExplanation, ConfidenceBadge } from './confidence-indicator'
 import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-display'
 import { BuckLocationLink } from '@/components/map/buck-location-link'
+import { buildMeasurementDiff } from '@/lib/review/measurement-diff'
 import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
@@ -25,6 +27,7 @@ import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
+import type { FieldProvenanceMap } from '@/lib/rules-engine'
 import type { ScoringResult, ScoringFormData, GroundTruthFormData, IntakeQualitySummary, Buck } from '@/lib/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -172,13 +175,242 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
   }
 }
 
+function extractPrecisionPassPayload(result: any): {
+  grossScore: number | null
+  netScore: number | null
+  scoreSheet: any | null
+  provenance: FieldProvenanceMap | null
+  runId: string | null
+} | null {
+  const run =
+    result?.latestPrecisionPassRun ??
+    result?.precisionPassRun ??
+    result?.reverseRun ??
+    null
+
+  const bestSummary = run?.best_summary ?? null
+  if (!bestSummary) return null
+
+  const grossRaw = bestSummary?.predicted_gross ?? null
+  const netRaw = bestSummary?.predicted_net ?? null
+
+  const grossScore =
+    typeof grossRaw === 'number' ? grossRaw : Number(grossRaw ?? null)
+
+  const netScore =
+    typeof netRaw === 'number' ? netRaw : Number(netRaw ?? null)
+
+  const scoreSheet =
+    bestSummary?.scoreSheet ??
+    bestSummary?.score_sheet ??
+    null
+
+  const provenance =
+    (bestSummary?.provenance as FieldProvenanceMap | null) ??
+    (bestSummary?.field_provenance as FieldProvenanceMap | null) ??
+    null
+
+  if (!scoreSheet && !provenance && grossScore == null && netScore == null) {
+    return null
+  }
+
+  console.log('[precision-pass] extracted persisted payload', {
+    runId: run?.id ?? null,
+    hasScoreSheet: !!scoreSheet,
+    hasProvenance: !!provenance,
+    grossScore,
+    netScore,
+  })
+
+  return {
+    grossScore,
+    netScore,
+    scoreSheet,
+    provenance,
+    runId: run?.id ?? null,
+  }
+}
+
+function extractFieldProvenance(result: any): FieldProvenanceMap | null {
+  // Case 1: reviewed sheet already stored with provenance
+  if (result?.review?.sheet_json?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'review.sheet_json.provenance',
+      hasReview: true,
+      hasPrediction: !!result?.prediction,
+      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
+    })
+    return result.review.sheet_json.provenance as FieldProvenanceMap
+  }
+
+  // Case 2: prediction has direct provenance
+  if (result?.prediction?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'prediction.provenance',
+      hasReview: false,
+      hasPrediction: true,
+      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
+    })
+    return result.prediction.provenance as FieldProvenanceMap
+  }
+
+  // Case 3: provenance stored inside prediction.raw_ai_response
+  if (result?.prediction?.raw_ai_response?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'prediction.raw_ai_response.provenance',
+      hasReview: false,
+      hasPrediction: true,
+      hasRawAiResponse: true,
+    })
+    return result.prediction.raw_ai_response.provenance as FieldProvenanceMap
+  }
+
+  // Case 4: top-level fallback shape
+  if (result?.rawAiResponse?.provenance) {
+    console.log('[provenance] extracted', {
+      source: 'result.rawAiResponse.provenance',
+      hasReview: false,
+      hasPrediction: !!result?.prediction,
+      hasRawAiResponse: true,
+    })
+    return result.rawAiResponse.provenance as FieldProvenanceMap
+  }
+
+  console.log('[provenance] extracted', {
+    source: 'none',
+    hasReview: false,
+    hasPrediction: !!result?.prediction,
+    hasRawAiResponse: !!result?.prediction?.raw_ai_response || !!result?.rawAiResponse,
+  })
+
+  return null
+}
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
+
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
+  const { data: latestRun } = useSWR(
+    result?.prediction?.id
+      ? `/api/reverse/latest-run?predictionId=${result.prediction.id}`
+      : null,
+    fetcher
+  )
+
+  const { data: reviewData } = useSWR(
+    result?.prediction?.id
+      ? `/api/review/save-score-sheet?predictionId=${result.prediction.id}`
+      : null,
+    fetcher
+  )
+
+  const reviewedScoreSheet = reviewData?.reviewedScoreSheet
+    ? {
+        ...reviewData.reviewedScoreSheet,
+        reviewCompleteness: reviewData.reviewCompleteness ?? 0,
+        isOfficial: reviewData.isOfficial ?? false,
+        reviewedGross:
+          reviewData.reviewedScoreSheet?.reviewed_gross ??
+          reviewData.reviewedScoreSheet?.sheet_json?.measurements?.grossScore ??
+          reviewData.reviewedScoreSheet?.sheet_json?.grossScore ??
+          null,
+        reviewedNet:
+          reviewData.reviewedScoreSheet?.reviewed_net ??
+          reviewData.reviewedScoreSheet?.sheet_json?.measurements?.netScore ??
+          reviewData.reviewedScoreSheet?.sheet_json?.netScore ??
+          null,
+        reviewedAt:
+          reviewData.reviewedScoreSheet?.updated_at ??
+          reviewData.reviewedScoreSheet?.reviewed_at ??
+          reviewData.reviewedScoreSheet?.created_at ??
+          null,
+        reviewedBy:
+          reviewData.reviewedScoreSheet?.created_by ??
+          reviewData.reviewedScoreSheet?.reviewed_by ??
+          'human_review',
+      }
+    : null
+
+  const aiMeasurements =
+    result?.prediction?.raw_ai_response?.measurements ??
+    result?.rawAiResponse?.measurements ??
+    result?.prediction?.measurements ??
+    null
+
+  const reviewedMeasurements =
+    reviewedScoreSheet?.sheet_json?.measurements ??
+    reviewedScoreSheet?.sheet_json ??
+    null
+
+  const measurementDiffRows = buildMeasurementDiff({
+    aiMeasurements,
+    reviewedMeasurements,
+  })
+
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showLearning, setShowLearning] = useState(false)
   const [showTrainingForm, setShowTrainingForm] = useState(false)
   const [isSubmittingTraining, setIsSubmittingTraining] = useState(false)
   const [trainingSubmitted, setTrainingSubmitted] = useState(false)
+  const [precisionPassOverride, setPrecisionPassOverride] = useState<{
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: FieldProvenanceMap | null
+    runId: string | null
+  } | null>(null)
+
+  // Refs that gate precision-pass hydration — each runId is applied at most once.
+  // Using refs (not state) ensures these guards don't themselves trigger re-renders.
+  const lastAppliedPrecisionRunIdRef = useRef<string | null>(null)
+  const lastHydratedPersistedRunIdRef = useRef<string | null>(null)
+
+  // Hydrate persisted precision-pass override (from DB / latestRun) exactly once per runId.
+  useEffect(() => {
+    const persisted = extractPrecisionPassPayload({
+      ...result,
+      latestPrecisionPassRun: latestRun ?? result.latestPrecisionPassRun,
+    })
+    if (!persisted?.runId) return
+    if (lastHydratedPersistedRunIdRef.current === persisted.runId) return
+    lastHydratedPersistedRunIdRef.current = persisted.runId
+    console.log('[precision-pass] hydrating persisted override', {
+      runId: persisted.runId,
+      grossScore: persisted.grossScore,
+      netScore: persisted.netScore,
+      hasScoreSheet: !!persisted.scoreSheet,
+      hasProvenance: !!persisted.provenance,
+    })
+    setPrecisionPassOverride(persisted)
+  }, [result, latestRun])
+
+  // Stable callback passed to PrecisionPassCard — must not change identity on re-renders
+  // so PrecisionPassCard's internal useEffect doesn't re-fire after we apply the override.
+  const handlePrecisionPassComplete = useCallback((payload: {
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: any | null
+    runId: string
+  }) => {
+    if (!payload.runId) return
+    if (lastAppliedPrecisionRunIdRef.current === payload.runId) return
+    lastAppliedPrecisionRunIdRef.current = payload.runId
+    console.log('[precision-pass] applying UI override', {
+      runId: payload.runId,
+      hasScoreSheet: !!payload.scoreSheet,
+      hasProvenance: !!payload.provenance,
+      grossScore: payload.grossScore,
+      netScore: payload.netScore,
+    })
+    setPrecisionPassOverride({
+      grossScore: payload.grossScore,
+      netScore: payload.netScore,
+      scoreSheet: payload.scoreSheet,
+      provenance: payload.provenance ?? null,
+      runId: payload.runId,
+    })
+  }, [])
 
   const normalized = normalizeResult(result)
   const { prediction } = result
@@ -259,6 +491,334 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                   </>
                 )}
               </Badge>
+            </div>
+          </div>
+
+          {/* Legitimacy / review status */}
+          {reviewedScoreSheet?.isOfficial ? (
+            <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800 mb-3">
+              Official reviewed score
+            </div>
+          ) : reviewedScoreSheet?.reviewCompleteness ? (
+            <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 mb-3">
+              Partially reviewed ({reviewedScoreSheet.reviewCompleteness}% complete)
+              <div className="mt-1 text-[11px] text-yellow-700">
+                Missing one or more required official-review fields
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-md border bg-neutral-50 px-3 py-2 text-xs mb-3">
+              AI estimated score
+            </div>
+          )}
+
+          {/* Calibration status */}
+          {(() => {
+            const calibrationApplied =
+              result?.prediction?.calibrationApplied ??
+              result?.prediction?.raw_ai_response?.calibrationApplied ??
+              result?.rawAiResponse?.calibrationApplied ??
+              normalized?.calibrationApplied ??
+              false
+
+            const calibrationMeta =
+              result?.prediction?.calibrationMeta ??
+              result?.prediction?.raw_ai_response?.calibrationMeta ??
+              result?.rawAiResponse?.calibrationMeta ??
+              normalized?.calibrationMeta ??
+              null
+
+            return calibrationApplied ? (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Calibrated using reviewed data
+                {calibrationMeta?.profile_type && (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    profile: {calibrationMeta.profile_type}
+                    {calibrationMeta?.sample_count ? (
+                      <> · {calibrationMeta.sample_count} samples</>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null
+          })()}
+
+          {/* Capture quality metadata */}
+          {(() => {
+            const captureQuality = result?.captureQualitySummary as any
+            if (!captureQuality?.coverage) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Capture quality: {captureQuality.coverage.coverageLabel}
+                {captureQuality.coverage.missingAngles?.length ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Missing: {captureQuality.coverage.missingAngles.join(', ')}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })()}
+
+          {/* Precision Mode Metadata */}
+          {(() => {
+            const referenceModeSummary = result?.referenceModeSummary as any ||
+              result?.prediction?.referenceModeSummary as any ||
+              result?.prediction?.raw_ai_response?.referenceModeSummary as any ||
+              null
+            
+            if (!referenceModeSummary?.precisionModeEnabled) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                Precision mode enabled
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Reference type: {referenceModeSummary.referenceType ?? 'unknown'}
+                  {referenceModeSummary.referenceNotes ? (
+                    <> · {referenceModeSummary.referenceNotes}</>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Image Diagnostics */}
+          {(() => {
+            const imageDiagnosticsSummary = result?.imageDiagnosticsSummary as any ||
+              result?.prediction?.imageDiagnosticsSummary as any ||
+              result?.prediction?.raw_ai_response?.imageDiagnosticsSummary as any ||
+              null
+            
+            if (!imageDiagnosticsSummary) return null
+            
+            return (
+              <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
+                <div className="font-medium mb-1">Image quality analysis</div>
+                <div>
+                  Quality: <span className="font-semibold">{imageDiagnosticsSummary.overall}</span>
+                </div>
+                {imageDiagnosticsSummary.poorCount > 0 && (
+                  <div className="mt-1 text-[11px] text-red-700">
+                    {imageDiagnosticsSummary.poorCount} image{imageDiagnosticsSummary.poorCount === 1 ? '' : 's'} may reduce accuracy
+                  </div>
+                )}
+                {imageDiagnosticsSummary.okCount > 0 && imageDiagnosticsSummary.poorCount === 0 && (
+                  <div className="mt-1 text-[11px] text-yellow-700">
+                    {imageDiagnosticsSummary.okCount} image{imageDiagnosticsSummary.okCount === 1 ? '' : 's'} has reduced detail
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Confidence Assessment Panel */}
+          {(() => {
+            const resolvedConfidenceBand =
+              result?.prediction?.confidenceBand ??
+              result?.prediction?.raw_ai_response?.confidenceBand ??
+              result?.rawAiResponse?.confidenceBand ??
+              null
+
+            const resolvedConfidenceReasons =
+              result?.prediction?.confidenceReasons ??
+              result?.prediction?.raw_ai_response?.confidenceReasons ??
+              result?.rawAiResponse?.confidenceReasons ??
+              []
+
+            const resolvedRawConfidence =
+              result?.prediction?.rawConfidence ??
+              result?.prediction?.raw_ai_response?.rawConfidence ??
+              result?.rawAiResponse?.rawConfidence ??
+              null
+
+            if (!resolvedConfidenceBand && resolvedConfidenceReasons?.length === 0) return null
+
+            return (
+              <div className="rounded-lg border px-4 py-4 mb-3">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <div className="text-sm font-medium">Confidence assessment</div>
+                    <div className="text-xs text-muted-foreground">
+                      Structured confidence based on image coverage, quality, measurement completeness, and runtime path
+                    </div>
+                  </div>
+
+                  {resolvedConfidenceBand ? (
+                    <div className="rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize">
+                      {resolvedConfidenceBand}
+                    </div>
+                  ) : null}
+                </div>
+
+                {resolvedRawConfidence != null && (
+                  <div className="text-xs text-muted-foreground mb-2">
+                    Raw confidence: {resolvedRawConfidence}%
+                  </div>
+                )}
+
+                {resolvedConfidenceReasons?.length ? (
+                  <div className="space-y-2">
+                    {resolvedConfidenceReasons.slice(0, 6).map((reason: any, idx: number) => (
+                      <div key={idx} className="rounded-md border px-3 py-2 text-xs">
+                        <div className="font-medium">
+                          {reason.direction === 'boost' ? 'Boost' : 'Penalty'} · {reason.label}
+                        </div>
+                        <div className="text-muted-foreground mt-1">
+                          {reason.details ?? ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    No structured confidence explanation available.
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Reviewed Score Sheet Summary Card */}
+          {reviewedScoreSheet && (
+            <div className="rounded-lg border bg-background px-4 py-4 mb-3">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-sm font-medium">Reviewed score sheet</div>
+                  <div className="text-xs text-muted-foreground">
+                    Human-reviewed measurement summary
+                  </div>
+                </div>
+
+                {reviewedScoreSheet.isOfficial ? (
+                  <div className="rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-800">
+                    Official
+                  </div>
+                ) : (
+                  <div className="rounded-full border border-yellow-200 bg-yellow-50 px-2.5 py-1 text-[11px] font-medium text-yellow-800">
+                    Partial
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed gross</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedGross ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed net</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedNet ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Completeness</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewCompleteness ?? 0}%
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed by</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedBy ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-md border px-3 py-2 col-span-2 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground">Reviewed at</div>
+                  <div className="text-sm font-semibold">
+                    {reviewedScoreSheet.reviewedAt
+                      ? new Date(reviewedScoreSheet.reviewedAt).toLocaleString()
+                      : '-'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Field-level diff view */}
+          {reviewedScoreSheet && measurementDiffRows.length > 0 && (
+            <div className="rounded-lg border bg-background px-4 py-4 mb-3">
+              <div className="mb-3">
+                <div className="text-sm font-medium">Field-level review changes</div>
+                <div className="text-xs text-muted-foreground">
+                  Comparison between AI measurements and reviewed values
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground mb-2">
+                {measurementDiffRows.filter((row) => row.changed).length} changed field(s)
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="py-2 pr-3 font-medium">Field</th>
+                      <th className="py-2 pr-3 font-medium">AI</th>
+                      <th className="py-2 pr-3 font-medium">Reviewed</th>
+                      <th className="py-2 pr-3 font-medium">Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {measurementDiffRows.map((row) => (
+                      <tr
+                        key={row.key}
+                        className={row.changed ? 'border-b bg-yellow-50/40' : 'border-b'}
+                      >
+                        <td className="py-2 pr-3 font-medium">{row.label}</td>
+                        <td className="py-2 pr-3">
+                          {row.aiValue ?? '-'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {row.reviewedValue ?? '-'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {row.delta === null ? '-' : row.delta > 0 ? `+${row.delta}` : row.delta}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Score evolution */}
+          <div className="rounded-md border bg-background px-3 py-3 mb-3">
+            <div className="text-xs font-medium mb-2">Score evolution</div>
+            <div className="space-y-1 text-xs">
+              <div>
+                AI:{' '}
+                {result?.prediction?.rawPredictedGross ??
+                  result?.prediction?.raw_ai_response?.grossScore ??
+                  result?.rawAiResponse?.grossScore ??
+                  result?.prediction?.raw_ai_response?.rawPredictedGross ??
+                  result?.rawAiResponse?.rawPredictedGross ??
+                  '-'}
+              </div>
+              <div>
+                Precision:{' '}
+                {precisionPassOverride?.grossScore ??
+                  result?.latestPrecisionPassRun?.best_summary?.predicted_gross ??
+                  '-'}
+              </div>
+              <div>
+                Calibrated:{' '}
+                {normalized?.grossScore ??
+                  result?.prediction?.predictedGross ??
+                  '-'}
+              </div>
+              {reviewedScoreSheet?.reviewedGross != null && (
+                <div className="font-semibold">
+                  Final: {reviewedScoreSheet.reviewedGross}
+                </div>
+              )}
             </div>
           </div>
 
@@ -409,11 +969,27 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         <ScoreSheetEditor
           predictionId={normalized.predictionId}
           buckId={result.buck.id}
-          aiScoreSheet={result.scoreSheet}
-          aiGrossScore={normalized.grossScore}
-          aiNetScore={normalized.netScore}
+          aiScoreSheet={
+            precisionPassOverride?.scoreSheet
+              ? precisionPassOverride.scoreSheet
+              : result.scoreSheet
+          }
+          aiGrossScore={precisionPassOverride?.grossScore ?? normalized.grossScore}
+          aiNetScore={precisionPassOverride?.netScore ?? normalized.netScore}
           aiConfidence={normalized.confidencePercent}
           isFallback={normalized.isFallback}
+          aiFieldProvenance={
+            precisionPassOverride?.provenance
+              ? precisionPassOverride.provenance
+              : extractFieldProvenance(result)
+          }
+          precisionRunId={precisionPassOverride?.runId ?? null}
+          imageUrl={imageUrls[0] ?? null}
+          landmarks={
+            (result?.prediction?.raw_ai_response as any)?.landmarks ??
+            (result?.rawAiResponse as any)?.landmarks ??
+            null
+          }
         />
       )}
       {/* Measurements Breakdown (Legacy) */}
@@ -450,7 +1026,12 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
       />
 
       {/* Precision Pass - Phase 50 */}
-      {normalized.predictionId && <PrecisionPassCard predictionId={normalized.predictionId} />}
+      {normalized.predictionId && (
+        <PrecisionPassCard
+          predictionId={normalized.predictionId}
+          onPrecisionPassComplete={handlePrecisionPassComplete}
+        />
+      )}
 
       {/* Structural Hypothesis - Phase 51 */}
       {normalized.predictionId && <StructuralHypothesisCard predictionId={normalized.predictionId} />}

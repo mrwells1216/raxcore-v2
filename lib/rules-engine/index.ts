@@ -79,6 +79,9 @@ export {
   describeMutation,
 } from './compute'
 
+// Provenance builder
+export { buildFieldProvenanceFromMeasurements } from './field-provenance'
+
 // Format converters
 export {
   fromFlatMeasurements,

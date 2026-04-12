@@ -1,15 +1,25 @@
+/**
+ * Legacy calibration dashboard.
+ * Kept temporarily for backward compatibility while the app uses
+ * the canonical calibration system:
+ * - lib/calibration.ts
+ * - /api/calibration/rebuild
+ * - calibration_profiles (profile_key/profile_type/etc)
+ */
+
 'use client'
 
 import { useState } from 'react'
 import useSWR from 'swr'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { CalibrationProfileEditor } from './calibration-profile-editor'
 import { CalibrationPreview } from './calibration-preview'
 import { ModelVersionManager } from './model-version-manager'
 import { CalibrationAuditTrail } from './calibration-audit-trail'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings2, GitCompare, History, RotateCcw } from 'lucide-react'
+import { Loader2, Settings2, GitCompare, History, RotateCcw, RefreshCw, Database } from 'lucide-react'
 import type { CalibrationProfile, ModelVersionWithCalibration, CalibrationChange, ModelActivationEvent } from '@/lib/types'
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
@@ -30,6 +40,13 @@ interface AuditData {
 
 export function CalibrationDashboard() {
   const [activeTab, setActiveTab] = useState('profiles')
+  const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildResult, setRebuildResult] = useState<{
+    ok: boolean
+    message?: string
+    profilesSaved?: number
+    segmentedCount?: number
+  } | null>(null)
 
   const { data: calibrationData, error: calibrationError, isLoading: calibrationLoading, mutate: mutateCalibration } = 
     useSWR<CalibrationData>('/api/admin/calibration', fetcher)
@@ -70,6 +87,42 @@ export function CalibrationDashboard() {
   const handleRefresh = () => {
     mutateCalibration()
     mutateModels()
+  }
+
+  const handleRebuildFromTraining = async () => {
+    setRebuilding(true)
+    setRebuildResult(null)
+
+    try {
+      const response = await fetch('/api/training/rebuild-calibration', {
+        method: 'POST',
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        setRebuildResult({
+          ok: false,
+          message: data.error || 'Failed to rebuild calibration profiles',
+        })
+        return
+      }
+
+      setRebuildResult({
+        ok: true,
+        message: data.message,
+        profilesSaved: data.profilesSaved,
+        segmentedCount: data.segmentedCount,
+      })
+
+      handleRefresh()
+    } catch (err) {
+      setRebuildResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Network error',
+      })
+    } finally {
+      setRebuilding(false)
+    }
   }
 
   return (
@@ -127,6 +180,59 @@ export function CalibrationDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Training-Derived Calibration */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Database className="h-4 w-4" />
+                Training-Derived Calibration
+              </CardTitle>
+              <CardDescription className="text-xs mt-1">
+                Rebuild calibration profiles from reviewed training samples
+              </CardDescription>
+            </div>
+            <Button
+              onClick={handleRebuildFromTraining}
+              disabled={rebuilding}
+              variant="outline"
+              size="sm"
+            >
+              {rebuilding ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Rebuild from Training
+            </Button>
+          </div>
+        </CardHeader>
+        {rebuildResult && (
+          <CardContent className="pt-0">
+            <Alert
+              variant={rebuildResult.ok ? 'default' : 'destructive'}
+              className={rebuildResult.ok ? 'border-green-500/20 bg-green-500/5' : ''}
+            >
+              <AlertDescription className={rebuildResult.ok ? 'text-green-600' : ''}>
+                {rebuildResult.message ? (
+                  rebuildResult.message
+                ) : rebuildResult.ok ? (
+                  <>
+                    Rebuilt {rebuildResult.profilesSaved} profile(s) successfully
+                    {rebuildResult.segmentedCount != null && rebuildResult.segmentedCount > 0 && (
+                      <> ({rebuildResult.segmentedCount} segmented)</>
+                    )}
+                  </>
+                ) : (
+                  'Failed to rebuild profiles'
+                )}
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        )}
+      </Card>
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

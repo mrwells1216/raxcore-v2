@@ -39,10 +39,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#6b4c3a' },
-    { media: '(prefers-color-scheme: dark)', color: '#3d2a1f' },
-  ],
+  themeColor: '#161412',
 }
 
 export default function RootLayout({
@@ -51,12 +48,12 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background" suppressHydrationWarning>
+    <html lang="en" className="dark bg-background" suppressHydrationWarning>
       <body className="font-sans antialiased min-h-svh">
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
-          enableSystem
+          enableSystem={false}
           disableTransitionOnChange
         >
           {children}

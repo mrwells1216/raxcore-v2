@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import useSWR from 'swr'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,14 +15,32 @@ const fetcher = (url: string) => fetch(url).then(r => r.json())
 interface PrecisionPassCardProps {
   predictionId: string
   className?: string
+  /** Optional manual overrides to include in the precision-pass request body */
+  manualOverrides?: Record<string, unknown> | null
+  onPrecisionPassComplete?: (payload: {
+    grossScore: number | null
+    netScore: number | null
+    scoreSheet: any | null
+    provenance: any | null
+    runId: string
+  }) => void
 }
 
-export function PrecisionPassCard({ predictionId, className }: PrecisionPassCardProps) {
+export function PrecisionPassCard({
+  predictionId,
+  className,
+  manualOverrides,
+  onPrecisionPassComplete,
+}: PrecisionPassCardProps) {
   const [runId, setRunId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+
+  // Guard: fire onPrecisionPassComplete at most once per runId regardless of
+  // how many times the parent re-renders or the effect re-evaluates.
+  const firedRunIdRef = useRef<string | null>(null)
 
   // Stop polling once completed or failed — no need to keep hitting the API
   const shouldPoll = runId && initialStatus !== 'completed' && initialStatus !== 'failed'
@@ -51,6 +69,55 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
   const isFailed = status === 'failed'
   const isRunning = status === 'running' || status === 'queued'
 
+  useEffect(() => {
+    if (!runId || !isComplete || !best || !onPrecisionPassComplete) return
+    // Never fire for the same runId twice — guards against effect re-runs caused
+    // by the parent passing a new onPrecisionPassComplete reference on re-render.
+    if (firedRunIdRef.current === runId) return
+
+    const normalizedScoreSheet =
+      (best as any)?.scoreSheet ??
+      (best as any)?.score_sheet ??
+      null
+
+    const normalizedProvenance =
+      (best as any)?.provenance ??
+      (best as any)?.field_provenance ??
+      null
+
+    const gross =
+      typeof best.predicted_gross === 'number'
+        ? best.predicted_gross
+        : Number(best.predicted_gross ?? null)
+
+    const net =
+      typeof best.predicted_net === 'number'
+        ? best.predicted_net
+        : Number(best.predicted_net ?? null)
+
+    console.log('[precision-pass] normalized payload', {
+      runId,
+      hasScoreSheet: !!normalizedScoreSheet,
+      hasProvenance: !!normalizedProvenance,
+      gross,
+      net,
+    })
+
+    if (!normalizedScoreSheet && !normalizedProvenance && gross == null && net == null) {
+      console.warn('[precision-pass] skipping empty UI payload', { runId })
+      return
+    }
+
+    firedRunIdRef.current = runId
+    onPrecisionPassComplete({
+      grossScore: gross,
+      netScore: net,
+      scoreSheet: normalizedScoreSheet,
+      provenance: normalizedProvenance,
+      runId,
+    })
+  }, [runId, isComplete, best, onPrecisionPassComplete])
+
   async function start() {
     setIsStarting(true)
     setError(null)
@@ -60,8 +127,14 @@ export function PrecisionPassCard({ predictionId, className }: PrecisionPassCard
     }
     
     try {
-      const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, { 
-        method: 'POST' 
+      const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(manualOverrides && Object.keys(manualOverrides).length > 0
+            ? { manualOverrides }
+            : {}),
+        }),
       })
       const json = await res.json()
       

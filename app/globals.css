@@ -47,45 +47,59 @@
 }
 
 .dark {
-  /* RAXcore Premium Outdoor Theme - Dark Mode */
-  --background: oklch(0.14 0.018 35);
-  --foreground: oklch(0.92 0.012 50);
-  --card: oklch(0.18 0.018 35);
-  --card-foreground: oklch(0.92 0.012 50);
-  --popover: oklch(0.18 0.018 35);
-  --popover-foreground: oklch(0.92 0.012 50);
-  --primary: oklch(0.58 0.10 35);
-  --primary-foreground: oklch(0.14 0.018 35);
-  --secondary: oklch(0.24 0.018 35);
-  --secondary-foreground: oklch(0.92 0.012 50);
-  --muted: oklch(0.24 0.018 35);
-  --muted-foreground: oklch(0.6 0.012 50);
-  --accent: oklch(0.65 0.10 45);
-  --accent-foreground: oklch(0.14 0.018 35);
-  --destructive: oklch(0.45 0.18 25);
-  --destructive-foreground: oklch(0.92 0 0);
-  --border: oklch(0.30 0.018 35);
-  --input: oklch(0.30 0.018 35);
-  --ring: oklch(0.58 0.10 35);
-  --chart-1: oklch(0.58 0.10 35);
-  --chart-2: oklch(0.65 0.10 45);
-  --chart-3: oklch(0.55 0.08 200);
-  --chart-4: oklch(0.7 0.10 60);
-  --chart-5: oklch(0.6 0.14 30);
-  --sidebar: oklch(0.16 0.018 35);
-  --sidebar-foreground: oklch(0.92 0.012 50);
-  --sidebar-primary: oklch(0.58 0.10 35);
-  --sidebar-primary-foreground: oklch(0.14 0.018 35);
-  --sidebar-accent: oklch(0.24 0.018 35);
-  --sidebar-accent-foreground: oklch(0.92 0.012 50);
-  --sidebar-border: oklch(0.30 0.018 35);
-  --sidebar-ring: oklch(0.58 0.10 35);
-  
-  /* Custom tokens */
-  --success: oklch(0.58 0.10 35);
-  --success-foreground: oklch(0.14 0 0);
-  --warning: oklch(0.7 0.16 75);
-  --warning-foreground: oklch(0.15 0.02 40);
+  /* RAXCORE — gunmetal dark + distressed bronze */
+  --background: #161412;
+  --foreground: #e8dcc8;
+  --card: #1e1b18;
+  --card-foreground: #e8dcc8;
+  --popover: #1e1b18;
+  --popover-foreground: #e8dcc8;
+
+  /* Bronze is the primary brand metal */
+  --primary: #a07828;
+  --primary-foreground: #0e0d0b;
+  --secondary: #252118;
+  --secondary-foreground: #c8b890;
+  --muted: #252118;
+  --muted-foreground: #7a6d55;
+  --accent: #d4a84b;
+  --accent-foreground: #0e0d0b;
+  --destructive: #8b2c2c;
+  --destructive-foreground: #e8dcc8;
+  --border: #3a3220;
+  --input: #2a2418;
+  --ring: #a07828;
+
+  /* Charts */
+  --chart-1: #a07828;
+  --chart-2: #d4a84b;
+  --chart-3: #4a7c44;
+  --chart-4: #c8903a;
+  --chart-5: #7a5020;
+
+  /* Sidebar */
+  --sidebar: #131110;
+  --sidebar-foreground: #e8dcc8;
+  --sidebar-primary: #a07828;
+  --sidebar-primary-foreground: #0e0d0b;
+  --sidebar-accent: #252118;
+  --sidebar-accent-foreground: #c8b890;
+  --sidebar-border: #3a3220;
+  --sidebar-ring: #a07828;
+
+  /* Semantic */
+  --success: #4a7c44;
+  --success-foreground: #e8dcc8;
+  --warning: #c8903a;
+  --warning-foreground: #0e0d0b;
+
+  /* RAXCORE bronze scale — used in inline styles throughout the app */
+  --bronze-light: #d4a84b;
+  --bronze-mid:   #a07828;
+  --bronze-dark:  #5a4010;
+
+  /* Scan / tactical green */
+  --scan-green: #5ab850;
 }
 
 @theme inline {
@@ -131,6 +145,10 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-bronze-light: var(--bronze-light);
+  --color-bronze-mid: var(--bronze-mid);
+  --color-bronze-dark: var(--bronze-dark);
+  --color-scan-green: var(--scan-green);
 }
 
 @layer base {
