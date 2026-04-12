@@ -37,6 +37,7 @@ import { ManualCorrectionPanel } from './manual-correction-panel'
 import {
   getMeasurementDisplayConfidence,
 } from '@/lib/scoring/measurement-display-confidence'
+import { cn } from '@/lib/utils'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { CorrectedMeasurements } from '@/lib/review/types'
 import {
