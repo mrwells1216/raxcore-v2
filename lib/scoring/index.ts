@@ -29,3 +29,5 @@ export * from './reference-consensus'
 export * from './image-angle-scoring'
 export * from './training-mode'
 export * from './real-confidence-engine'
+// Step 9: D-PAD adjustment for precise landmark fine-tuning
+export * from './dpad-adjustment'
