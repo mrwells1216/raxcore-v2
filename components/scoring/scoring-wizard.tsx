@@ -63,14 +63,17 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   }, [])
 
   const handleGridChange = useCallback((imgs: GridImage[]) => {
-    setGridImages(imgs)
-    if (imgs.length > 0) setDetailsOpen(true)
-    setSelectedImageAngles(prev => {
-      const updated = [...prev]
-      while (updated.length < imgs.length) updated.push(null)
-      return updated.slice(0, imgs.length)
+    // Use requestAnimationFrame to avoid setState during render chain
+    requestAnimationFrame(() => {
+      setGridImages(imgs)
+      if (imgs.length > 0) setDetailsOpen(true)
+      setSelectedImageAngles(prev => {
+        const updated = [...prev]
+        while (updated.length < imgs.length) updated.push(null)
+        return updated.slice(0, imgs.length)
+      })
+      updateIntakeQuality(imgs)
     })
-    updateIntakeQuality(imgs)
   }, [updateIntakeQuality])
 
   const handleScanFilesReady = useCallback(async (files: File[], angles: ScanAngle[]) => {
