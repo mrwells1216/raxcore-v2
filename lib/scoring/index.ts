@@ -25,3 +25,9 @@ export * from './multi-view-service'
 export * from './multi-view-uncertainty'
 // Phase 54: Weighted multi-reference consensus engine
 export * from './reference-consensus'
+// Phase 60: Image angle scoring, training mode, and real confidence
+export * from './image-angle-scoring'
+export * from './training-mode'
+export * from './real-confidence-engine'
+// Step 9: D-PAD adjustment for precise landmark fine-tuning
+export * from './dpad-adjustment'

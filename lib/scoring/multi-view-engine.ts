@@ -30,6 +30,12 @@ import type {
 import { analyzesCrossViewConflicts } from './cross-view-conflict'
 import type { GeometryConsistencyResult } from './geometry-consistency'
 import { checkGeometryConsistency } from './geometry-consistency'
+// Phase 60: Image angle scoring and real confidence
+import type { ImageAngleScore, MultiImageAngleAnalysis } from './image-angle-scoring'
+import { scoreImageForAngle, analyzeMultiImageAngles, computeWeightedFusionForFamily } from './image-angle-scoring'
+import type { ConfidenceResult, FamilyConfidenceInput } from './real-confidence-engine'
+import { computeRealConfidence } from './real-confidence-engine'
+import type { ImageDiagnostics } from './image-diagnostics'
 
 // ============================================================================
 // TYPES
@@ -125,6 +131,9 @@ export interface MultiViewResult {
   geometryConsistency: GeometryConsistencyResult | null
   processingTimeMs: number
   debugInfo: MultiViewDebugInfo
+  // Phase 60: Enhanced angle analysis and confidence
+  angleAnalysis?: MultiImageAngleAnalysis
+  realConfidence?: ConfidenceResult
 }
 
 export interface MultiViewDebugInfo {
@@ -144,6 +153,8 @@ export interface MultiViewInput {
   baseMeasurements: Measurements
   earsFullyVisible?: boolean
   geometryConsistencyInput?: GeometryConsistencyResult
+  // Phase 60: Image diagnostics for per-angle scoring
+  imageDiagnostics?: ImageDiagnostics[]
 }
 
 // ============================================================================
@@ -225,8 +236,26 @@ export function processMultiView(input: MultiViewInput): MultiViewResult {
     return buildSingleViewResult(mvSetId, input, startTime, debugInfo)
   }
 
-  // Stage 1: Build view graph
+  // Stage 0: Per-image angle scoring (Phase 60)
   let stageStart = Date.now()
+  const angleAnalysis = analyzeMultiImageAngles(
+    input.views.map((view, index) => ({
+      index,
+      angleType: view.angleType,
+      angleConfidence: view.angleConfidence,
+      landmarks: view.landmarks,
+      diagnostics: input.imageDiagnostics?.[index] || null,
+      measurements: view.measurements,
+    }))
+  )
+  debugInfo.stages.push({
+    name: 'angle_scoring',
+    durationMs: Date.now() - stageStart,
+    result: `Coverage: ${angleAnalysis.coverageQuality}, gaps: ${angleAnalysis.coverageGaps.join(', ') || 'none'}`
+  })
+
+  // Stage 1: Build view graph
+  stageStart = Date.now()
   const viewGraph = buildViewGraph(input.views, input.baseMeasurements, debugInfo)
   debugInfo.stages.push({ 
     name: 'build_view_graph', 
@@ -328,6 +357,36 @@ export function processMultiView(input: MultiViewInput): MultiViewResult {
     result: `Consistency: ${geometryConsistency.tier}`
   })
 
+  // Stage 9: Compute real confidence (Phase 60)
+  stageStart = Date.now()
+  const familyInputs: FamilyConfidenceInput[] = familyFusionDetails.map(detail => ({
+    family: detail.family,
+    values: detail.primaryViews.map(idx => ({
+      imageIndex: idx,
+      value: detail.fusedValue,
+      confidence: detail.fusedConfidence,
+    })),
+    fusedValue: detail.fusedValue,
+    fusedConfidence: detail.fusedConfidence,
+  }))
+
+  const realConfidence = computeRealConfidence(
+    angleAnalysis,
+    familyInputs,
+    solution.fusedMeasurements,
+    solution.crossViewAgreementScore,
+    undefined // Historical summaries can be loaded async if needed
+  )
+  
+  // Update solution confidence with real confidence
+  solution.scoreConfidence = realConfidence.overallConfidence / 100
+  
+  debugInfo.stages.push({
+    name: 'real_confidence',
+    durationMs: Date.now() - stageStart,
+    result: `Confidence: ${realConfidence.overallConfidence}% (${realConfidence.tier})`
+  })
+
   return {
     mvSetId,
     status: 'completed',
@@ -338,6 +397,8 @@ export function processMultiView(input: MultiViewInput): MultiViewResult {
     geometryConsistency,
     processingTimeMs: Date.now() - startTime,
     debugInfo,
+    angleAnalysis,
+    realConfidence,
   }
 }
 

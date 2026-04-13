@@ -148,11 +148,16 @@ export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
         await videoRef.current.play()
       }
       setIsStreaming(true)
-    } catch (err) {
-      console.error('[scan-mode] camera start failed:', err)
-      setCameraError('Camera access denied. Tap to retry.')
-      setIsStreaming(false)
-    }
+  } catch (err) {
+  // Handle AbortError gracefully (tab lost focus, React re-render interrupted stream)
+  if (err instanceof Error && err.name === 'AbortError') {
+    console.warn('[scan-mode] camera aborted, will retry on next mount')
+    return
+  }
+  console.error('[scan-mode] camera start failed:', err)
+  setCameraError('Camera access denied. Tap to retry.')
+  setIsStreaming(false)
+  }
   }, [])
 
   useEffect(() => {
