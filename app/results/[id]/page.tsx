@@ -6,12 +6,19 @@ import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ShareBuckButton } from '@/components/scoring/share-buck-button'
+import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const { buck, images, prediction } = await getBuckBundle(id)
   if (!buck || !prediction) return notFound()
+
+  // Resolve the effective measurement graph (persisted > derived > none)
+  const effectiveMeasurementGraph = await loadEffectiveMeasurementGraph(
+    buck.id,
+    { latestPrediction: prediction as unknown as Record<string, unknown> }
+  )
 
   // Fetch latest completed precision pass run for this prediction
   const supabase = await createServerSupabaseClient()
@@ -53,6 +60,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       review_completeness: number
     } | null
     precisionPassGross?: number | null
+    effectiveMeasurementGraph?: typeof effectiveMeasurementGraph
   } = {
     buck: { ...buck, property_id: (buck as any).property_id || null },
     images,
@@ -80,6 +88,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       review_completeness: trainingSample.review_completeness ?? 0,
     } : null,
     precisionPassGross: latestPrecisionPassRun?.best_summary?.predicted_gross ?? null,
+    effectiveMeasurementGraph,
   }
 
   const formData: ScoringFormData = {

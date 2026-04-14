@@ -193,6 +193,44 @@ function buildCircumferences(leftBeam: Beam, rightBeam: Beam): CircumferencePoin
   return circumferences;
 }
 
+/**
+ * Extract the AntlerMeasurementGraph from a raw prediction record.
+ * Handles all known storage shapes:
+ *   - prediction.measurementGraph
+ *   - prediction.measurement_graph
+ *   - prediction.rawResponse.measurementGraph
+ *   - prediction.raw_response.measurementGraph
+ *
+ * Returns null if no graph is found or the payload does not have the
+ * expected AntlerMeasurementGraph shape (nodes array required).
+ */
+export function extractPredictionDetectionGraph(
+  prediction: Record<string, unknown> | null | undefined
+): AntlerMeasurementGraph | null {
+  if (!prediction) return null
+
+  const candidates = [
+    prediction.measurementGraph,
+    prediction.measurement_graph,
+    (prediction.rawResponse as Record<string, unknown> | null | undefined)?.measurementGraph,
+    (prediction.raw_response as Record<string, unknown> | null | undefined)?.measurementGraph,
+    (prediction.raw_response as Record<string, unknown> | null | undefined)?.measurement_graph,
+  ]
+
+  for (const candidate of candidates) {
+    if (
+      candidate &&
+      typeof candidate === 'object' &&
+      'nodes' in (candidate as Record<string, unknown>) &&
+      Array.isArray((candidate as AntlerMeasurementGraph).nodes)
+    ) {
+      return candidate as AntlerMeasurementGraph
+    }
+  }
+
+  return null
+}
+
 export function convertDetectionGraphToMeasurementGraph(
   detectionGraph: AntlerMeasurementGraph
 ): MeasurementGraph {

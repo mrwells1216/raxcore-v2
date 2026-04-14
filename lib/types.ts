@@ -4551,6 +4551,23 @@ export type GraphSource = 'front' | 'left' | 'right' | 'fused'
 /** Tine label identifiers */
 export type TineLabel = 'G1' | 'G2' | 'G3' | 'G4' | 'unknown'
 
+/** How visible/reliable a measurement is */
+export type MeasurementVisibility = 'visible' | 'inferred' | 'corrected'
+
+/** Where a measurement originated */
+export type MeasurementOrigin = 'ai' | 'human' | 'fused'
+
+/** Optional provenance metadata for individual graph segments.
+ *  All fields are optional so existing graph objects are never invalidated. */
+export interface MeasurementProvenance {
+  sourceImageIndex?: number | null
+  sourceImageAngle?: 'front' | 'left' | 'right' | 'unknown' | null
+  visibility?: MeasurementVisibility
+  origin?: MeasurementOrigin
+  confidence?: number | null
+  notes?: string | null
+}
+
 /** Main beam geometry with confidence tracking */
 export interface Beam {
   id: string
@@ -4558,6 +4575,7 @@ export interface Beam {
   length: number
   confidence: number
   source: GraphSource
+  provenance?: MeasurementProvenance
 }
 
 /** Individual tine measurement */
@@ -4570,6 +4588,7 @@ export interface Tine {
   length: number
   label: TineLabel
   confidence: number
+  provenance?: MeasurementProvenance
 }
 
 /** Spread measurement between antler tips */
@@ -4578,6 +4597,7 @@ export interface Spread {
   rightPoint: Vec2
   distance: number
   confidence: number
+  provenance?: MeasurementProvenance
 }
 
 /** Circumference measurement point (H1-H4) */
@@ -4588,6 +4608,7 @@ export interface CircumferencePoint {
   position: Vec2
   circumference: number
   confidence: number
+  provenance?: MeasurementProvenance
 }
 
 /** Full measurement graph structure - core engine data */
