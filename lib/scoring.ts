@@ -246,28 +246,30 @@ export function getGraphConfidence(graph: MeasurementGraph): number {
 export function getLowConfidenceMeasurements(
   graph: MeasurementGraph,
   threshold = 0.5
-): { type: string; id: string; confidence: number }[] {
-  const lowConf: { type: string; id: string; confidence: number }[] = [];
+): { type: string; id: string; label: string; confidence: number }[] {
+  const lowConf: { type: string; id: string; label: string; confidence: number }[] = [];
 
   if (graph.beams.left.confidence < threshold) {
-    lowConf.push({ type: 'beam', id: 'beam-left', confidence: graph.beams.left.confidence });
+    lowConf.push({ type: 'beam', id: 'beam-left', label: 'Left Beam', confidence: graph.beams.left.confidence });
   }
   if (graph.beams.right.confidence < threshold) {
-    lowConf.push({ type: 'beam', id: 'beam-right', confidence: graph.beams.right.confidence });
+    lowConf.push({ type: 'beam', id: 'beam-right', label: 'Right Beam', confidence: graph.beams.right.confidence });
   }
   if (graph.spread.confidence < threshold) {
-    lowConf.push({ type: 'spread', id: 'spread', confidence: graph.spread.confidence });
+    lowConf.push({ type: 'spread', id: 'spread', label: 'Inside Spread', confidence: graph.spread.confidence });
   }
 
   graph.tines.forEach(t => {
     if (t.confidence < threshold) {
-      lowConf.push({ type: 'tine', id: t.id, confidence: t.confidence });
+      const sideLabel = t.side === 'left' ? 'L' : 'R';
+      lowConf.push({ type: 'tine', id: t.id, label: `${t.label} (${sideLabel})`, confidence: t.confidence });
     }
   });
 
   graph.circumferences.forEach(c => {
     if (c.confidence < threshold) {
-      lowConf.push({ type: 'circumference', id: c.id, confidence: c.confidence });
+      const sideLabel = c.side === 'left' ? 'L' : 'R';
+      lowConf.push({ type: 'circumference', id: c.id, label: `${c.label} (${sideLabel})`, confidence: c.confidence });
     }
   });
 
