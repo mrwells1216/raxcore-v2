@@ -111,15 +111,17 @@ function FrameStrip({
 
 interface ScanModePanelProps {
   onFilesReady: (files: File[], angles: ScanAngle[]) => void
+  onFallbackToUpload?: () => void
 }
 
-export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
+export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePanelProps) {
   const videoRef    = useRef<HTMLVideoElement>(null)
   const canvasRef   = useRef<HTMLCanvasElement>(null)
   const streamRef   = useRef<MediaStream | null>(null)
   const rafRef      = useRef<number | null>(null)
   const stableRef   = useRef(0)
   const lastAutoRef = useRef(0)
+  const lastUpdateRef = useRef(0)
 
   const [isStreaming, setIsStreaming]    = useState(false)
   const [cameraError, setCameraError]   = useState<string | null>(null)
@@ -176,10 +178,10 @@ export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
     let lastTick = 0
     const TICK_MS = 250
 
-    const loop = (now: number) => {
+    const loop = (rafTime: number) => {
       rafRef.current = requestAnimationFrame(loop)
-      if (now - lastTick < TICK_MS) return
-      lastTick = now
+      if (rafTime - lastTick < TICK_MS) return
+      lastTick = rafTime
 
       const video = videoRef.current
       const canvas = canvasRef.current
@@ -192,7 +194,18 @@ export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
       ctx.drawImage(video, 0, 0)
 
       const result = analyseFrame(canvas)
-      setValidation(result)
+      
+      // Throttle validation state updates to prevent CPU overload
+      const now = Date.now()
+      if (now - lastUpdateRef.current > 120) {
+        setValidation(result)
+        lastUpdateRef.current = now
+      }
+      
+      // Reject bad frames early
+      if (!result.hasRack || result.rejectionReason) {
+        return
+      }
       const newZones = detectCoverageZones(result, angleHint)
 
       setFrames(prev => {
@@ -227,10 +240,19 @@ export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
 
   // Auto-advance angle hint when zone is covered
   useEffect(() => {
-    if (progress.zones.full_rack && angleHint === 'front')          setAngleHint('left')
-    else if (progress.zones.left_antler && angleHint === 'left')    setAngleHint('right')
-    else if (progress.zones.right_antler && angleHint === 'right')  setAngleHint('front')
-  }, [progress.zones, angleHint])
+    let next = angleHint
+    if (progress.zones.full_rack && angleHint === 'front') next = 'left'
+    else if (progress.zones.left_antler && angleHint === 'left') next = 'right'
+    else if (progress.zones.right_antler && angleHint === 'right') next = 'complete'
+    if (next !== angleHint) {
+      setAngleHint(next as ScanAngle)
+    }
+  }, [
+    progress.zones.full_rack,
+    progress.zones.left_antler,
+    progress.zones.right_antler,
+    angleHint
+  ])
 
   // ── Capture helpers ──────────────────────────────────────────────────────────
 
@@ -345,16 +367,27 @@ export function ScanModePanel({ onFilesReady }: ScanModePanelProps) {
         )}
 
         {/* Camera error */}
-        {cameraError && (
-          <button
-            type="button"
-            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 text-white w-full"
-            onClick={() => startCamera(facingMode)}
-          >
+{cameraError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 text-white">
             <Camera className="h-10 w-10 opacity-50" />
             <p className="text-sm text-center px-6">{cameraError}</p>
-            <p className="text-xs text-white/50">Tap to retry</p>
-          </button>
+            <button
+              type="button"
+              onClick={() => startCamera(facingMode)}
+              className="text-xs text-white/70 hover:text-white underline touch-manipulation"
+            >
+              Tap to retry
+            </button>
+            {onFallbackToUpload && (
+              <button
+                type="button"
+                onClick={onFallbackToUpload}
+                className="mt-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-medium touch-manipulation"
+              >
+                Switch to Upload
+              </button>
+            )}
+          </div>
         )}
 
         {/* Coverage ring overlay */}

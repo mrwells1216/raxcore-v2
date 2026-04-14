@@ -52,6 +52,21 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       id, url, file, angleType, width, height,
     }))
 
+  // Validate image set before scoring
+  function validateImageSet(images: GridImage[]) {
+    if (!images.length) {
+      throw new Error('No images uploaded')
+    }
+
+    const hasFullRack = images.some(img => img.angleType === 'front')
+
+    if (!hasFullRack) {
+      throw new Error('At least one full rack (front) image is required')
+    }
+
+    return true
+  }
+
   const updateIntakeQuality = useCallback((imgs: GridImage[], earsVisible?: boolean, sourceType?: string) => {
     if (imgs.length === 0) { setIntakeQuality(null); return }
     const assessment = computeIntakeQuality({
@@ -123,6 +138,14 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
   }
 
   const handleAnalyze = async (data: ScoringFormData) => {
+    // Validate images before proceeding
+    try {
+      validateImageSet(gridImages)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Invalid images')
+      return
+    }
+
     const finalQuality = computeIntakeQuality({
       images: gridImages.map(img => ({
         angleType: img.angleType,

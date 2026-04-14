@@ -37,6 +37,9 @@ import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
 import { getBestCalibrationProfile, applyCalibration } from '@/lib/calibration'
 import { startPrecisionPass } from '@/lib/reverse-engineering/service'
+import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
+import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
+import type { MultiImageDetectionResult } from '@/lib/detection/types'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -340,6 +343,46 @@ export async function POST(request: Request) {
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Detection Phase: Validate deer/rack presence before scoring
+    // ─────────────────────────────────────────────────────────────────────────────
+    let detectionSummary: MultiImageDetectionResult | null = null
+    
+    try {
+      console.log('[score] starting detection phase', { imageCount: storedImageUrls.length })
+      const detectionImages = await detectRackWithOpenAI(storedImageUrls)
+      detectionSummary = buildMultiImageDetectionSummary(detectionImages)
+      
+      console.log('[score] detection complete', {
+        accepted: detectionSummary.accepted,
+        overallSubjectType: detectionSummary.overallSubjectType,
+        overallConfidence: detectionSummary.overallConfidence,
+        acceptedImageCount: detectionSummary.images.filter(i => i.accepted).length,
+        rejectionReasonCount: detectionSummary.rejectionReasons.length,
+      })
+
+      if (!detectionSummary.accepted) {
+        // Mark buck as failed due to detection rejection
+        await updateBuckStatus(buck.id, 'failed')
+        
+        return NextResponse.json(
+          {
+            error: 'No usable deer rack detected.',
+            userMessage:
+              detectionSummary.rejectionReasons[0]?.message ??
+              'The uploaded images do not contain a usable deer rack for scoring.',
+            errorType: 'detection_rejected',
+            detection: detectionSummary,
+            buckId: buck.id,
+          },
+          { status: 422 },
+        )
+      }
+    } catch (detectionError) {
+      // Detection failed but we can continue with scoring as fallback
+      console.error('[score] detection phase failed, continuing with scoring:', detectionError)
+    }
+
     // Log capture quality metadata
     if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
       let captureQualityData: any = {}
@@ -574,6 +617,10 @@ export async function POST(request: Request) {
           confidenceNotes: scoringResult.confidenceExplanation ?? [],
           mainFramePoints: scoringResult.mainFramePoints ?? 10,
         }),
+        // Detection phase data
+        detection: detectionSummary ?? undefined,
+        bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
+        measurementGraph: detectionSummary?.graph ?? undefined,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -838,6 +885,10 @@ export async function POST(request: Request) {
         confidenceNotes: scoringResult.confidenceExplanation ?? [],
         mainFramePoints: scoringResult.mainFramePoints ?? 10,
       }),
+      // Detection phase data
+      detection: detectionSummary ?? null,
+      bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? null,
+      measurementGraph: detectionSummary?.graph ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages
