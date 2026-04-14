@@ -2,15 +2,14 @@
  * load-effective-measurement-graph.ts
  *
  * Phase 2 canonical loader — single source of truth for resolving the
- * "effective" MeasurementGraph for any buck.
+ * effective MeasurementGraph for any buck.
  *
  * Resolution order:
  *   1. Latest persisted row from measurement_graphs (highest version)
  *   2. MeasurementGraph derived from the detection graph in the latest prediction
- *   3. null (caller decides how to handle absence)
+ *   3. Safe fallback graph
  *
- * This loader is safe to call from server components, API routes, and
- * server actions. It never throws — errors produce a null graph + reason.
+ * Never throws for missing tables, missing rows, or missing graph payloads.
  */
 
 import { createClient } from '@/lib/supabase/server'
@@ -22,29 +21,61 @@ import {
 } from '@/lib/scoring/graph-conversion'
 
 // ---------------------------------------------------------------------------
-// Types
+// Public result type (matches spec exactly)
 // ---------------------------------------------------------------------------
 
-export type EffectiveGraphSource =
-  | 'persisted'         // came from measurement_graphs table
-  | 'derived'           // derived from latest prediction detection graph
-  | 'none'              // no graph available for this buck
-
-export interface EffectiveMeasurementGraph {
-  graph: MeasurementGraph | null
-  source: EffectiveGraphSource
-  /** Set when source === 'persisted' */
-  persistedVersion?: number
-  /** Set when source === 'persisted' */
-  persistedId?: string
-  /** Set when source === 'derived' */
-  detectionGraphConfidence?: number | null
-  /** Non-null when we fell back due to an error; for debug/logging only */
-  fallbackReason?: string
+export interface EffectiveMeasurementGraphResult {
+  graph: MeasurementGraph
+  source: 'persisted_graph' | 'prediction_graph' | 'fallback'
+  version: number | null
+  graphId: string | null
+  predictionId: string | null
+  measurementGraphsAvailable: boolean
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers — foreign key probe (matches pattern in mesh-adjustments)
+// Fallback graph — safe minimal geometry used when no data exists
+// ---------------------------------------------------------------------------
+
+const FALLBACK_GRAPH: MeasurementGraph = {
+  beams: {
+    left: {
+      id: 'beam-left',
+      points: [
+        { x: 160, y: 430 },
+        { x: 170, y: 340 },
+        { x: 185, y: 255 },
+        { x: 200, y: 180 },
+      ],
+      length: 0,
+      confidence: 0.25,
+      source: 'fused',
+    },
+    right: {
+      id: 'beam-right',
+      points: [
+        { x: 340, y: 430 },
+        { x: 330, y: 340 },
+        { x: 315, y: 255 },
+        { x: 300, y: 180 },
+      ],
+      length: 0,
+      confidence: 0.25,
+      source: 'fused',
+    },
+  },
+  tines: [],
+  spread: {
+    leftPoint: { x: 160, y: 430 },
+    rightPoint: { x: 340, y: 430 },
+    distance: 0,
+    confidence: 0.25,
+  },
+  circumferences: [],
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
 // ---------------------------------------------------------------------------
 
 function isMissingTableError(error: unknown): boolean {
@@ -65,14 +96,17 @@ function isMissingColumnError(error: unknown): boolean {
   )
 }
 
-async function fetchPersistedGraph(
+/**
+ * Probe measurement_graphs with buck_id first, then rack_id as a legacy fallback.
+ * Returns the highest-version row, the table availability flag, and the graph id.
+ */
+async function fetchLatestPersistedGraph(
   supabase: Awaited<ReturnType<typeof createClient>>,
   buckId: string
 ): Promise<{
-  graph: { id: string; graph: MeasurementGraph; version: number } | null
+  record: { id: string; graph: MeasurementGraph; version: number } | null
   available: boolean
 }> {
-  // Try buck_id first, fall back to rack_id for legacy rows
   for (const fk of ['buck_id', 'rack_id'] as const) {
     const { data, error } = await supabase
       .from('measurement_graphs')
@@ -83,38 +117,36 @@ async function fetchPersistedGraph(
       .maybeSingle()
 
     if (!error) {
-      return { graph: (data as { id: string; graph: MeasurementGraph; version: number } | null) ?? null, available: true }
+      return {
+        record: (data as { id: string; graph: MeasurementGraph; version: number } | null) ?? null,
+        available: true,
+      }
     }
 
     if (isMissingTableError(error)) {
-      return { graph: null, available: false }
+      return { record: null, available: false }
     }
 
     if (!isMissingColumnError(error)) {
-      // Unexpected error on buck_id — don't try rack_id, surface absence
-      return { graph: null, available: true }
+      // Unexpected error on this fk — treat as unavailable, don't try the other key
+      return { record: null, available: true }
     }
 
-    // isMissingColumnError → this fk doesn't exist, try the other one
+    // 42703 → this foreign key column doesn't exist, try the other one
   }
 
-  return { graph: null, available: true }
+  return { record: null, available: true }
 }
 
-async function fetchLatestPredictionRaw(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  buckId: string
-): Promise<Record<string, unknown> | null> {
-  const { data, error } = await supabase
-    .from('predictions')
-    .select('*')
-    .eq('buck_id', buckId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error || !data) return null
-  return data as Record<string, unknown>
+/**
+ * Extract AntlerMeasurementGraph from a raw prediction record.
+ * Probes all known storage shapes; returns null if none found.
+ * Re-exported from graph-conversion but kept as a local alias for clarity.
+ */
+function extractPredictionMeasurementGraph(
+  prediction: Record<string, unknown> | null | undefined
+): AntlerMeasurementGraph | null {
+  return extractPredictionDetectionGraph(prediction)
 }
 
 // ---------------------------------------------------------------------------
@@ -122,56 +154,100 @@ async function fetchLatestPredictionRaw(
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the effective MeasurementGraph for a given buckId.
+ * Resolve the effective MeasurementGraph for a buck.
  *
- * Always returns an EffectiveMeasurementGraph — never throws.
- *
- * @param buckId  The buck UUID to resolve.
- * @param hint    Optional pre-fetched latest prediction to avoid an extra DB round-trip.
- *                Pass the full prediction record as a plain object.
+ * @param buckId           The buck UUID.
+ * @param hint             Optional pre-fetched data to skip extra DB round-trips.
+ *                         Pass latestPrediction as a plain object to avoid re-fetching.
  */
 export async function loadEffectiveMeasurementGraph(
   buckId: string,
   hint?: { latestPrediction?: Record<string, unknown> | null }
-): Promise<EffectiveMeasurementGraph> {
-  try {
-    const supabase = await createClient()
+): Promise<EffectiveMeasurementGraphResult> {
+  const supabase = await createClient()
 
-    // 1. Try persisted graph
-    const { graph: persisted } = await fetchPersistedGraph(supabase, buckId)
+  // ── Step 1: persisted graph ──────────────────────────────────────────────
+  const { record: persisted, available: measurementGraphsAvailable } =
+    await fetchLatestPersistedGraph(supabase, buckId)
 
-    if (persisted) {
-      return {
-        graph: persisted.graph,
-        source: 'persisted',
-        persistedVersion: persisted.version,
-        persistedId: persisted.id,
-      }
+  if (persisted) {
+    const source = 'persisted_graph' as const
+    console.log('[graph-loader] resolved', {
+      buckId,
+      source,
+      version: persisted.version,
+      predictionId: null,
+      measurementGraphsAvailable,
+    })
+    return {
+      graph: persisted.graph,
+      source,
+      version: persisted.version,
+      graphId: persisted.id,
+      predictionId: null,
+      measurementGraphsAvailable,
     }
+  }
 
-    // 2. Derive from latest prediction detection graph
-    const predictionRaw =
-      hint?.latestPrediction !== undefined
-        ? hint.latestPrediction
-        : await fetchLatestPredictionRaw(supabase, buckId)
+  // ── Step 2: derive from latest prediction detection graph ────────────────
+  let predictionRaw: Record<string, unknown> | null = null
+  let predictionId: string | null = null
 
-    const detectionGraph: AntlerMeasurementGraph | null =
-      extractPredictionDetectionGraph(predictionRaw)
+  if (hint?.latestPrediction !== undefined) {
+    predictionRaw = hint.latestPrediction
+    predictionId = (hint.latestPrediction?.id as string | null) ?? null
+  } else {
+    const { data, error } = await supabase
+      .from('predictions')
+      .select('*')
+      .eq('buck_id', buckId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-    if (detectionGraph) {
-      const derived = convertDetectionGraphToMeasurementGraph(detectionGraph)
-      return {
-        graph: derived,
-        source: 'derived',
-        detectionGraphConfidence: detectionGraph.graphConfidence ?? null,
-      }
+    if (!error && data) {
+      predictionRaw = data as Record<string, unknown>
+      predictionId = (data as { id?: string }).id ?? null
     }
+  }
 
-    // 3. No graph available
-    return { graph: null, source: 'none' }
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : 'Unknown error in loadEffectiveMeasurementGraph'
-    console.error('[load-effective-graph] error:', reason)
-    return { graph: null, source: 'none', fallbackReason: reason }
+  const detectionGraph = extractPredictionMeasurementGraph(predictionRaw)
+
+  if (detectionGraph) {
+    const derived = convertDetectionGraphToMeasurementGraph(detectionGraph)
+    const source = 'prediction_graph' as const
+    console.log('[graph-loader] resolved', {
+      buckId,
+      source,
+      version: null,
+      predictionId,
+      measurementGraphsAvailable,
+    })
+    return {
+      graph: derived,
+      source,
+      version: null,
+      graphId: null,
+      predictionId,
+      measurementGraphsAvailable,
+    }
+  }
+
+  // ── Step 3: fallback ─────────────────────────────────────────────────────
+  const source = 'fallback' as const
+  console.log('[graph-loader] resolved', {
+    buckId,
+    source,
+    version: null,
+    predictionId,
+    measurementGraphsAvailable,
+  })
+  return {
+    graph: FALLBACK_GRAPH,
+    source,
+    version: null,
+    graphId: null,
+    predictionId,
+    measurementGraphsAvailable,
   }
 }

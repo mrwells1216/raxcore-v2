@@ -470,6 +470,15 @@ export interface ScoringResult {
   }
   // Phase 10: Extended learning data (for admin)
   extendedLearningSummary?: ExtendedLearningSummary
+  // Phase 2: Effective measurement graph resolved at load time
+  effectiveMeasurementGraph?: {
+    graph: MeasurementGraph | null
+    source: 'persisted_graph' | 'prediction_graph' | 'fallback'
+    version: number | null
+    graphId: string | null
+    predictionId: string | null
+    measurementGraphsAvailable: boolean
+  } | null
 }
 
 // Legacy API response types (for backward compatibility)

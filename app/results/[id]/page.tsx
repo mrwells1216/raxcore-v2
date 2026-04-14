@@ -6,7 +6,7 @@ import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ShareBuckButton } from '@/components/scoring/share-buck-button'
-import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
+import { loadEffectiveMeasurementGraph, type EffectiveMeasurementGraphResult } from '@/lib/scoring/load-effective-measurement-graph'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -60,7 +60,6 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       review_completeness: number
     } | null
     precisionPassGross?: number | null
-    effectiveMeasurementGraph?: typeof effectiveMeasurementGraph
   } = {
     buck: { ...buck, property_id: (buck as any).property_id || null },
     images,

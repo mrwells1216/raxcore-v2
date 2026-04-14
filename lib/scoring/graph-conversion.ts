@@ -1,8 +1,37 @@
-import type { MeasurementGraph, Beam, CircumferencePoint, Tine, Vec2 } from '@/lib/types';
+import type { MeasurementGraph, Beam, CircumferencePoint, Tine, Vec2, MeasurementProvenance } from '@/lib/types';
 import type { AntlerMeasurementGraph, MeasurementGraphNode } from '@/lib/detection/types';
 
 const TINE_LABELS = ['G1', 'G2', 'G3', 'G4'] as const;
 const CIRCUMFERENCE_LABELS = ['H1', 'H2', 'H3', 'H4'] as const;
+
+function imageIndexToAngle(index: number | null | undefined): MeasurementProvenance['sourceImageAngle'] {
+  if (index === 0) return 'front';
+  if (index === 1) return 'left';
+  if (index === 2) return 'right';
+  return 'unknown';
+}
+
+function provenanceFromNodes(
+  nodes: MeasurementGraphNode[],
+  usedFallback: boolean,
+  segmentConfidence: number
+): MeasurementProvenance {
+  const origin = nodes.length === 0 ? 'ai' : 'ai';
+  const indexes = [
+    ...new Set(nodes.map((n) => n.sourceImageIndex).filter((v): v is number => typeof v === 'number')),
+  ];
+  const sourceImageIndex = indexes.length === 1 ? indexes[0] : null;
+  const sourceImageAngle =
+    indexes.length === 1 ? imageIndexToAngle(indexes[0]) : indexes.length === 0 ? 'unknown' : 'unknown';
+
+  return {
+    origin: indexes.length > 1 ? 'fused' : origin,
+    visibility: usedFallback ? 'inferred' : 'visible',
+    sourceImageIndex,
+    sourceImageAngle: indexes.length > 1 ? 'unknown' : sourceImageAngle,
+    confidence: segmentConfidence,
+  };
+}
 
 function average(values: number[]): number {
   if (values.length === 0) return 0;
@@ -103,11 +132,14 @@ function buildBeam(graph: AntlerMeasurementGraph, side: 'left' | 'right', fallba
     ...new Set(pointSources.map((node) => node.sourceImageIndex).filter((value) => typeof value === 'number')),
   ];
 
+  const usedFallback = !burr || !tip;
+  const segmentConfidence = average(pointSources.map((node) => node.confidence));
+
   return {
     id: `beam-${side}`,
     points,
     length: polylineLength(points),
-    confidence: average(pointSources.map((node) => node.confidence)),
+    confidence: segmentConfidence,
     source:
       sourceImageIndexes.length === 1
         ? sourceImageIndexes[0] === 0
@@ -116,6 +148,7 @@ function buildBeam(graph: AntlerMeasurementGraph, side: 'left' | 'right', fallba
             ? 'left'
             : 'right'
         : 'fused',
+    provenance: provenanceFromNodes(pointSources, usedFallback, segmentConfidence),
   };
 }
 
@@ -138,6 +171,8 @@ function buildTines(graph: AntlerMeasurementGraph): Tine[] {
       const tip = toVec2(tipNodes[i], { x: side === 'left' ? 130 : 370, y: 300 - i * 55 });
       const dx = tip.x - base.x;
       const dy = tip.y - base.y;
+      const tineConf = average([baseNodes[i]?.confidence ?? 0, tipNodes[i]?.confidence ?? 0]);
+      const tineSources = [baseNodes[i], tipNodes[i]].filter(Boolean) as MeasurementGraphNode[];
 
       tines.push({
         id: `${TINE_LABELS[i].toLowerCase()}-${side}`,
@@ -147,7 +182,8 @@ function buildTines(graph: AntlerMeasurementGraph): Tine[] {
         tipPoint: tip,
         length: Math.sqrt(dx * dx + dy * dy),
         label: TINE_LABELS[i],
-        confidence: average([baseNodes[i]?.confidence ?? 0, tipNodes[i]?.confidence ?? 0]),
+        confidence: tineConf,
+        provenance: provenanceFromNodes(tineSources, false, tineConf),
       });
     }
   });
@@ -162,12 +198,16 @@ function buildSpread(graph: AntlerMeasurementGraph, leftBeam: Beam, rightBeam: B
   const rightPoint = toVec2(rightAnchor, rightBeam.points[0] ?? { x: 340, y: 430 });
   const dx = rightPoint.x - leftPoint.x;
   const dy = rightPoint.y - leftPoint.y;
+  const spreadConf = average([leftAnchor?.confidence ?? leftBeam.confidence, rightAnchor?.confidence ?? rightBeam.confidence]);
+  const spreadSources = [leftAnchor, rightAnchor].filter(Boolean) as MeasurementGraphNode[];
+  const usedFallback = !leftAnchor || !rightAnchor;
 
   return {
     leftPoint,
     rightPoint,
     distance: Math.sqrt(dx * dx + dy * dy),
-    confidence: average([leftAnchor?.confidence ?? leftBeam.confidence, rightAnchor?.confidence ?? rightBeam.confidence]),
+    confidence: spreadConf,
+    provenance: provenanceFromNodes(spreadSources, usedFallback, spreadConf),
   };
 }
 
@@ -179,13 +219,21 @@ function buildCircumferences(leftBeam: Beam, rightBeam: Beam): CircumferencePoin
     const beam = side === 'left' ? leftBeam : rightBeam;
 
     ratios.forEach((ratio, index) => {
+      const circConf = Math.max(0.2, beam.confidence * 0.7);
       circumferences.push({
         id: `${CIRCUMFERENCE_LABELS[index].toLowerCase()}-${side}`,
         side,
         label: CIRCUMFERENCE_LABELS[index],
         position: samplePointOnPolyline(beam.points, ratio),
         circumference: 0,
-        confidence: Math.max(0.2, beam.confidence * 0.7),
+        confidence: circConf,
+        // Circumferences are always inferred — sampled from the beam polyline
+        provenance: {
+          origin: 'ai',
+          visibility: 'inferred',
+          sourceImageAngle: beam.source === 'fused' ? 'unknown' : beam.source,
+          confidence: circConf,
+        },
       });
     });
   });
