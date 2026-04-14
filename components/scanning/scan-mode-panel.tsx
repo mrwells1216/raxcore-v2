@@ -122,6 +122,9 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   const stableRef   = useRef(0)
   const lastAutoRef = useRef(0)
   const lastUpdateRef = useRef(0)
+  // Guard: true while this component instance is mounted. Prevents stale async
+  // callbacks (camera init, abort handlers) from calling setState after unmount.
+  const isActiveRef = useRef(true)
 
   const [isStreaming, setIsStreaming]    = useState(false)
   const [cameraError, setCameraError]   = useState<string | null>(null)
@@ -137,6 +140,7 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   // ── Camera start/stop ────────────────────────────────────────────────────────
 
   const startCamera = useCallback(async (facing: 'environment' | 'user') => {
+    if (!isActiveRef.current) return
     setCameraError(null)
     try {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
@@ -144,27 +148,36 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
         video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       })
+      // Component may have unmounted while getUserMedia was awaited
+      if (!isActiveRef.current) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
       }
-      setIsStreaming(true)
-  } catch (err) {
-  // Handle AbortError gracefully (tab lost focus, React re-render interrupted stream)
-  if (err instanceof Error && err.name === 'AbortError') {
-    console.warn('[scan-mode] camera aborted, will retry on next mount')
-    return
-  }
-  console.error('[scan-mode] camera start failed:', err)
-  setCameraError('Camera access denied. Tap to retry.')
-  setIsStreaming(false)
-  }
+      if (isActiveRef.current) setIsStreaming(true)
+    } catch (err) {
+      // AbortError during normal unmount/remount — silently discard, not a real failure
+      if (err instanceof Error && err.name === 'AbortError') {
+        return
+      }
+      // Real acquisition failure — only report if still mounted
+      if (isActiveRef.current) {
+        console.error('[scan-mode] camera initialization failed:', err)
+        setCameraError('Camera access denied. Tap to retry.')
+        setIsStreaming(false)
+      }
+    }
   }, [])
 
   useEffect(() => {
+    isActiveRef.current = true
     startCamera(facingMode)
     return () => {
+      isActiveRef.current = false
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }

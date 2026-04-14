@@ -209,6 +209,67 @@ function determineImageAngle(
   }
 }
 
+/**
+ * Shared helper — resolves the effective scoring angle for each image in a
+ * deterministic way. Both the capture-quality coverage engine and the score
+ * route capture-quality log must call this so they see the same angles.
+ *
+ * Resolution order:
+ *  1. User-selected angle (from selectedAngles array)
+ *  2. AI-predicted angle (if confidence >= 0.5)
+ *  3. Visibility-score based inference (if scores available and max >= 0.4)
+ *  4. Filename inference
+ *  5. Index-based fallback: 0→front, 1→left, 2→right
+ */
+export function resolveScoringImageRoles(
+  images: Array<ImageAnalysisInput | null | undefined>,
+  selectedAngles?: Array<CaptureAngle | null | undefined>
+): Array<{ index: number; resolvedAngle: CaptureAngle }> {
+  return (images ?? []).map((img, index) => {
+    const selectedAngle = selectedAngles?.[index] ?? null
+
+    // 1. User-selected angle
+    if (selectedAngle && selectedAngle !== 'unknown') {
+      return { index, resolvedAngle: selectedAngle }
+    }
+
+    // 2. AI-predicted angle
+    if (
+      img?.predictedAngle &&
+      img.predictedAngle !== 'unknown' &&
+      (img.angleConfidence ?? 0) >= 0.5
+    ) {
+      return { index, resolvedAngle: img.predictedAngle }
+    }
+
+    // 3. Visibility-score inference
+    if (img?.visibilityScores) {
+      const scores = scoreImageForAngle(img.visibilityScores)
+      const maxScore = Math.max(scores.front, scores.left, scores.right)
+      if (maxScore >= 0.4) {
+        const angle: CaptureAngle =
+          scores.front === maxScore ? 'front' :
+          scores.left === maxScore ? 'left' : 'right'
+        return { index, resolvedAngle: angle }
+      }
+    }
+
+    // 4. Filename inference
+    const filenameAngle = inferAngleFromFilename(img?.name)
+    if (filenameAngle !== 'unknown') {
+      return { index, resolvedAngle: filenameAngle }
+    }
+
+    // 5. Index-based fallback
+    const fallbacks: CaptureAngle[] = ['front', 'left', 'right']
+    if (index < fallbacks.length) {
+      return { index, resolvedAngle: fallbacks[index] }
+    }
+
+    return { index, resolvedAngle: 'unknown' }
+  })
+}
+
 export function buildCaptureQualitySummary(params: {
   images: Array<ImageAnalysisInput | null | undefined>
   selectedAngles?: Array<CaptureAngle | null | undefined>

@@ -41,6 +41,7 @@ import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
 import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
+import { resolveScoringImageRoles } from '@/lib/scoring/capture-quality'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -384,17 +385,41 @@ export async function POST(request: Request) {
       console.error('[score] detection phase failed, continuing with scoring:', detectionError)
     }
 
-    // Log capture quality metadata
-    if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
-      let captureQualityData: any = {}
+    // Log capture quality metadata — use resolved angles so coverage and vision see the same truth
+    {
+      let parsedSelectedAngles: (string | null)[] | null = null
       try {
-        if (selectedImageAnglesRaw) captureQualityData.selectedImageAngles = JSON.parse(selectedImageAnglesRaw)
-      } catch (e) {
+        if (selectedImageAnglesRaw) parsedSelectedAngles = JSON.parse(selectedImageAnglesRaw)
+      } catch (_e) {
         // ignore parse error
+      }
+
+      // Build ImageAnalysisInput-compatible objects from resolved images for angle resolution
+      const imageInputsForResolution = resolvedImages.map((img) => ({
+        name: null,
+        predictedAngle: null,
+        angleConfidence: null,
+        visibilityScores: null,
+      }))
+
+      const resolvedRoles = resolveScoringImageRoles(
+        imageInputsForResolution,
+        parsedSelectedAngles as any
+      )
+
+      // Prefer the angles already on resolvedImages (from form angle_N fields) when available
+      const finalAngles = resolvedImages.map((img, i) =>
+        img.angleType && img.angleType !== 'unknown'
+          ? img.angleType
+          : resolvedRoles[i]?.resolvedAngle ?? 'unknown'
+      )
+
+      const captureQualityData: Record<string, unknown> = {
+        selectedImageAngles: finalAngles,
       }
       try {
         if (captureQualitySummaryRaw) captureQualityData.summary = JSON.parse(captureQualitySummaryRaw)
-      } catch (e) {
+      } catch (_e) {
         // ignore parse error
       }
       console.log('[score] capture quality check', captureQualityData)
@@ -633,17 +658,20 @@ export async function POST(request: Request) {
       })() : null
     })
 
-    const graphPersistence = await persistInitialMeasurementGraph({
-      buckId: buck.id,
-      detectionGraph: detectionSummary?.graph ?? null,
-    })
-
-    console.log('[score] initial measurement graph persistence', {
-      buckId: buck.id,
-      status: graphPersistence.status,
-      detail: graphPersistence.detail ?? null,
-      version: graphPersistence.version ?? null,
-    })
+    try {
+      const graphPersistence = await persistInitialMeasurementGraph({
+        buckId: buck.id,
+        detectionGraph: detectionSummary?.graph ?? null,
+      })
+      console.log('[score] initial measurement graph persistence', {
+        buckId: buck.id,
+        status: graphPersistence.status,
+        detail: graphPersistence.detail ?? null,
+        version: graphPersistence.version ?? null,
+      })
+    } catch (graphErr) {
+      console.error('[score] initial measurement graph persistence failed (non-blocking):', graphErr)
+    }
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
