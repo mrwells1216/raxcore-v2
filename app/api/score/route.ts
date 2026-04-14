@@ -42,6 +42,8 @@ import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-gr
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
 import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
 import { resolveScoringImageRoles } from '@/lib/scoring/capture-quality'
+import { computeGraphNativeScore, buildScoreComparison } from '@/lib/scoring/score-from-graph'
+import { extractPredictionDetectionGraph, convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -554,6 +556,36 @@ export async function POST(request: Request) {
       calibratedGross: calibrated.calibratedGross,
     })
 
+    // ── Phase 3: Graph-native score comparison ──────────────────────────────
+    let scoreComparison: import('@/lib/scoring/score-from-graph').ScoreComparison | null = null
+    try {
+      const detectionGraph = extractPredictionDetectionGraph(
+        detectionSummary?.graph
+          ? { measurementGraph: detectionSummary.graph }
+          : null
+      )
+      if (detectionGraph) {
+        const measurementGraph = convertDetectionGraphToMeasurementGraph(detectionGraph)
+        const graphScore = computeGraphNativeScore(measurementGraph, scoringResult.measurements)
+        scoreComparison = buildScoreComparison(
+          scoringResult.predictedGross ?? null,
+          scoringResult.predictedNet ?? null,
+          graphScore
+        )
+        console.log('[graph-score] comparison', {
+          buckId: buck.id,
+          activeSource: scoreComparison.activeSource,
+          legacyGross: scoreComparison.legacyGross,
+          graphGross: scoreComparison.graphGross,
+          grossDelta: scoreComparison.grossDelta,
+          graphCompleteness: scoreComparison.graphCompleteness,
+        })
+      }
+    } catch (graphScoreErr) {
+      console.error('[graph-score] comparison failed (non-blocking):', graphScoreErr)
+    }
+    // ── end Phase 3 ─────────────────────────────────────────────────────────
+
     // Get active model version
     const model = await getActiveModelVersion()
 
@@ -638,6 +670,8 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        // Phase 3: graph-native vs legacy comparison metadata
+        scoreComparison: scoreComparison ?? undefined,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -921,6 +955,8 @@ export async function POST(request: Request) {
       detection: detectionSummary ?? null,
       bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? null,
       measurementGraph: detectionSummary?.graph ?? null,
+      // Phase 3: Graph-native vs legacy score comparison metadata
+      scoreComparison: scoreComparison ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

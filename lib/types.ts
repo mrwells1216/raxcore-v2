@@ -479,6 +479,17 @@ export interface ScoringResult {
     predictionId: string | null
     measurementGraphsAvailable: boolean
   } | null
+  // Phase 3: Graph-native vs legacy score comparison
+  scoreComparison?: {
+    activeSource: 'legacy' | 'graph_native'
+    legacyGross: number | null
+    graphGross: number | null
+    legacyNet: number | null
+    graphNet: number | null
+    grossDelta: number | null
+    netDelta: number | null
+    graphCompleteness: number
+  } | null
 }
 
 // Legacy API response types (for backward compatibility)
