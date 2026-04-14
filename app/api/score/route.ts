@@ -40,6 +40,7 @@ import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
+import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -630,6 +631,18 @@ export async function POST(request: Request) {
           return null
         }
       })() : null
+    })
+
+    const graphPersistence = await persistInitialMeasurementGraph({
+      buckId: buck.id,
+      detectionGraph: detectionSummary?.graph ?? null,
+    })
+
+    console.log('[score] initial measurement graph persistence', {
+      buckId: buck.id,
+      status: graphPersistence.status,
+      detail: graphPersistence.detail ?? null,
+      version: graphPersistence.version ?? null,
     })
 
     // Update status to completed
