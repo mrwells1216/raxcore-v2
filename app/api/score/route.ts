@@ -385,34 +385,25 @@ export async function POST(request: Request) {
       console.error('[score] detection phase failed, continuing with scoring:', detectionError)
     }
 
-    // Log capture quality metadata — use resolved angles so coverage and vision see the same truth
+    // Log capture quality metadata — use the same resolved angles that the vision scorer received.
+    // resolvedImages already carries the correct angleType from the form (angle_0, angle_1, …).
+    // resolveScoringImageRoles is called with those as selectedAngles so both systems share one truth.
     {
-      let parsedSelectedAngles: (string | null)[] | null = null
-      try {
-        if (selectedImageAnglesRaw) parsedSelectedAngles = JSON.parse(selectedImageAnglesRaw)
-      } catch (_e) {
-        // ignore parse error
-      }
-
-      // Build ImageAnalysisInput-compatible objects from resolved images for angle resolution
       const imageInputsForResolution = resolvedImages.map((img) => ({
         name: null,
-        predictedAngle: null,
-        angleConfidence: null,
-        visibilityScores: null,
+        predictedAngle: null as null,
+        angleConfidence: null as null,
+        visibilityScores: null as null,
       }))
 
-      const resolvedRoles = resolveScoringImageRoles(
-        imageInputsForResolution,
-        parsedSelectedAngles as any
+      // Pass the already-resolved angleType values as selectedAngles so the helper
+      // uses them directly rather than falling through to index-based inference.
+      const selectedAnglesFromImages = resolvedImages.map((img) =>
+        (img.angleType && img.angleType !== 'unknown' ? img.angleType : null) as (string | null)
       )
 
-      // Prefer the angles already on resolvedImages (from form angle_N fields) when available
-      const finalAngles = resolvedImages.map((img, i) =>
-        img.angleType && img.angleType !== 'unknown'
-          ? img.angleType
-          : resolvedRoles[i]?.resolvedAngle ?? 'unknown'
-      )
+      const resolvedRoles = resolveScoringImageRoles(imageInputsForResolution, selectedAnglesFromImages)
+      const finalAngles = resolvedRoles.map((r) => r.resolvedAngle)
 
       const captureQualityData: Record<string, unknown> = {
         selectedImageAngles: finalAngles,

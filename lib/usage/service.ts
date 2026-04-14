@@ -471,7 +471,7 @@ async function incrementRateLimitState(
     // Fallback: get state and update manually
     const state = await getOrCreateRateLimitState(clientKey, windowType, burstSeconds)
     
-    const { data: updated } = await supabase
+    const { data: updated, error: updateErr } = await supabase
       .from('rate_limit_state')
       .update({
         request_count: state.request_count + requestCount,
@@ -483,6 +483,13 @@ async function incrementRateLimitState(
       .eq('id', state.id)
       .select()
       .single()
+
+    if (updateErr) {
+      const code = (updateErr as { code?: string }).code
+      if (code === '42703' || (updateErr.message ?? '').includes('updated_at')) {
+        console.warn('[usage] schema mismatch, skipping updated_at-dependent bookkeeping', { code })
+      }
+    }
 
     return updated || state
   }
