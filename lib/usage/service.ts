@@ -284,18 +284,28 @@ export async function createUsageRecord(input: UsageRecordInput): Promise<UsageR
 export async function updateUsageRecord(
   requestId: string,
   updates: UsageRecordUpdate
-  ): Promise<UsageRecord | null> {
+): Promise<UsageRecord | null> {
   // Use service role client for internal bookkeeping
   const supabase = await getServiceSupabase()
-  
+
   const { data, error } = await supabase
-  .from('usage_records')
-  .update(updates)
-  .eq('request_id', requestId)
-  .select()
-  .maybeSingle() // Use maybeSingle to handle zero rows gracefully
+    .from('usage_records')
+    .update(updates)
+    .eq('request_id', requestId)
+    .select()
+    .maybeSingle() // Use maybeSingle to handle zero rows gracefully
 
   if (error) {
+    // Code 42703 = column does not exist (e.g. updated_at missing on table or trigger).
+    // Treat as a tolerated schema mismatch — log and return null without throwing.
+    const code = (error as { code?: string }).code
+    if (code === '42703' || (error.message ?? '').includes('updated_at')) {
+      console.warn('[usage] schema mismatch, skipping updated_at-dependent bookkeeping', {
+        requestId,
+        code,
+      })
+      return null
+    }
     console.error('Error updating usage record:', error)
     return null
   }
@@ -461,7 +471,7 @@ async function incrementRateLimitState(
     // Fallback: get state and update manually
     const state = await getOrCreateRateLimitState(clientKey, windowType, burstSeconds)
     
-    const { data: updated } = await supabase
+    const { data: updated, error: updateErr } = await supabase
       .from('rate_limit_state')
       .update({
         request_count: state.request_count + requestCount,
@@ -473,6 +483,13 @@ async function incrementRateLimitState(
       .eq('id', state.id)
       .select()
       .single()
+
+    if (updateErr) {
+      const code = (updateErr as { code?: string }).code
+      if (code === '42703' || (updateErr.message ?? '').includes('updated_at')) {
+        console.warn('[usage] schema mismatch, skipping updated_at-dependent bookkeeping', { code })
+      }
+    }
 
     return updated || state
   }

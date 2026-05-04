@@ -7,7 +7,10 @@ import { MeshOverlay } from '@/components/admin/mesh-overlay';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { scoreFromGraph, getGraphConfidence, getLowConfidenceMeasurements } from '@/lib/scoring';
-import { convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion';
+import {
+  convertDetectionGraphToMeasurementGraph,
+  extractPredictionDetectionGraph,
+} from '@/lib/scoring/graph-conversion';
 import type { MeasurementGraph } from '@/lib/types';
 import type { AntlerMeasurementGraph } from '@/lib/detection/types';
 
@@ -81,23 +84,10 @@ const FALLBACK_GRAPH: MeasurementGraph = {
   circumferences: [],
 };
 
+// Delegates to the shared graph-conversion helper so extraction logic is
+// defined in one place and consistent across the whole codebase.
 function getPredictionMeasurementGraph(prediction: Record<string, unknown> | null): AntlerMeasurementGraph | null {
-  if (!prediction) return null;
-
-  const direct = prediction.measurementGraph ?? prediction.measurement_graph;
-  if (direct && typeof direct === 'object' && 'nodes' in (direct as Record<string, unknown>)) {
-    return direct as AntlerMeasurementGraph;
-  }
-
-  const rawResponse = prediction.rawResponse ?? prediction.raw_response;
-  if (rawResponse && typeof rawResponse === 'object') {
-    const nested = (rawResponse as Record<string, unknown>).measurementGraph;
-    if (nested && typeof nested === 'object' && 'nodes' in (nested as Record<string, unknown>)) {
-      return nested as AntlerMeasurementGraph;
-    }
-  }
-
-  return null;
+  return extractPredictionDetectionGraph(prediction);
 }
 
 function getPrimaryImageUrl(images: MeshReviewApiResponse['images']): string {

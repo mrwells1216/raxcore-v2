@@ -40,6 +40,10 @@ import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
+import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
+import { resolveScoringImageRoles } from '@/lib/scoring/capture-quality'
+import { computeGraphNativeScore, buildScoreComparison } from '@/lib/scoring/score-from-graph'
+import { extractPredictionDetectionGraph, convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -383,17 +387,32 @@ export async function POST(request: Request) {
       console.error('[score] detection phase failed, continuing with scoring:', detectionError)
     }
 
-    // Log capture quality metadata
-    if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
-      let captureQualityData: any = {}
-      try {
-        if (selectedImageAnglesRaw) captureQualityData.selectedImageAngles = JSON.parse(selectedImageAnglesRaw)
-      } catch (e) {
-        // ignore parse error
+    // Log capture quality metadata — use the same resolved angles that the vision scorer received.
+    // resolvedImages already carries the correct angleType from the form (angle_0, angle_1, …).
+    // resolveScoringImageRoles is called with those as selectedAngles so both systems share one truth.
+    {
+      const imageInputsForResolution = resolvedImages.map((img) => ({
+        name: null,
+        predictedAngle: null as null,
+        angleConfidence: null as null,
+        visibilityScores: null as null,
+      }))
+
+      // Pass the already-resolved angleType values as selectedAngles so the helper
+      // uses them directly rather than falling through to index-based inference.
+      const selectedAnglesFromImages = resolvedImages.map((img) =>
+        (img.angleType && img.angleType !== 'unknown' ? img.angleType : null) as (string | null)
+      )
+
+      const resolvedRoles = resolveScoringImageRoles(imageInputsForResolution, selectedAnglesFromImages)
+      const finalAngles = resolvedRoles.map((r) => r.resolvedAngle)
+
+      const captureQualityData: Record<string, unknown> = {
+        selectedImageAngles: finalAngles,
       }
       try {
         if (captureQualitySummaryRaw) captureQualityData.summary = JSON.parse(captureQualitySummaryRaw)
-      } catch (e) {
+      } catch (_e) {
         // ignore parse error
       }
       console.log('[score] capture quality check', captureQualityData)
@@ -537,6 +556,36 @@ export async function POST(request: Request) {
       calibratedGross: calibrated.calibratedGross,
     })
 
+    // ── Phase 3: Graph-native score comparison ──────────────────────────────
+    let scoreComparison: import('@/lib/scoring/score-from-graph').ScoreComparison | null = null
+    try {
+      const detectionGraph = extractPredictionDetectionGraph(
+        detectionSummary?.graph
+          ? { measurementGraph: detectionSummary.graph }
+          : null
+      )
+      if (detectionGraph) {
+        const measurementGraph = convertDetectionGraphToMeasurementGraph(detectionGraph)
+        const graphScore = computeGraphNativeScore(measurementGraph, scoringResult.measurements)
+        scoreComparison = buildScoreComparison(
+          scoringResult.predictedGross ?? null,
+          scoringResult.predictedNet ?? null,
+          graphScore
+        )
+        console.log('[graph-score] comparison', {
+          buckId: buck.id,
+          activeSource: scoreComparison.activeSource,
+          legacyGross: scoreComparison.legacyGross,
+          graphGross: scoreComparison.graphGross,
+          grossDelta: scoreComparison.grossDelta,
+          graphCompleteness: scoreComparison.graphCompleteness,
+        })
+      }
+    } catch (graphScoreErr) {
+      console.error('[graph-score] comparison failed (non-blocking):', graphScoreErr)
+    }
+    // ── end Phase 3 ─────────────────────────────────────────────────────────
+
     // Get active model version
     const model = await getActiveModelVersion()
 
@@ -621,6 +670,8 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        // Phase 3: graph-native vs legacy comparison metadata
+        scoreComparison: scoreComparison ?? undefined,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -631,6 +682,21 @@ export async function POST(request: Request) {
         }
       })() : null
     })
+
+    try {
+      const graphPersistence = await persistInitialMeasurementGraph({
+        buckId: buck.id,
+        detectionGraph: detectionSummary?.graph ?? null,
+      })
+      console.log('[score] initial measurement graph persistence', {
+        buckId: buck.id,
+        status: graphPersistence.status,
+        detail: graphPersistence.detail ?? null,
+        version: graphPersistence.version ?? null,
+      })
+    } catch (graphErr) {
+      console.error('[score] initial measurement graph persistence failed (non-blocking):', graphErr)
+    }
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
@@ -889,6 +955,8 @@ export async function POST(request: Request) {
       detection: detectionSummary ?? null,
       bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? null,
       measurementGraph: detectionSummary?.graph ?? null,
+      // Phase 3: Graph-native vs legacy score comparison metadata
+      scoreComparison: scoreComparison ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages
