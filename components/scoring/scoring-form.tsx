@@ -3,7 +3,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Eye, Calendar, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Eye, Calendar, AlertCircle, Printer, Ruler } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -45,6 +45,9 @@ const formSchema = z.object({
   precision_mode_enabled: z.boolean().optional().default(false),
   reference_type: z.enum(['none', 'ruler', 'credit_card', 'coin', 'aruco_marker', 'other_known_object']).optional().default('none'),
   reference_notes: z.string().optional().default(''),
+  reference_size_value: z.coerce.number().min(0.1).max(200).optional(),
+  reference_size_unit: z.enum(['in', 'cm', 'mm']).optional().default('in'),
+  reference_placement: z.enum(['same_depth_plane', 'near_antler_plane', 'in_front_or_behind', 'unknown']).optional().default('unknown'),
 })
 
 interface ScoringFormProps {
@@ -83,6 +86,9 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
       precision_mode_enabled: false,
       reference_type: 'none',
       reference_notes: '',
+      reference_size_value: undefined,
+      reference_size_unit: 'in',
+      reference_placement: 'unknown',
     },
   })
   
@@ -92,11 +98,27 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
   const watchReferenceType = form.watch('reference_type')
   const watchReferenceNotes = form.watch('reference_notes')
+  const watchReferenceSizeValue = form.watch('reference_size_value')
+  const watchReferenceSizeUnit = form.watch('reference_size_unit')
+  const watchReferencePlacement = form.watch('reference_placement')
+  const shouldShowReferenceSize =
+    watchReferenceType === 'aruco_marker' ||
+    watchReferenceType === 'ruler' ||
+    watchReferenceType === 'other_known_object'
+  const referenceSizeLabel =
+    watchReferenceType === 'ruler'
+      ? 'Readable Span'
+      : watchReferenceType === 'other_known_object'
+        ? 'Known Object Span'
+        : 'Marker Edge'
 
   const referenceModeSummary = buildReferenceModeSummary({
     precisionModeEnabled: watchPrecisionModeEnabled,
     referenceType: watchReferenceType,
     referenceNotes: watchReferenceNotes,
+    referenceSizeValue: watchReferenceSizeValue,
+    referenceSizeUnit: watchReferenceSizeUnit,
+    referencePlacement: watchReferencePlacement,
   })
 
   useImperativeHandle(ref, () => ({
@@ -531,7 +553,13 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                 <label className="text-xs font-medium text-muted-foreground">Reference Type</label>
                 <Select
                   value={watchReferenceType ?? 'none'}
-                  onValueChange={(value) => form.setValue('reference_type', value as any, { shouldDirty: true })}
+                  onValueChange={(value) => {
+                    form.setValue('reference_type', value as any, { shouldDirty: true })
+                    if (value === 'aruco_marker' && !form.getValues('reference_size_value')) {
+                      form.setValue('reference_size_value', 2, { shouldDirty: true })
+                      form.setValue('reference_size_unit', 'in', { shouldDirty: true })
+                    }
+                  }}
                 >
                   <SelectTrigger className="min-h-[48px]">
                     <SelectValue placeholder="Select reference type" />
@@ -546,6 +574,74 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                   </SelectContent>
                 </Select>
               </div>
+
+              {shouldShowReferenceSize && (
+                <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">{referenceSizeLabel}</label>
+                    <div className="relative">
+                      <Ruler className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        min="0.1"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="min-h-[48px] pl-9"
+                        value={watchReferenceSizeValue ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value ? Number(e.target.value) : undefined
+                          form.setValue('reference_size_value', value, { shouldDirty: true })
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">Unit</label>
+                    <Select
+                      value={watchReferenceSizeUnit ?? 'in'}
+                      onValueChange={(value) => form.setValue('reference_size_unit', value as any, { shouldDirty: true })}
+                    >
+                      <SelectTrigger className="min-h-[48px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="in">in</SelectItem>
+                        <SelectItem value="cm">cm</SelectItem>
+                        <SelectItem value="mm">mm</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              {watchReferenceType === 'aruco_marker' && (
+                <Button asChild variant="outline" size="sm" className="w-full">
+                  <a href="/precision-marker" target="_blank" rel="noreferrer">
+                    <Printer className="h-4 w-4" />
+                    Print marker
+                  </a>
+                </Button>
+              )}
+
+              {referenceModeSummary.referencePresent && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Reference Placement</label>
+                  <Select
+                    value={watchReferencePlacement ?? 'unknown'}
+                    onValueChange={(value) => form.setValue('reference_placement', value as any, { shouldDirty: true })}
+                  >
+                    <SelectTrigger className="min-h-[48px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="same_depth_plane">Same depth plane as rack</SelectItem>
+                      <SelectItem value="near_antler_plane">Near the rack plane</SelectItem>
+                      <SelectItem value="in_front_or_behind">In front of / behind rack</SelectItem>
+                      <SelectItem value="unknown">Unknown</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {/* Reference notes */}
               <div className="space-y-2">

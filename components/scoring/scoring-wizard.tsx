@@ -117,7 +117,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         url,
         file,
         slotKey: slotKey as any,
-        angleType: angle,
+        angleType: angle as AngleType,
         width,
         height,
         group: null,
@@ -215,10 +215,22 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
           precisionModeEnabled: data.precision_mode_enabled,
           referenceType: data.reference_type,
           referenceNotes: data.reference_notes,
+          referenceSizeValue: data.reference_size_value,
+          referenceSizeUnit: data.reference_size_unit,
+          referencePlacement: data.reference_placement,
         })
         apiFormData.append('precision_mode_enabled', String(data.precision_mode_enabled))
         apiFormData.append('reference_type', data.reference_type ?? 'none')
         if (data.reference_notes) apiFormData.append('reference_notes', data.reference_notes)
+        if (data.reference_size_value !== undefined) {
+          apiFormData.append('reference_size_value', String(data.reference_size_value))
+        }
+        if (data.reference_size_unit) {
+          apiFormData.append('reference_size_unit', data.reference_size_unit)
+        }
+        if (data.reference_placement) {
+          apiFormData.append('reference_placement', data.reference_placement)
+        }
         apiFormData.append('reference_mode_summary', JSON.stringify(referenceModeSummary))
       }
 
@@ -518,6 +530,9 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
                     precision_mode_enabled: false,
                     reference_type: 'none',
                     reference_notes: '',
+                    reference_size_value: undefined,
+                    reference_size_unit: 'in',
+                    reference_placement: 'unknown',
                     abnormal_point_tags: [],
                   } as ScoringFormData)
                 }

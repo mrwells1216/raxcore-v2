@@ -368,6 +368,9 @@ export interface ScoringFormData {
   precision_mode_enabled?: boolean
   reference_type?: 'none' | 'ruler' | 'credit_card' | 'coin' | 'aruco_marker' | 'other_known_object'
   reference_notes?: string
+  reference_size_value?: number
+  reference_size_unit?: 'in' | 'cm' | 'mm'
+  reference_placement?: 'same_depth_plane' | 'near_antler_plane' | 'in_front_or_behind' | 'unknown'
 }
 
 export interface GroundTruthFormData {

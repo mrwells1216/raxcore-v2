@@ -105,6 +105,9 @@ export async function POST(request: Request) {
   const precisionModeEnabledRaw = formData.get('precision_mode_enabled') as string | null
   const referenceTypeRaw = formData.get('reference_type') as string | null
   const referenceNotesRaw = formData.get('reference_notes') as string | null
+  const referenceSizeValueRaw = formData.get('reference_size_value') as string | null
+  const referenceSizeUnitRaw = formData.get('reference_size_unit') as string | null
+  const referencePlacementRaw = formData.get('reference_placement') as string | null
   const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
@@ -458,6 +461,9 @@ export async function POST(request: Request) {
       precisionModeEnabled: precisionModeEnabledRaw === 'true',
       referenceType: (referenceTypeRaw as Parameters<typeof buildPrecisionReferenceProfile>[0]['referenceType']) ?? 'none',
       referenceNotes: referenceNotesRaw,
+      referenceSizeValue: referenceSizeValueRaw,
+      referenceSizeUnit: referenceSizeUnitRaw,
+      referencePlacement: referencePlacementRaw,
     })
 
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)

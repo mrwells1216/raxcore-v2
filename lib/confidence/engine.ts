@@ -267,14 +267,26 @@ export function computeConfidence(inputs: ConfidenceInputs): ConfidenceResult {
   let referenceScore = 0
   const referenceSummary = inputs.referenceModeSummary
   if (referenceSummary?.precisionModeEnabled && referenceSummary?.referencePresent) {
-    if (referenceSummary?.shouldBoostConfidenceLater) {
-      referenceScore += 5
+    if (referenceSummary?.supportsScaleCalibration) {
+      const placement = referenceSummary?.referencePlacement
+      const placementAdjustment =
+        placement === 'same_depth_plane'
+          ? 0
+          : placement === 'near_antler_plane'
+            ? -1
+            : placement === 'in_front_or_behind'
+              ? -4
+              : -2
+      const impact = Math.max(1, 5 + placementAdjustment)
+      referenceScore += impact
       reasons.push({
         type: 'reference_boost',
         label: 'Strong scale reference recorded',
-        impact: 5,
+        impact,
         direction: 'boost',
-        details: `Reference type: ${referenceSummary.referenceType}.`,
+        details: referenceSummary.referenceSizeInches
+          ? `Reference type: ${referenceSummary.referenceType}; known size ${referenceSummary.referenceSizeInches.toFixed(2)}".`
+          : `Reference type: ${referenceSummary.referenceType}.`,
       })
     } else {
       referenceScore += 2

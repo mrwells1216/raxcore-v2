@@ -1,4 +1,11 @@
 import type { Measurements } from '@/lib/types'
+import {
+  getPlacementLabel,
+  getPlacementQualityMultiplier,
+  normalizeReferenceSizeInches,
+  type ReferencePlacement,
+  type ReferenceSizeUnit,
+} from './precision-marker'
 
 export type ReferenceType =
   | 'none'
@@ -14,6 +21,8 @@ export type ReferenceModeSummary = {
   referencePresent: boolean
   referenceNotes: string | null
   supportsScaleCalibration: boolean
+  referenceSizeInches: number | null
+  referencePlacement: ReferencePlacement | null
 }
 
 export type PrecisionReferenceObservation = {
@@ -45,6 +54,9 @@ export type PrecisionReferenceProfile = {
   knownDimensions: PrecisionReferenceDimension[]
   promptBlock: string | null
   confidenceBoost: number
+  referenceSizeInches: number | null
+  referencePlacement: ReferencePlacement | null
+  placementQualityMultiplier: number
   notes: string[]
 }
 
@@ -91,6 +103,9 @@ export function buildReferenceModeSummary(params: {
   precisionModeEnabled?: boolean | null
   referenceType?: ReferenceType | null
   referenceNotes?: string | null
+  referenceSizeValue?: number | string | null
+  referenceSizeUnit?: ReferenceSizeUnit | string | null
+  referencePlacement?: ReferencePlacement | string | null
 }): ReferenceModeSummary {
   const precisionModeEnabled = Boolean(params.precisionModeEnabled)
   const referenceType = params.referenceType ?? 'none'
@@ -103,6 +118,11 @@ export function buildReferenceModeSummary(params: {
     precisionModeEnabled && referenceType !== 'none'
 
   const supportsScaleCalibration = referencePresent
+  const referenceSizeInches = normalizeReferenceSizeInches(
+    params.referenceSizeValue,
+    params.referenceSizeUnit,
+  )
+  const referencePlacement = normalizeReferencePlacement(params.referencePlacement)
 
   return {
     precisionModeEnabled,
@@ -110,6 +130,8 @@ export function buildReferenceModeSummary(params: {
     referencePresent,
     referenceNotes,
     supportsScaleCalibration,
+    referenceSizeInches,
+    referencePlacement,
   }
 }
 
@@ -117,12 +139,18 @@ export function buildPrecisionReferenceProfile(params: {
   precisionModeEnabled?: boolean | null
   referenceType?: ReferenceType | null
   referenceNotes?: string | null
+  referenceSizeValue?: number | string | null
+  referenceSizeUnit?: ReferenceSizeUnit | string | null
+  referencePlacement?: ReferencePlacement | string | null
 }): PrecisionReferenceProfile | null {
   const summary = buildReferenceModeSummary(params)
   if (!summary.referencePresent) return null
 
   const noteText = summary.referenceNotes ?? ''
   const noteMeasurements = extractMeasurementsInInches(noteText)
+  const structuredMeasurements = summary.referenceSizeInches
+    ? [summary.referenceSizeInches, ...noteMeasurements]
+    : noteMeasurements
   const notes: string[] = []
   let typeLabel = summary.referenceType.replaceAll('_', ' ')
   let knownDimensions: PrecisionReferenceDimension[] = []
@@ -139,7 +167,7 @@ export function buildPrecisionReferenceProfile(params: {
       break
     case 'aruco_marker': {
       typeLabel = 'printed fiducial marker'
-      const parsedEdge = noteMeasurements[0]
+      const parsedEdge = structuredMeasurements[0]
       if (parsedEdge) {
         knownDimensions = [
           {
@@ -175,8 +203,8 @@ export function buildPrecisionReferenceProfile(params: {
     }
     case 'other_known_object': {
       typeLabel = 'known-size object'
-      if (noteMeasurements.length >= 2) {
-        const sorted = [...noteMeasurements].sort((a, b) => b - a)
+      if (structuredMeasurements.length >= 2) {
+        const sorted = [...structuredMeasurements].sort((a, b) => b - a)
         knownDimensions = [
           {
             label: 'object long edge',
@@ -191,11 +219,11 @@ export function buildPrecisionReferenceProfile(params: {
             weight: 0.35,
           },
         ]
-      } else if (noteMeasurements.length === 1) {
+      } else if (structuredMeasurements.length === 1) {
         knownDimensions = [
           {
             label: 'known object span',
-            inches: noteMeasurements[0],
+            inches: structuredMeasurements[0],
             observationField: 'estimated_long_edge_inches',
             weight: 1,
           },
@@ -223,6 +251,12 @@ export function buildPrecisionReferenceProfile(params: {
 
   if (summary.referenceNotes) {
     promptLines.push(`User notes: ${summary.referenceNotes}`)
+  }
+  if (summary.referenceSizeInches) {
+    promptLines.push(`Structured known size: ${summary.referenceSizeInches.toFixed(3)}".`)
+  }
+  if (summary.referencePlacement) {
+    promptLines.push(`Reference placement: ${getPlacementLabel(summary.referencePlacement)}.`)
   }
 
   if (summary.referenceType === 'ruler') {
@@ -255,6 +289,9 @@ export function buildPrecisionReferenceProfile(params: {
     knownDimensions,
     promptBlock: promptLines.join(' '),
     confidenceBoost: hardScaleEligible ? 6 : 3,
+    referenceSizeInches: summary.referenceSizeInches,
+    referencePlacement: summary.referencePlacement,
+    placementQualityMultiplier: getPlacementQualityMultiplier(summary.referencePlacement),
     notes,
   }
 }
@@ -286,7 +323,7 @@ export function applyPrecisionReferenceScaling(params: {
 
   const quality = clamp(Number(observation?.quality ?? 0), 0, 1)
   const distortion = clamp(Number(observation?.distortion ?? 0.35), 0, 1)
-  const qualityScore = clamp(quality * (1 - distortion), 0, 1)
+  const qualityScore = clamp(quality * (1 - distortion) * profile.placementQualityMultiplier, 0, 1)
 
   if (!observation?.detected) {
     return {
@@ -319,7 +356,7 @@ export function applyPrecisionReferenceScaling(params: {
   }> = []
 
   if (profile.summary.referenceType === 'ruler') {
-    const visibleSpan = observation?.visible_span_inches
+    const visibleSpan = observation?.visible_span_inches ?? profile.referenceSizeInches
     const anatomicalEstimate =
       observation?.estimated_long_edge_inches ??
       observation?.estimated_short_edge_inches
@@ -397,9 +434,26 @@ export function applyPrecisionReferenceScaling(params: {
         : `Detected ${profile.typeLabel}, but scale adjustment was negligible.`,
     notes: [
       ...profile.notes,
+      profile.referencePlacement
+        ? `Reference placement: ${getPlacementLabel(profile.referencePlacement)}.`
+        : 'Reference placement was not specified.',
       `Dominant reference measurement: ${dominant.label}.`,
     ],
   }
+}
+
+function normalizeReferencePlacement(
+  placement: ReferencePlacement | string | null | undefined,
+): ReferencePlacement | null {
+  if (
+    placement === 'same_depth_plane' ||
+    placement === 'near_antler_plane' ||
+    placement === 'in_front_or_behind' ||
+    placement === 'unknown'
+  ) {
+    return placement
+  }
+  return null
 }
 
 function scaleMeasurements(measurements: Measurements, scaleFactor: number): Measurements {

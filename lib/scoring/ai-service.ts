@@ -144,6 +144,8 @@ export interface ScoringOutput {
     qualityScore: number
     confidenceBoost: number
     dominantMeasurement: string | null
+    referenceSizeInches: number | null
+    referencePlacement: string | null
     summary: string
     notes: string[]
   } | null
@@ -1471,6 +1473,8 @@ async function buildVisionScoringOutput(
           qualityScore: precisionReferenceResult.qualityScore,
           confidenceBoost: precisionReferenceResult.confidenceBoost,
           dominantMeasurement: precisionReferenceResult.dominantMeasurement,
+          referenceSizeInches: input.precisionReferenceProfile.referenceSizeInches,
+          referencePlacement: input.precisionReferenceProfile.referencePlacement,
           summary: precisionReferenceResult.summary,
           notes: precisionReferenceResult.notes,
         }

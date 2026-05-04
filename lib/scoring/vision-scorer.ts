@@ -300,6 +300,7 @@ PRECISION REFERENCE MODE
 - Always populate reference_object. If the object is not visible, set detected to false.
 - For fixed-size references, estimated_*_inches must represent how large that object would measure under your current non-reference anatomical scale before downstream correction.
 - For rulers or tape measures, visible_span_inches should reflect the directly readable real-world span when markings are visible.
+- If the reference is not in the same depth plane as the rack, increase distortion and lower quality.
 `
     : ''
 
