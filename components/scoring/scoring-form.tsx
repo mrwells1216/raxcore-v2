@@ -515,7 +515,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             <div className="space-y-0.5">
               <h3 className="text-sm font-semibold text-foreground">Precision Mode</h3>
               <p className="text-xs text-muted-foreground">
-                Include a known-size reference for improved accuracy
+                Include a known-size reference so the score can rescale the rack when that object is clearly visible
               </p>
             </div>
             <Switch
@@ -551,7 +551,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Notes (optional)</label>
                 <Textarea
-                  placeholder="Example: standard credit card placed next to left beam"
+                  placeholder="Example: standard credit card beside left beam, or printed marker edge = 2.0 inches"
                   className="min-h-[60px] resize-none"
                   value={watchReferenceNotes ?? ''}
                   onChange={(e) => form.setValue('reference_notes', e.target.value, { shouldDirty: true })}
@@ -572,9 +572,9 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                     </div>
                     <div>
                       <span className="font-medium">Reference: {referenceModeSummary.referenceType}</span>
-                      {referenceModeSummary.shouldBoostConfidenceLater && (
+                      {referenceModeSummary.supportsScaleCalibration && (
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Strong candidate for future scale-aware confidence improvements
+                          Included in scale-aware scoring when the object and size are clear
                         </p>
                       )}
                     </div>

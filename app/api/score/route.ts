@@ -40,6 +40,7 @@ import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
+import { buildPrecisionReferenceProfile } from '@/lib/scoring/reference-mode'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -274,7 +275,10 @@ export async function POST(request: Request) {
     rackType: rackType,
     userId: userId || undefined,
     harvestMethod: harvestMethod || undefined,
-    sourceType: sourceType || undefined,
+    sourceType:
+      sourceType === 'mounted_photo' || sourceType === 'european_mount'
+        ? 'mount'
+        : sourceType || undefined,
     earsFullyVisible: earsFullyVisible,
     notes: notes || undefined,
     // Phase 54: Abnormal/Irregular Points
@@ -450,6 +454,12 @@ export async function POST(request: Request) {
       // ignore parse error
     }
 
+    const precisionReferenceProfile = buildPrecisionReferenceProfile({
+      precisionModeEnabled: precisionModeEnabledRaw === 'true',
+      referenceType: (referenceTypeRaw as Parameters<typeof buildPrecisionReferenceProfile>[0]['referenceType']) ?? 'none',
+      referenceNotes: referenceNotesRaw,
+    })
+
     // Run AI scoring (Phase 39: pass requestId as traceId for observability)
     const scoringResult = await scoreBuck({
       images: resolvedImages,
@@ -460,34 +470,9 @@ export async function POST(request: Request) {
       captureDevice: captureDevice || undefined,
       harvestYear: Number.isFinite(harvestYear) ? harvestYear ?? undefined : undefined,
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
+      precisionReferenceProfile,
       traceId: requestId,
     })
-
-    // Apply intake quality adjustments to confidence and error bands
-    let adjustedConfidence = scoringResult.confidencePercent
-    let adjustedErrorBandLow = scoringResult.errorBandLow
-    let adjustedErrorBandHigh = scoringResult.errorBandHigh
-    
-    if (intakeQuality) {
-      // Apply confidence adjustment from intake quality
-      adjustedConfidence = Math.max(15, Math.min(95, adjustedConfidence + intakeQuality.confidenceAdjustment))
-      
-      // Apply error band widening
-      if (intakeQuality.errorBandWidening > 1.0) {
-        const midpoint = scoringResult.predictedGross
-        const originalRange = scoringResult.errorBandHigh - scoringResult.errorBandLow
-        const newRange = originalRange * intakeQuality.errorBandWidening
-        adjustedErrorBandLow = midpoint - (newRange / 2)
-        adjustedErrorBandHigh = midpoint + (newRange / 2)
-      }
-      
-      // Add intake quality factors to confidence explanation
-      if (intakeQuality.weakestFactors.length > 0) {
-        scoringResult.confidenceExplanation.push(
-          `Image quality factors: ${intakeQuality.weakestFactors.join(', ')}`
-        )
-      }
-    }
 
     // Apply calibration from training data using unified calibration engine
     const rawPredictedGross =
@@ -523,9 +508,12 @@ export async function POST(request: Request) {
     ;(scoringResult as any).rawConfidence = rawConfidence
 
     // Apply calibrated values
-    scoringResult.predictedGross = calibrated.calibratedGross
-    scoringResult.predictedNet = calibrated.calibratedNet
-    scoringResult.confidencePercent = calibrated.calibratedConfidence
+    scoringResult.predictedGross =
+      calibrated.calibratedGross ?? scoringResult.predictedGross
+    scoringResult.predictedNet =
+      calibrated.calibratedNet ?? scoringResult.predictedNet
+    scoringResult.confidencePercent =
+      calibrated.calibratedConfidence ?? scoringResult.confidencePercent
 
     ;(scoringResult as any).calibrationApplied = calibrated.calibrationApplied
     ;(scoringResult as any).calibrationMeta = calibrated.calibrationMeta
@@ -536,6 +524,74 @@ export async function POST(request: Request) {
       rawGross: rawPredictedGross,
       calibratedGross: calibrated.calibratedGross,
     })
+
+    // Compute final confidence using the confidence engine before persisting results
+    const confidenceResult = computeConfidence({
+      rawConfidence:
+        typeof (scoringResult as any).rawConfidence === 'number'
+          ? (scoringResult as any).rawConfidence
+          : typeof scoringResult?.confidencePercent === 'number'
+            ? scoringResult.confidencePercent
+            : null,
+
+      captureQualitySummary: captureQualitySummary ?? null,
+      imageDiagnosticsSummary: imageDiagnosticsSummary ?? null,
+      referenceModeSummary: referenceModeSummary ?? null,
+
+      measurements:
+        scoringResult?.measurements ??
+        (scoringResult as any)?.rawAiResponse?.measurements ??
+        null,
+
+      isFallback: Boolean((scoringResult as any)?.isFallback),
+      calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
+      calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
+    })
+
+    ;(scoringResult as any).rawConfidence =
+      typeof (scoringResult as any).rawConfidence === 'number'
+        ? (scoringResult as any).rawConfidence
+        : confidenceResult.rawConfidence
+
+    scoringResult.confidencePercent = confidenceResult.finalConfidence
+    ;(scoringResult as any).confidenceBand = confidenceResult.confidenceBand
+    ;(scoringResult as any).confidenceReasons = confidenceResult.reasons
+    ;(scoringResult as any).confidenceComponentScores = confidenceResult.componentScores
+
+    console.log('[score] confidence engine result', {
+      rawConfidence: confidenceResult.rawConfidence,
+      finalConfidence: confidenceResult.finalConfidence,
+      confidenceBand: confidenceResult.confidenceBand,
+      reasons: confidenceResult.reasons,
+      componentScores: confidenceResult.componentScores,
+    })
+
+    // Apply intake quality adjustments to the finalized confidence and error bands
+    let adjustedConfidence = scoringResult.confidencePercent
+    let adjustedErrorBandLow = scoringResult.errorBandLow
+    let adjustedErrorBandHigh = scoringResult.errorBandHigh
+
+    if (intakeQuality) {
+      adjustedConfidence = Math.max(15, Math.min(95, adjustedConfidence + intakeQuality.confidenceAdjustment))
+
+      if (intakeQuality.errorBandWidening > 1.0) {
+        const midpoint = scoringResult.predictedGross
+        const originalRange = scoringResult.errorBandHigh - scoringResult.errorBandLow
+        const newRange = originalRange * intakeQuality.errorBandWidening
+        adjustedErrorBandLow = midpoint - (newRange / 2)
+        adjustedErrorBandHigh = midpoint + (newRange / 2)
+      }
+
+      if (intakeQuality.weakestFactors.length > 0) {
+        scoringResult.confidenceExplanation.push(
+          `Image quality factors: ${intakeQuality.weakestFactors.join(', ')}`
+        )
+      }
+    }
+
+    scoringResult.confidencePercent = adjustedConfidence
+    scoringResult.errorBandLow = adjustedErrorBandLow
+    scoringResult.errorBandHigh = adjustedErrorBandHigh
 
     // Get active model version
     const model = await getActiveModelVersion()
@@ -604,7 +660,7 @@ export async function POST(request: Request) {
         confidenceExplanation: scoringResult.confidenceExplanation,
         scalingReferencesUsed: scoringResult.scalingReferencesUsed,
         disclaimer: SCORING_DISCLAIMER
-      },
+      } as any,
       rawResponse: {
         ...scoringResult,
         state,
@@ -615,7 +671,7 @@ export async function POST(request: Request) {
           scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
           rackType: rackType as 'typical' | 'non-typical',
           confidenceNotes: scoringResult.confidenceExplanation ?? [],
-          mainFramePoints: scoringResult.mainFramePoints ?? 10,
+          mainFramePoints: mainFramePoints ?? 10,
         }),
         // Detection phase data
         detection: detectionSummary ?? undefined,
@@ -630,7 +686,7 @@ export async function POST(request: Request) {
           return null
         }
       })() : null
-    })
+    } as any)
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
@@ -756,7 +812,7 @@ export async function POST(request: Request) {
       status: 'success',
       durationMs: totalDurationMs,
       modelUsed: scoringResult.visionModelUsed ?? undefined,
-      modelVersion: model?.slug ?? undefined,
+      modelVersion: model?.version_name ?? undefined,
       fallbackUsed: scoringResult.scoringMethod !== 'vision',
       retryCount: scoringResult.runtimeMetadata?.totalAttempts
         ? scoringResult.runtimeMetadata.totalAttempts - 1
@@ -771,58 +827,17 @@ export async function POST(request: Request) {
       },
     })
 
-    // Compute final confidence using the confidence engine
-    const confidenceResult = computeConfidence({
-      rawConfidence:
-        typeof (scoringResult as any).rawConfidence === 'number'
-          ? (scoringResult as any).rawConfidence
-          : typeof scoringResult?.confidencePercent === 'number'
-            ? scoringResult.confidencePercent
-            : null,
-
-      captureQualitySummary: captureQualitySummary ?? null,
-      imageDiagnosticsSummary: imageDiagnosticsSummary ?? null,
-      referenceModeSummary: referenceModeSummary ?? null,
-
-      measurements:
-        scoringResult?.measurements ??
-        scoringResult?.rawAiResponse?.measurements ??
-        null,
-
-      isFallback: Boolean(scoringResult?.isFallback),
-      calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
-      calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
-    })
-
-    ;(scoringResult as any).rawConfidence =
-      typeof (scoringResult as any).rawConfidence === 'number'
-        ? (scoringResult as any).rawConfidence
-        : confidenceResult.rawConfidence
-
-    scoringResult.confidencePercent = confidenceResult.finalConfidence
-    ;(scoringResult as any).confidenceBand = confidenceResult.confidenceBand
-    ;(scoringResult as any).confidenceReasons = confidenceResult.reasons
-    ;(scoringResult as any).confidenceComponentScores = confidenceResult.componentScores
-
-    console.log('[score] confidence engine result', {
-      rawConfidence: confidenceResult.rawConfidence,
-      finalConfidence: confidenceResult.finalConfidence,
-      confidenceBand: confidenceResult.confidenceBand,
-      reasons: confidenceResult.reasons,
-      componentScores: confidenceResult.componentScores,
-    })
-
-    // Phase 50: Shadow precision pass — fire-and-forget, 10% rollout
+    // Phase 50: Shadow precision pass - fire-and-forget, 10% rollout
     // Does not block the response; failures are logged only.
     {
       const SHADOW_ROLLOUT_PERCENT = 10
       const shouldShadow = Math.random() * 100 < SHADOW_ROLLOUT_PERCENT
-      if (shouldShadow) {
+      if (shouldShadow && userId) {
         ;(async () => {
           try {
             await startPrecisionPass({
               predictionId: prediction.id,
-              requestedByUserId: userId ?? null,
+              requestedByUserId: userId,
             })
           } catch (shadowErr) {
             console.error('[score] Phase 50 shadow precision pass enqueue failed (non-blocking):', shadowErr)
@@ -847,13 +862,14 @@ export async function POST(request: Request) {
         low: adjustedErrorBandLow,
         high: adjustedErrorBandHigh
       },
-      confidence: (scoringResult as any).confidenceBand ?? (scoringResult.confidencePercent >= 75 ? 'high' : scoringResult.confidencePercent >= 50 ? 'medium' : 'low'),
-      confidencePercent: scoringResult.confidencePercent,
+      confidence: (scoringResult as any).confidenceBand ?? (adjustedConfidence >= 75 ? 'high' : adjustedConfidence >= 50 ? 'medium' : 'low'),
+      confidencePercent: adjustedConfidence,
       measurements: scoringResult.measurements,
       landmarks: scoringResult.landmarks,
       stateCalibration: scoringResult.stateCalibration,
       confidenceExplanation: scoringResult.confidenceExplanation,
       scalingReferencesUsed: scoringResult.scalingReferencesUsed,
+      precisionReferenceMetadata: scoringResult.precisionReferenceMetadata ?? null,
       learningSummary: scoringResult.learningSummary,
       disclaimer: SCORING_DISCLAIMER,
       images: buckImages.map(img => img.image_url),
@@ -883,7 +899,7 @@ export async function POST(request: Request) {
         scalingReference: scoringResult.scalingReferencesUsed?.[0] ?? 'unknown',
         rackType: rackType as 'typical' | 'non-typical',
         confidenceNotes: scoringResult.confidenceExplanation ?? [],
-        mainFramePoints: scoringResult.mainFramePoints ?? 10,
+        mainFramePoints: mainFramePoints ?? 10,
       }),
       // Detection phase data
       detection: detectionSummary ?? null,

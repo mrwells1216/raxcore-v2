@@ -28,6 +28,7 @@ import {
   type FallbackMetadata
 } from './fallback-handler'
 import { logEventFireForget } from '@/lib/monitoring/service'
+import type { PrecisionReferenceProfile } from './reference-mode'
 
 // OpenAI is the only provider for scoring vision calls.
 // Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
@@ -84,6 +85,7 @@ export interface VisionScoringInput {
   sourceType?: string
   captureDevice?: string
   mainFramePoints?: number
+  precisionReference?: PrecisionReferenceProfile | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -209,6 +211,30 @@ const VisionLandmarksSchema = z.object({
   ear_base_spacing_px_inches: optionalCoercedNumber(),
 })
 
+const ReferenceObjectSchema = z.object({
+  detected: coerceBool(false).describe('Whether the user-supplied precision reference was detected clearly'),
+  type: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim()) ? val.trim() : 'none',
+    z.string()
+  ).describe('Detected reference object type'),
+  quality: coerceNumber(0).describe('Detection quality for the reference object (0-1)'),
+  distortion: coerceNumber(0.35).describe('Perspective distortion affecting the reference object (0-1)'),
+  estimated_long_edge_inches: optionalCoercedNumber().describe('Estimated long-edge length under the current non-reference anatomical scale'),
+  estimated_short_edge_inches: optionalCoercedNumber().describe('Estimated short-edge length under the current non-reference anatomical scale'),
+  estimated_diameter_inches: optionalCoercedNumber().describe('Estimated diameter under the current non-reference anatomical scale'),
+  visible_span_inches: optionalCoercedNumber().describe('Visible real-world span if ruler or tape marks are directly readable'),
+  notes: z.preprocess(
+    (val) => Array.isArray(val) ? val.filter((v): v is string => typeof v === 'string') : [],
+    z.array(z.string())
+  ).describe('Reference-specific notes or caveats'),
+}).default({
+  detected: false,
+  type: 'none',
+  quality: 0,
+  distortion: 0.35,
+  notes: [],
+})
+
 // Helper: coerce angle enum values with fallback
 const coerceAngleEnum = () =>
   z.preprocess(
@@ -235,6 +261,7 @@ const coerceRackType = () =>
 const VisionOutputSchema = z.object({
   measurements: VisionMeasurementsSchema,
   landmarks: VisionLandmarksSchema,
+  reference_object: ReferenceObjectSchema,
   gross_score: coerceNumber(120).describe('Calculated gross B&C score'),
   net_score: coerceNumber(115).describe('Calculated net B&C score'),
   confidence_percent: coerceNumber(50).describe('Confidence in the estimate (10-95%)'),
@@ -264,6 +291,17 @@ function buildVisionPrompt(input: VisionScoringInput): string {
   const angleDescriptions = input.images.map((img, i) => 
     `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})`
   ).join('\n')
+  const precisionReferenceBlock = input.precisionReference?.promptBlock
+    ? `
+PRECISION REFERENCE MODE
+- User intentionally included a known-size reference object.
+- ${input.precisionReference.promptBlock}
+- If the hard reference is clearly visible and its size is known, prioritize it over anatomical priors for absolute scale.
+- Always populate reference_object. If the object is not visible, set detected to false.
+- For fixed-size references, estimated_*_inches must represent how large that object would measure under your current non-reference anatomical scale before downstream correction.
+- For rulers or tape measures, visible_span_inches should reflect the directly readable real-world span when markings are visible.
+`
+    : ''
 
   return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
@@ -279,6 +317,8 @@ CONTEXT:
 
 IMAGES PROVIDED:
 ${angleDescriptions}
+
+${precisionReferenceBlock}
 
 ═══════════════════════════════════════════════════════════════
 MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS
@@ -441,6 +481,29 @@ function normalizeVisionResponse(raw: unknown): unknown {
     ear_base_spacing_px_inches: rawLandmarks?.ear_base_spacing_px_inches,
   }
 
+  const rawReferenceObject = obj.reference_object as Record<string, unknown> | undefined
+  const reference_object = {
+    detected: toBool(rawReferenceObject?.detected, false),
+    type: typeof rawReferenceObject?.type === 'string' ? rawReferenceObject.type : 'none',
+    quality: Math.max(0, Math.min(1, toNum(rawReferenceObject?.quality, 0))),
+    distortion: Math.max(0, Math.min(1, toNum(rawReferenceObject?.distortion, 0.35))),
+    estimated_long_edge_inches: rawReferenceObject?.estimated_long_edge_inches != null
+      ? toNum(rawReferenceObject.estimated_long_edge_inches, 0)
+      : undefined,
+    estimated_short_edge_inches: rawReferenceObject?.estimated_short_edge_inches != null
+      ? toNum(rawReferenceObject.estimated_short_edge_inches, 0)
+      : undefined,
+    estimated_diameter_inches: rawReferenceObject?.estimated_diameter_inches != null
+      ? toNum(rawReferenceObject.estimated_diameter_inches, 0)
+      : undefined,
+    visible_span_inches: rawReferenceObject?.visible_span_inches != null
+      ? toNum(rawReferenceObject.visible_span_inches, 0)
+      : undefined,
+    notes: Array.isArray(rawReferenceObject?.notes)
+      ? rawReferenceObject.notes.filter((n): n is string => typeof n === 'string')
+      : [],
+  }
+
   // Normalize angle_quality
   const rawAngleQuality = obj.angle_quality as Record<string, unknown> | undefined
   const validAngles = ['front', 'left', 'right', 'back', 'other', 'none']
@@ -465,6 +528,7 @@ function normalizeVisionResponse(raw: unknown): unknown {
   return {
     measurements,
     landmarks,
+    reference_object,
     gross_score: toNum(obj.gross_score, 120),
     net_score: toNum(obj.net_score, 115),
     confidence_percent: Math.min(95, Math.max(10, toNum(obj.confidence_percent, 50))),

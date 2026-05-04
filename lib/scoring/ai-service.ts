@@ -42,7 +42,11 @@ import type { ExtendedLearningSummary, CalibrationProfile, MeasurementCorrection
 // Phase 42: Geometry consistency and reference ranking
 import { checkGeometryConsistency, geometryResultToMetadata, type GeometryConsistencyResult } from './geometry-consistency'
 import { rankReferenceSources, referenceRankingToMetadata, type ReferenceRanking } from './reference-ranking'
-import { computeEnhancedLandmarks, type EnhancedLandmarkData } from './landmarks'
+import { computeEnhancedLandmarks } from './landmarks'
+import {
+  applyPrecisionReferenceScaling,
+  type PrecisionReferenceProfile,
+} from './reference-mode'
 
 export interface ImageAnalysisInput {
   imageUrl: string
@@ -63,6 +67,7 @@ export interface ScoringInput {
   // Phase 20: Optional explicit calibration profile for model comparison
   // If not provided, uses the active calibration profile
   calibrationProfile?: CalibrationProfile | null
+  precisionReferenceProfile?: PrecisionReferenceProfile | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -131,6 +136,17 @@ export interface ScoringOutput {
   referenceConsensusResult?: ReferenceConsensusOutput | null
   // Training correction layer — structured output for UI and logging
   trainingCorrectionResult?: TrainingCorrectionResult | null
+  precisionReferenceMetadata?: {
+    referenceType: string
+    applied: boolean
+    detected: boolean
+    scaleFactor: number
+    qualityScore: number
+    confidenceBoost: number
+    dominantMeasurement: string | null
+    summary: string
+    notes: string[]
+  } | null
 }
 
 // Learning summary exposed to UI
@@ -734,6 +750,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     sourceType: input.sourceType,
     captureDevice: input.captureDevice,
     mainFramePoints: input.mainFramePoints,
+    precisionReference: input.precisionReferenceProfile,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 
@@ -865,11 +882,23 @@ async function buildVisionScoringOutput(
   startTime: number
 ): Promise<ScoringOutput> {
   const visionOutput = visionResult.output
-  const rawMeasurements = visionOutputToMeasurements(visionOutput)
+  const unscaledMeasurements = visionOutputToMeasurements(visionOutput)
   const rawLandmarks = visionOutputToLandmarks(visionOutput)
+  const precisionReferenceResult = applyPrecisionReferenceScaling({
+    profile: input.precisionReferenceProfile,
+    observation: visionOutput.reference_object,
+    measurements: unscaledMeasurements,
+  })
+  const rawMeasurements = precisionReferenceResult.adjustedMeasurements
+  const precisionAdjustedVisionGross = precisionReferenceResult.applied
+    ? Number((visionOutput.gross_score * precisionReferenceResult.scaleFactor).toFixed(1))
+    : visionOutput.gross_score
 
   // STAGE 1: Raw vision output
-  const baseVisionConfidence = visionOutput.confidence_percent
+  const baseVisionConfidence = Math.min(
+    97,
+    visionOutput.confidence_percent + precisionReferenceResult.confidenceBoost,
+  )
 
   // STAGE 2: Normalization - reduce outliers, enforce realistic ranges
   const normalizationResult = normalizeMeasurements(rawMeasurements)
@@ -928,8 +957,8 @@ async function buildVisionScoringOutput(
   // Phase 54: Weighted multi-reference consensus
   const referenceQualityData = visionOutputToReferenceQualityData(visionOutput)
   const referenceConsensusResult = computeReferenceConsensus({
-    visionGross:            visionOutput.gross_score,
-    visionConfidencePercent: visionOutput.confidence_percent,
+    visionGross:            precisionAdjustedVisionGross,
+    visionConfidencePercent: baseVisionConfidence,
     landmarks:              rawLandmarks,
     angleTypes:             angles,
     earsFullyVisible:       input.earsFullyVisible,
@@ -1216,6 +1245,13 @@ async function buildVisionScoringOutput(
     ...visionOutput.explanation,
     `Vision model analyzed ${input.images.length} image(s) with ${baseVisionConfidence}% base confidence.`,
   ]
+
+  if (precisionReferenceResult.detected) {
+    explanations.push(precisionReferenceResult.summary)
+  }
+  if (precisionReferenceResult.notes.length > 0) {
+    explanations.push(...precisionReferenceResult.notes)
+  }
   
   // Add normalization info if adjustments were made
   if (normalizationResult.adjustments.length > 0) {
@@ -1280,6 +1316,14 @@ async function buildVisionScoringOutput(
   const scalingReferencesUsed: string[] = [...visionOutput.anatomical_references_used]
   if (input.mainFramePoints) {
     scalingReferencesUsed.push(`User-provided frame hint (${input.mainFramePoints}-point)`)
+  }
+  if (input.precisionReferenceProfile?.summary.referencePresent) {
+    const precisionRefLabel = `Precision reference (${input.precisionReferenceProfile.typeLabel})`
+    scalingReferencesUsed.push(
+      precisionReferenceResult.applied
+        ? `${precisionRefLabel} ${precisionReferenceResult.summary}`
+        : precisionRefLabel
+    )
   }
   // Phase 54: Add dominant reference labels from consensus
   if (referenceConsensusResult.dominantReferences.length > 0) {
@@ -1418,6 +1462,19 @@ async function buildVisionScoringOutput(
     referenceConsensusResult,
     // Training correction layer output
     trainingCorrectionResult,
+    precisionReferenceMetadata: input.precisionReferenceProfile
+      ? {
+          referenceType: input.precisionReferenceProfile.summary.referenceType,
+          applied: precisionReferenceResult.applied,
+          detected: precisionReferenceResult.detected,
+          scaleFactor: precisionReferenceResult.scaleFactor,
+          qualityScore: precisionReferenceResult.qualityScore,
+          confidenceBoost: precisionReferenceResult.confidenceBoost,
+          dominantMeasurement: precisionReferenceResult.dominantMeasurement,
+          summary: precisionReferenceResult.summary,
+          notes: precisionReferenceResult.notes,
+        }
+      : null,
   }
 }
 

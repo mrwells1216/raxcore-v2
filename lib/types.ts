@@ -3171,7 +3171,20 @@ export interface PredictionSegmentLog {
 // ========================================
 
 export type LandmarkQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
-export type ReferenceSourceType = 'strong_ear' | 'partial_ear' | 'strong_eye' | 'combined_ear_eye' | 'weak_fallback' | 'none'
+export type ReferenceSourceType =
+  | 'eye_box'
+  | 'pedicle_spacing'
+  | 'eye_to_pedicle'
+  | 'skull_width'
+  | 'nose_bridge'
+  | 'muzzle_width'
+  | 'ear_base_spacing'
+  | 'strong_ear'
+  | 'partial_ear'
+  | 'strong_eye'
+  | 'combined_ear_eye'
+  | 'weak_fallback'
+  | 'none'
 export type GeometryConsistencyTier = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
 export type AsymmetryCause = 'real_asymmetry' | 'poor_angle' | 'weak_reference' | 'unknown'
 
