@@ -11,6 +11,7 @@ import { EditableImageCarousel } from './editable-image-carousel'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
+import { resolveImageRoles } from '@/lib/scoring/resolve-image-roles'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
@@ -199,11 +200,22 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
         apiFormData.append('intake_quality', JSON.stringify(qualitySummary))
       }
 
+      // Resolve capture angles: use explicit UI selection when available, fall
+      // back to the image's own angleType, then fill any remaining unknowns
+      // with unclaimed canonical roles (front → left → right).  This ensures
+      // the capture-quality summary never sends [null, null, null] even when
+      // the user has not explicitly labelled each photo.
+      const resolvedCaptureAngles = resolveImageRoles(
+        gridImages.map((img, index) => ({
+          angleType: selectedImageAngles[index] ?? (img.angleType as CaptureAngle),
+        })),
+      ).map((entry) => entry.resolvedAngle as CaptureAngle)
+
       const captureQuality = buildCaptureQualitySummary({
         images: gridImages.map(img => ({ name: `Image ${img.id}` })),
-        selectedAngles: selectedImageAngles.map(a => a ?? undefined),
+        selectedAngles: resolvedCaptureAngles,
       })
-      apiFormData.append('selected_image_angles', JSON.stringify(selectedImageAngles))
+      apiFormData.append('selected_image_angles', JSON.stringify(resolvedCaptureAngles))
       apiFormData.append('capture_quality_summary', JSON.stringify({
         coverage: captureQuality.coverage,
         recommendation: captureQuality.recommendation,

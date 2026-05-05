@@ -41,6 +41,7 @@ import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
 import { buildPrecisionReferenceProfile } from '@/lib/scoring/reference-mode'
+import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -693,6 +694,18 @@ export async function POST(request: Request) {
         }
       })() : null
     } as any)
+
+    // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
+    const graphPersistence = await persistInitialMeasurementGraph({
+      buckId: buck.id,
+      detectionGraph: detectionSummary?.graph ?? null,
+    })
+    console.log('[score] initial measurement graph persistence', {
+      buckId: buck.id,
+      status: graphPersistence.status,
+      version: graphPersistence.version ?? null,
+      detail: graphPersistence.detail ?? null,
+    })
 
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')

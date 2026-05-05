@@ -122,6 +122,9 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   const stableRef   = useRef(0)
   const lastAutoRef = useRef(0)
   const lastUpdateRef = useRef(0)
+  // Tracks whether the component is still mounted; prevents AbortError retry
+  // noise on normal teardown and races between getUserMedia and unmount.
+  const isActiveRef = useRef(true)
 
   const [isStreaming, setIsStreaming]    = useState(false)
   const [cameraError, setCameraError]   = useState<string | null>(null)
@@ -137,6 +140,9 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   // ── Camera start/stop ────────────────────────────────────────────────────────
 
   const startCamera = useCallback(async (facing: 'environment' | 'user') => {
+    // Bail immediately if the component has already unmounted
+    if (!isActiveRef.current) return
+
     setCameraError(null)
     try {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
@@ -144,27 +150,43 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
         video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       })
+
+      // Component may have unmounted while awaiting getUserMedia
+      if (!isActiveRef.current) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
       }
+
+      // Check again after the async play() call
+      if (!isActiveRef.current) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+
       setIsStreaming(true)
-  } catch (err) {
-  // Handle AbortError gracefully (tab lost focus, React re-render interrupted stream)
-  if (err instanceof Error && err.name === 'AbortError') {
-    console.warn('[scan-mode] camera aborted, will retry on next mount')
-    return
-  }
-  console.error('[scan-mode] camera start failed:', err)
-  setCameraError('Camera access denied. Tap to retry.')
-  setIsStreaming(false)
-  }
+    } catch (err) {
+      // Silently discard errors that happen after unmount — they are not real
+      // failures, just the result of React strict-mode double-invocation or
+      // navigation away while the camera was starting.
+      if (!isActiveRef.current) return
+
+      console.warn('[scan-mode] camera initialization failed', err)
+      setCameraError('Camera access denied. Tap to retry.')
+      setIsStreaming(false)
+    }
   }, [])
 
   useEffect(() => {
+    isActiveRef.current = true
     startCamera(facingMode)
     return () => {
+      isActiveRef.current = false
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
