@@ -154,11 +154,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Debug: Log parsed form values
-    console.log('[v0] Parsed form data - state:', state, 'rackType:', rackType)
-    
     if (!state || !rackType) {
-      console.error('[v0] Validation failed - state:', state, 'rackType:', rackType)
       return NextResponse.json({ error: 'State and rack type are required' }, { status: 400 })
     }
 
