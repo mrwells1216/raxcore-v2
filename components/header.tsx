@@ -32,72 +32,40 @@ interface HeaderProps {
   usageSlot?: React.ReactNode
 }
 
-/** RAXCORE antler icon — matches the circuit-board plate from the brand identity */
+/** RAXCORE logo — the circuit-board plate brand image */
 function RaxcoreLogo({ size = 28 }: { size?: number }) {
   return (
-    <svg
-      width={size}
+    <img
+      src="/raxcore-logo.jpg"
+      alt="RAXcore Antler Analytics logo"
+      width={size * 1.75}
       height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden
-      style={{ display: 'block' }}
-    >
-      <rect x="1" y="1" width="30" height="30" rx="4" fill="url(#plate)" stroke="url(#rim)" strokeWidth="1" />
-      <path
-        d="M16 24 L14 19 L11 17 L9 13 L11 10 L13 12 L14 9 L13 6
-           M16 24 L18 19 L21 17 L23 13 L21 10 L19 12 L18 9 L19 6"
-        stroke="url(#antlerGrad)"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <path
-        d="M4 4 L7 4 M28 4 L25 4 M4 28 L7 28 M28 28 L25 28"
-        stroke="url(#trace)"
-        strokeWidth="0.8"
-        strokeLinecap="round"
-      />
-      <defs>
-        <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="#3a2e1a" />
-          <stop offset="100%" stopColor="#221a0e" />
-        </linearGradient>
-        <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%"   stopColor="#d4a84b" />
-          <stop offset="100%" stopColor="#6b4e1c" />
-        </linearGradient>
-        <linearGradient id="antlerGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="#d4a84b" />
-          <stop offset="60%"  stopColor="#a07828" />
-          <stop offset="100%" stopColor="#6b4e1c" />
-        </linearGradient>
-        <linearGradient id="trace" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%"   stopColor="#a07828" stopOpacity="0.8" />
-          <stop offset="100%" stopColor="#6b4e1c" stopOpacity="0.4" />
-        </linearGradient>
-      </defs>
-    </svg>
+      style={{
+        display: 'block',
+        objectFit: 'cover',
+        borderRadius: 4,
+      }}
+    />
   )
 }
 
-/** Wordmark: RAXCORE in chamfered outline style */
+/** Wordmark: RAXCORE — copper "RAX" + silver-outline "CORE", matching the brand plate */
 function RaxcoreWordmark({ className }: { className?: string }) {
   return (
     <span className={cn('flex items-baseline gap-0', className)}>
       <span
-        className="font-black tracking-[0.12em] text-base leading-none"
-        style={{ color: 'var(--bronze-light)', letterSpacing: '0.12em' }}
+        className="font-black leading-none"
+        style={{ color: '#c8845a', letterSpacing: '0.1em', fontSize: '1rem' }}
       >
         RAX
       </span>
       <span
-        className="font-black tracking-[0.12em] text-base leading-none"
+        className="font-black leading-none"
         style={{
           color: 'transparent',
-          WebkitTextStroke: '1.2px var(--bronze-mid)',
-          letterSpacing: '0.12em',
+          WebkitTextStroke: '1.1px #d9cfc4',
+          letterSpacing: '0.1em',
+          fontSize: '1rem',
         }}
       >
         CORE

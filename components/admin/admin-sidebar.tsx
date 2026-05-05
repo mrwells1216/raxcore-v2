@@ -72,8 +72,8 @@ export function AdminSidebar() {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
         <Link href="/admin" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
-          <span className="font-semibold">RAXcore Admin</span>
+          <img src="/raxcore-logo.jpg" alt="RAXcore logo" width={56} height={32} className="rounded object-cover" />
+          <span className="font-semibold" style={{ color: '#c8845a' }}>Admin</span>
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -96,8 +96,8 @@ export function AdminSidebar() {
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
             <Link href="/admin" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
-              <span className="font-semibold text-sidebar-foreground">RAXcore Admin</span>
+              <img src="/raxcore-logo.jpg" alt="RAXcore logo" width={60} height={34} className="rounded object-cover" />
+              <span className="font-semibold" style={{ color: '#c8845a' }}>Admin</span>
             </Link>
             <Button 
               variant="ghost" 
