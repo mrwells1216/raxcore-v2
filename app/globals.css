@@ -47,56 +47,56 @@
 }
 
 .dark {
-  /* RAXCORE — gunmetal dark + distressed bronze */
-  --background: #161412;
-  --foreground: #e8dcc8;
-  --card: #1e1b18;
-  --card-foreground: #e8dcc8;
-  --popover: #1e1b18;
-  --popover-foreground: #e8dcc8;
+  /* RAXCORE — gunmetal panel + copper/rose-gold accent (matched to brand plate) */
+  --background: #1a1816;
+  --foreground: #e4dcd0;
+  --card: #222018;
+  --card-foreground: #e4dcd0;
+  --popover: #222018;
+  --popover-foreground: #e4dcd0;
 
-  /* Bronze is the primary brand metal */
-  --primary: #a07828;
-  --primary-foreground: #0e0d0b;
-  --secondary: #252118;
-  --secondary-foreground: #c8b890;
-  --muted: #252118;
-  --muted-foreground: #7a6d55;
-  --accent: #d4a84b;
-  --accent-foreground: #0e0d0b;
+  /* Copper — matched to the exact tone on the brand plate logo */
+  --primary: #a86840;
+  --primary-foreground: #0e0c0a;
+  --secondary: #272320;
+  --secondary-foreground: #c0a888;
+  --muted: #272320;
+  --muted-foreground: #7a6a58;
+  --accent: #b87248;
+  --accent-foreground: #0e0c0a;
   --destructive: #8b2c2c;
-  --destructive-foreground: #e8dcc8;
-  --border: #3a3220;
-  --input: #2a2418;
-  --ring: #a07828;
+  --destructive-foreground: #e4dcd0;
+  --border: #3a2e22;
+  --input: #2a2420;
+  --ring: #a86840;
 
   /* Charts */
-  --chart-1: #a07828;
-  --chart-2: #d4a84b;
+  --chart-1: #a86840;
+  --chart-2: #b87248;
   --chart-3: #4a7c44;
-  --chart-4: #c8903a;
-  --chart-5: #7a5020;
+  --chart-4: #c08030;
+  --chart-5: #6e3e18;
 
-  /* Sidebar */
+  /* Sidebar — slightly darker than main bg, matching the plate background */
   --sidebar: #131110;
-  --sidebar-foreground: #e8dcc8;
-  --sidebar-primary: #a07828;
-  --sidebar-primary-foreground: #0e0d0b;
-  --sidebar-accent: #252118;
-  --sidebar-accent-foreground: #c8b890;
-  --sidebar-border: #3a3220;
-  --sidebar-ring: #a07828;
+  --sidebar-foreground: #e4dcd0;
+  --sidebar-primary: #a86840;
+  --sidebar-primary-foreground: #0e0c0a;
+  --sidebar-accent: #272320;
+  --sidebar-accent-foreground: #c0a888;
+  --sidebar-border: #3a2e22;
+  --sidebar-ring: #a86840;
 
   /* Semantic */
   --success: #4a7c44;
-  --success-foreground: #e8dcc8;
-  --warning: #c8903a;
-  --warning-foreground: #0e0d0b;
+  --success-foreground: #e4dcd0;
+  --warning: #c08030;
+  --warning-foreground: #0e0c0a;
 
-  /* RAXCORE bronze scale — used in inline styles throughout the app */
-  --bronze-light: #d4a84b;
-  --bronze-mid:   #a07828;
-  --bronze-dark:  #5a4010;
+  /* RAXCORE copper scale — matched exactly to the logo plate */
+  --bronze-light: #b87248;
+  --bronze-mid:   #a86840;
+  --bronze-dark:  #5c3418;
 
   /* Scan / tactical green */
   --scan-green: #5ab850;

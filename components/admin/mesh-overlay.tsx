@@ -22,11 +22,13 @@ type SelectableItem =
   | { type: 'spread'; item: Spread }
   | { type: 'circumference'; index: number; item: CircumferencePoint };
 
+// Confidence tiers match the spec: green (high) → yellow (medium) → red (low).
+// Selected segments use cyan so they are never confused with low-confidence red.
 const COLORS = {
-  high: '#22c55e',    // green - high confidence
-  medium: '#3b82f6',  // blue - medium confidence
-  low: '#f59e0b',     // amber - low confidence
-  selected: '#ef4444' // red - selected
+  high:     '#22c55e',  // green  — confidence >= 0.75
+  medium:   '#eab308',  // yellow — confidence >= 0.50
+  low:      '#ef4444',  // red    — confidence <  0.50
+  selected: '#06b6d4',  // cyan   — currently selected segment
 };
 
 function getColorForConfidence(confidence: number, isSelected: boolean): string {
@@ -34,6 +36,16 @@ function getColorForConfidence(confidence: number, isSelected: boolean): string 
   if (confidence >= 0.75) return COLORS.high;
   if (confidence >= 0.5) return COLORS.medium;
   return COLORS.low;
+}
+
+/** Human-readable provenance origin label for the selection panel */
+function provenanceLabel(provenance: { origin?: string; visibility?: string; notes?: string } | undefined): string | null {
+  if (!provenance) return null;
+  const parts: string[] = [];
+  if (provenance.origin) parts.push(provenance.origin.toUpperCase());
+  if (provenance.visibility) parts.push(provenance.visibility);
+  if (provenance.notes) parts.push(`"${provenance.notes}"`);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function getItemId(item: SelectableItem): string {
@@ -355,17 +367,20 @@ export function MeshOverlay({
 
           {/* Confidence legend */}
           <g className="pointer-events-none">
-            <rect x="10" y="10" width="140" height="85" fill="rgba(0,0,0,0.6)" rx="4" />
+            <rect x="10" y="10" width="155" height="100" fill="rgba(0,0,0,0.65)" rx="4" />
             <text x="15" y="28" fill="white" fontSize="12" fontWeight="bold">Confidence</text>
-            
-            <line x1="15" y1="38" x2="30" y2="38" stroke={COLORS.high} strokeWidth="2" />
-            <text x="35" y="42" fill="white" fontSize="11">High (0.75+)</text>
-            
-            <line x1="15" y1="52" x2="30" y2="52" stroke={COLORS.medium} strokeWidth="2" />
-            <text x="35" y="56" fill="white" fontSize="11">Medium (0.5-0.75)</text>
-            
-            <line x1="15" y1="66" x2="30" y2="66" stroke={COLORS.low} strokeWidth="2" />
-            <text x="35" y="70" fill="white" fontSize="11">Low (&lt;0.5)</text>
+
+            <line x1="15" y1="40" x2="30" y2="40" stroke={COLORS.high} strokeWidth="2.5" />
+            <text x="36" y="44" fill="white" fontSize="11">High (0.75+)</text>
+
+            <line x1="15" y1="56" x2="30" y2="56" stroke={COLORS.medium} strokeWidth="2.5" />
+            <text x="36" y="60" fill="white" fontSize="11">Medium (0.5–0.75)</text>
+
+            <line x1="15" y1="72" x2="30" y2="72" stroke={COLORS.low} strokeWidth="2.5" />
+            <text x="36" y="76" fill="white" fontSize="11">Low (&lt;0.5)</text>
+
+            <line x1="15" y1="88" x2="30" y2="88" stroke={COLORS.selected} strokeWidth="2.5" strokeDasharray="4,3" />
+            <text x="36" y="92" fill="white" fontSize="11">Selected</text>
           </g>
         </svg>
       </div>
@@ -374,12 +389,21 @@ export function MeshOverlay({
       {!readOnly && selectedInfo && (
         <Card className="p-4 space-y-4 bg-secondary/30">
           <div>
-            <p className="text-sm font-medium mb-2">
+            <p className="text-sm font-medium mb-1">
               Selected: <span className="text-primary">{getSelectedLabel()}</span>
             </p>
             <p className="text-xs text-muted-foreground">
               Confidence: {(getSelectedConfidence() * 100).toFixed(0)}%
             </p>
+            {(() => {
+              const prov = (selectedInfo.item as { provenance?: Parameters<typeof provenanceLabel>[0] }).provenance;
+              const label = provenanceLabel(prov);
+              return label ? (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Provenance: <span className="font-mono">{label}</span>
+                </p>
+              ) : null;
+            })()}
           </div>
 
           <div className="space-y-2">

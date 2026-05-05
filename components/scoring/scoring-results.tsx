@@ -73,6 +73,16 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
   fallbackMetadata?: { summary?: string; fallbackStrategy?: string } | null
   // B&C-style score sheet for measurement breakdown
   scoreSheet?: ScoreSheet | null
+  // Build B: graph-native score comparison
+  scoreComparison?: {
+    activeSource: 'graph_native' | 'legacy'
+    legacyGross: number | null
+    graphGross: number | null
+    grossDelta: number | null
+    graphCompleteness: number
+    graphSource: string
+    reason: string
+  } | null
 }
 
 interface ScoringResultsProps {
@@ -491,6 +501,23 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                   </>
                 )}
               </Badge>
+              {result.scoreComparison && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-xs gap-1',
+                    result.scoreComparison.activeSource === 'graph_native'
+                      ? 'border-green-500/40 text-green-700 dark:text-green-400'
+                      : 'border-muted-foreground/30 text-muted-foreground',
+                  )}
+                  title={result.scoreComparison.reason}
+                >
+                  <Ruler className="h-3 w-3" />
+                  {result.scoreComparison.activeSource === 'graph_native'
+                    ? `Graph (${Math.round(result.scoreComparison.graphCompleteness * 100)}%)`
+                    : 'Legacy AI'}
+                </Badge>
+              )}
             </div>
           </div>
 

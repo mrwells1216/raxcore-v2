@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { buildTrainingSample } from '@/lib/training/build-training-sample'
 import { getReviewCompleteness } from '@/lib/review/review-completeness'
 import { isOfficialReview } from '@/lib/review/is-official-review'
+import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 
 export async function POST(req: Request) {
   const db = await createClient()
@@ -116,6 +118,121 @@ export async function POST(req: Request) {
 
     savedReviewedScoreSheet = data
     updated = false
+  }
+
+  // Part 5: Patch canonical measurement graph with human-corrected values.
+  // Each edited measurement is stamped: origin='human', visibility='corrected'.
+  // Fields that cannot map to graph segments are noted as warnings, not errors.
+  // This is best-effort and never blocks the save response.
+  {
+    const m = reviewedSheet?.measurements ?? {}
+    const graphWarnings: string[] = []
+    ;(async () => {
+      try {
+        const effective = await loadEffectiveMeasurementGraph(buckId)
+        if (effective.source === 'fallback') return
+
+        const graph = structuredClone(effective.graph) as typeof effective.graph & Record<string, unknown>
+        const humanProv = {
+          origin: 'human' as const,
+          visibility: 'corrected' as const,
+          notes: 'Manual score edit',
+        }
+
+        // Beams
+        if (typeof m.main_beam_left === 'number' && m.main_beam_left > 0) {
+          graph.beams.left.length = m.main_beam_left
+          graph.beams.left.provenance = humanProv
+        }
+        if (typeof m.main_beam_right === 'number' && m.main_beam_right > 0) {
+          graph.beams.right.length = m.main_beam_right
+          graph.beams.right.provenance = humanProv
+        }
+        // Spread
+        if (typeof m.inside_spread === 'number' && m.inside_spread > 0) {
+          graph.spread.distance = m.inside_spread
+          graph.spread.provenance = humanProv
+        }
+        // Tines: g1_left … g5_right
+        const tineKeys: Array<[string, string, 'left' | 'right']> = [
+          ['g1_left', 'G1', 'left'], ['g1_right', 'G1', 'right'],
+          ['g2_left', 'G2', 'left'], ['g2_right', 'G2', 'right'],
+          ['g3_left', 'G3', 'left'], ['g3_right', 'G3', 'right'],
+          ['g4_left', 'G4', 'left'], ['g4_right', 'G4', 'right'],
+          ['g5_left', 'G5', 'left'], ['g5_right', 'G5', 'right'],
+        ]
+        for (const [key, label, side] of tineKeys) {
+          const val = m[key]
+          if (typeof val !== 'number' || val <= 0) continue
+          const existing = graph.tines.find((t: any) => t.label === label && t.side === side)
+          if (existing) {
+            existing.length = val
+            existing.provenance = humanProv
+          } else {
+            graphWarnings.push(`Edited field ${key} not graph-mapped yet — no matching tine in graph`)
+          }
+        }
+        // Circumferences: h1_left … h4_right
+        const circKeys: Array<[string, string, 'left' | 'right']> = [
+          ['h1_left', 'H1', 'left'], ['h1_right', 'H1', 'right'],
+          ['h2_left', 'H2', 'left'], ['h2_right', 'H2', 'right'],
+          ['h3_left', 'H3', 'left'], ['h3_right', 'H3', 'right'],
+          ['h4_left', 'H4', 'left'], ['h4_right', 'H4', 'right'],
+        ]
+        for (const [key, label, side] of circKeys) {
+          const val = m[key]
+          if (typeof val !== 'number' || val <= 0) continue
+          const existing = graph.circumferences.find((c: any) => c.label === label && c.side === side)
+          if (existing) {
+            existing.circumference = val
+            existing.provenance = humanProv
+          } else {
+            graphWarnings.push(`Edited field ${key} not graph-mapped yet — no matching circumference in graph`)
+          }
+        }
+
+        // Persist new version
+        const adminDb = await getServiceSupabase()
+        const newVersion = (effective.version ?? 0) + 1
+        const insertPayload: Record<string, unknown> = {
+          graph,
+          version: newVersion,
+          confidence: null,
+          source: 'human_review',
+          created_at: new Date().toISOString(),
+        }
+
+        // Use correct FK column (buck_id modern, rack_id legacy)
+        if (effective.graphId) {
+          // We have a persisted row — check which column it uses
+          const { data: existingRow } = await adminDb
+            .from('measurement_graphs')
+            .select('buck_id, rack_id')
+            .eq('id', effective.graphId)
+            .maybeSingle()
+          if (existingRow?.buck_id) insertPayload.buck_id = buckId
+          else insertPayload.rack_id = buckId
+        } else {
+          insertPayload.buck_id = buckId
+        }
+
+        const { error: graphErr } = await adminDb
+          .from('measurement_graphs')
+          .insert(insertPayload)
+
+        if (graphErr) {
+          console.warn('[review-save] graph patch insert failed (non-blocking):', graphErr.message)
+        } else {
+          console.log('[review-save] graph patch persisted', {
+            buckId,
+            newVersion,
+            warnings: graphWarnings,
+          })
+        }
+      } catch (gErr) {
+        console.warn('[review-save] graph patch error (non-blocking):', gErr instanceof Error ? gErr.message : String(gErr))
+      }
+    })()
   }
 
   // Load original prediction for training truth build

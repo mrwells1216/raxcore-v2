@@ -30,6 +30,7 @@ import {
   Boxes,
   Eye,
   Zap,
+  ClipboardCheck,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -60,6 +61,7 @@ const navigation = [
   { name: 'Supervision', href: '/admin/supervision', icon: Eye },
   { name: 'Training Packs', href: '/admin/training-packs', icon: Zap },
   { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
+  { name: 'Official Score', href: '/admin/official-score', icon: ClipboardCheck },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
@@ -71,9 +73,8 @@ export function AdminSidebar() {
     <>
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
-        <Link href="/admin" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
-          <span className="font-semibold">RAXcore Admin</span>
+        <Link href="/admin" className="flex items-center">
+          <img src="/raxcore-logo.jpg" alt="RAXcore Antler Analytics" style={{ height: 32, width: 'auto', borderRadius: 4 }} />
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -95,9 +96,8 @@ export function AdminSidebar() {
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
-            <Link href="/admin" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">Rx</div>
-              <span className="font-semibold text-sidebar-foreground">RAXcore Admin</span>
+            <Link href="/admin" className="flex items-center">
+              <img src="/raxcore-logo.jpg" alt="RAXcore Antler Analytics" style={{ height: 34, width: 'auto', borderRadius: 4 }} />
             </Link>
             <Button 
               variant="ghost" 
