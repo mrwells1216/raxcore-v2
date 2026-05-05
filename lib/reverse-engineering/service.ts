@@ -134,6 +134,18 @@ export async function startPrecisionPass(params: {
   requestedByUserId: string
   /** Optional manual overrides — fields corrected by the user before re-running. */
   manualOverrides?: Record<string, unknown> | null
+  /** Part 6: scoreComparison from the original scoring run, if available */
+  scoreComparison?: {
+    activeSource: 'graph_native' | 'legacy'
+    legacyGross: number | null
+    graphGross: number | null
+    legacyNet: number | null
+    graphNet: number | null
+    grossDelta: number | null
+    graphCompleteness: number
+    graphSource: string
+    reason: string
+  } | null
 }): Promise<{ run: ReverseRunRow; jobId: string }> {
   const supabase = await getServiceSupabase()
 
@@ -216,6 +228,18 @@ export async function startPrecisionPass(params: {
         reverseRunId: run.id,
         ...(params.manualOverrides && Object.keys(params.manualOverrides).length > 0
           ? { manualOverrides: params.manualOverrides }
+          : {}),
+        // Part 6: pass scoreComparison so precision pass knows active source + graph values
+        ...(params.scoreComparison
+          ? {
+              activeSource: params.scoreComparison.activeSource,
+              legacyGross: params.scoreComparison.legacyGross,
+              graphGross: params.scoreComparison.graphGross,
+              legacyNet: params.scoreComparison.legacyNet,
+              graphNet: params.scoreComparison.graphNet,
+              graphCompleteness: params.scoreComparison.graphCompleteness,
+              graphSource: params.scoreComparison.graphSource,
+            }
           : {}),
       },
       priority: 'high',

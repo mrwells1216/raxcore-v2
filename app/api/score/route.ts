@@ -50,6 +50,11 @@ function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
 }
 
+// Guard: is a number finite and positive?
+function finite(v: unknown): v is number {
+  return typeof v === 'number' && isFinite(v) && v > 0
+}
+
 // Extract client identifier from request
 function getClientKey(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for')
@@ -534,6 +539,59 @@ export async function POST(request: Request) {
       calibratedGross: calibrated.calibratedGross,
     })
 
+    // Part 3: Build graph evidence for confidence engine from the detection graph.
+    // This is best-effort — any failure leaves graphEvidenceForConfidence null.
+    let graphEvidenceForConfidence: import('@/lib/confidence/engine').GraphEvidenceInputs | null = null
+    try {
+      const graphForConf = detectionSummary?.graph
+        ? (() => {
+            const { convertDetectionGraphToMeasurementGraph } = require('@/lib/scoring/graph-conversion')
+            return convertDetectionGraphToMeasurementGraph(detectionSummary.graph)
+          })()
+        : null
+
+      if (graphForConf) {
+        const { scoreFromGraph: sfgConf } = require('@/lib/scoring/score-from-graph')
+        const { getLowConfidenceMeasurements } = require('@/lib/scoring')
+        const graphScoreConf = sfgConf(graphForConf)
+        const legacyGrossConf = scoringResult.predictedGross ?? null
+
+        let correctedSegmentCount = 0
+        let inferredSegmentCount = 0
+
+        const allSegments = [
+          graphForConf.beams?.left,
+          graphForConf.beams?.right,
+          graphForConf.spread,
+          ...(graphForConf.tines ?? []),
+          ...(graphForConf.circumferences ?? []),
+        ].filter(Boolean)
+
+        for (const seg of allSegments) {
+          const p = (seg as any)?.provenance
+          if (p?.origin === 'human' || p?.visibility === 'corrected') correctedSegmentCount++
+          if (p?.visibility === 'inferred') inferredSegmentCount++
+        }
+
+        const lowConfSegs = getLowConfidenceMeasurements(graphForConf, 0.5)
+
+        graphEvidenceForConfidence = {
+          graphSource: 'prediction_graph',
+          graphCompleteness: graphScoreConf.completeness,
+          correctedSegmentCount,
+          inferredSegmentCount,
+          lowConfidenceSegmentCount: lowConfSegs.length,
+          legacyGraphGrossDelta: legacyGrossConf != null
+            ? Math.abs(graphScoreConf.grossScore - legacyGrossConf)
+            : null,
+          missingCircumferences: graphForConf.circumferences.length === 0 ||
+            graphForConf.circumferences.every((c: any) => !(c.circumference > 0)),
+        }
+      }
+    } catch {
+      // non-blocking — confidence engine works fine without graph evidence
+    }
+
     // Compute final confidence using the confidence engine before persisting results
     const confidenceResult = computeConfidence({
       rawConfidence:
@@ -555,6 +613,7 @@ export async function POST(request: Request) {
       isFallback: Boolean((scoringResult as any)?.isFallback),
       calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
       calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
+      graphEvidence: graphEvidenceForConfidence,
     })
 
     ;(scoringResult as any).rawConfidence =
@@ -566,6 +625,7 @@ export async function POST(request: Request) {
     ;(scoringResult as any).confidenceBand = confidenceResult.confidenceBand
     ;(scoringResult as any).confidenceReasons = confidenceResult.reasons
     ;(scoringResult as any).confidenceComponentScores = confidenceResult.componentScores
+    ;(scoringResult as any).confidenceEvidence = confidenceResult.confidenceEvidence ?? null
 
     console.log('[score] confidence engine result', {
       rawConfidence: confidenceResult.rawConfidence,
@@ -709,54 +769,71 @@ export async function POST(request: Request) {
       detail: graphPersistence.detail ?? null,
     })
 
-    // Build B: graph-native score comparison (fire-and-forget, best-effort)
-    // Loads the just-persisted (or derived) graph and computes a parallel score.
-    // The result is surfaced in the response as scoreComparison but does NOT
-    // replace the legacy AI score — that only happens once completeness >= 0.80
-    // and the difference is within 3 inches.
+    // Graph-native score comparison — always fires, best-effort, never blocks response.
+    // Active source rule (Part 1):
+    //   graph_native when: source is persisted_graph or prediction_graph
+    //                      AND completeness >= 0.75
+    //                      AND graphGross is finite and > 0
+    //   legacy otherwise
     let scoreComparison: {
       activeSource: 'graph_native' | 'legacy'
-      legacyGross: number
-      graphGross: number
-      legacyNet: number
-      graphNet: number
-      grossDelta: number
-      netDelta: number
+      legacyGross: number | null
+      graphGross: number | null
+      legacyNet: number | null
+      graphNet: number | null
+      grossDelta: number | null
+      netDelta: number | null
       graphCompleteness: number
+      graphSource: 'persisted_graph' | 'prediction_graph' | 'fallback'
+      reason: string
     } | null = null
 
     try {
       const effective = await loadEffectiveMeasurementGraph(buck.id)
-      if (effective.source !== 'fallback') {
-        const graphScore = scoreFromGraphNative(effective.graph)
-        const legacyGross = scoringResult.predictedGross ?? 0
-        const legacyNet = scoringResult.predictedNet ?? 0
-        const grossDelta = Math.abs(graphScore.grossScore - legacyGross)
-        const netDelta = Math.abs(graphScore.netScore - legacyNet)
-        const activeSource =
-          graphScore.completeness >= 0.80 && grossDelta <= 3
-            ? 'graph_native'
-            : 'legacy'
+      const graphScore = scoreFromGraphNative(effective.graph)
+      const legacyGross = scoringResult.predictedGross ?? null
+      const legacyNet = scoringResult.predictedNet ?? null
+      const graphGross = graphScore.grossScore
+      const graphNet = graphScore.netScore
+      const grossDelta = legacyGross != null ? Math.abs(graphGross - legacyGross) : null
+      const netDelta = legacyNet != null ? Math.abs(graphNet - legacyNet) : null
 
-        scoreComparison = {
-          activeSource,
-          legacyGross,
-          graphGross: graphScore.grossScore,
-          legacyNet,
-          graphNet: graphScore.netScore,
-          grossDelta,
-          netDelta,
-          graphCompleteness: graphScore.completeness,
-        }
+      // Active source decision
+      let activeSource: 'graph_native' | 'legacy' = 'legacy'
+      let reason = ''
 
-        console.log('[score] graph-native comparison', {
-          buckId: buck.id,
-          graphSource: effective.source,
-          activeSource,
-          grossDelta,
-          graphCompleteness: graphScore.completeness,
-        })
+      if (effective.source === 'fallback') {
+        reason = 'Graph source is fallback — no usable graph'
+      } else if (graphScore.completeness < 0.75) {
+        reason = `Graph completeness too low (${(graphScore.completeness * 100).toFixed(0)}% < 75%)`
+      } else if (!finite(graphGross) || graphGross <= 0) {
+        reason = 'Graph gross score is invalid (non-finite or zero)'
+      } else {
+        activeSource = 'graph_native'
+        reason = `Graph completeness ${(graphScore.completeness * 100).toFixed(0)}%, source: ${effective.source}`
       }
+
+      scoreComparison = {
+        activeSource,
+        legacyGross,
+        graphGross,
+        legacyNet,
+        graphNet,
+        grossDelta,
+        netDelta,
+        graphCompleteness: graphScore.completeness,
+        graphSource: effective.source,
+        reason,
+      }
+
+      console.log('[score] graph-native comparison', {
+        buckId: buck.id,
+        graphSource: effective.source,
+        activeSource,
+        grossDelta,
+        graphCompleteness: graphScore.completeness,
+        reason,
+      })
     } catch (compErr) {
       console.warn('[score] graph comparison failed (non-blocking):', compErr instanceof Error ? compErr.message : String(compErr))
     }
@@ -980,6 +1057,8 @@ export async function POST(request: Request) {
       measurementGraph: detectionSummary?.graph ?? null,
       // Build B: graph-native score comparison
       scoreComparison,
+      // Part 3: graph evidence breakdown for confidence
+      confidenceEvidence: (scoringResult as any).confidenceEvidence ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

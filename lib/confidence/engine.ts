@@ -8,6 +8,14 @@ export type ConfidenceReasonType =
   | 'symmetry_penalty'
   | 'deduction_penalty'
   | 'missing_metadata_penalty'
+  // Graph evidence types (Part 3)
+  | 'graph_source_boost'
+  | 'graph_completeness_boost'
+  | 'graph_human_correction_boost'
+  | 'graph_inferred_penalty'
+  | 'graph_low_confidence_penalty'
+  | 'graph_missing_circumference_penalty'
+  | 'graph_legacy_delta_penalty'
 
 export type ConfidenceReason = {
   type: ConfidenceReasonType
@@ -15,6 +23,23 @@ export type ConfidenceReason = {
   impact: number
   direction: 'boost' | 'penalty'
   details?: string | null
+}
+
+export type GraphEvidenceInputs = {
+  /** 'persisted_graph' | 'prediction_graph' | 'fallback' */
+  graphSource?: string | null
+  /** 0–1 weighted completeness from scoreFromGraph */
+  graphCompleteness?: number | null
+  /** Number of segments with origin='human' / visibility='corrected' */
+  correctedSegmentCount?: number | null
+  /** Number of segments with visibility='inferred' */
+  inferredSegmentCount?: number | null
+  /** Number of segments with confidence < 0.5 */
+  lowConfidenceSegmentCount?: number | null
+  /** |graphGross - legacyGross| — null if either missing */
+  legacyGraphGrossDelta?: number | null
+  /** True when graph has no circumference values at all */
+  missingCircumferences?: boolean | null
 }
 
 export type ConfidenceInputs = {
@@ -29,6 +54,8 @@ export type ConfidenceInputs = {
   isFallback?: boolean | null
   calibrationApplied?: boolean | null
   calibrationMeta?: any | null
+  /** Part 3: graph evidence signals layered on top of existing confidence */
+  graphEvidence?: GraphEvidenceInputs | null
 }
 
 export type ConfidenceResult = {
@@ -46,7 +73,18 @@ export type ConfidenceResult = {
     calibrationScore: number
     symmetryScore: number
     deductionScore: number
+    graphEvidenceScore: number
   }
+  /** Part 3: structured summary of graph evidence factors that affected confidence */
+  confidenceEvidence?: {
+    graphSource: string | null
+    graphCompleteness: number | null
+    correctedSegmentCount: number | null
+    inferredSegmentCount: number | null
+    lowConfidenceSegmentCount: number | null
+    legacyGraphGrossDelta: number | null
+    reasons: string[]
+  } | null
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -420,6 +458,182 @@ export function computeConfidence(inputs: ConfidenceInputs): ConfidenceResult {
   }
   total += deductionScore
 
+  // ── Part 3: Graph evidence layer ──────────────────────────────────────────
+  // Applied conservatively on top of all existing signals.
+  let graphEvidenceScore = 0
+  const graphEvidenceReasons: string[] = []
+  const ge = inputs.graphEvidence
+
+  if (ge) {
+    // Persisted graph boost (strongest signal — human-validated geometry)
+    if (ge.graphSource === 'persisted_graph') {
+      graphEvidenceScore += 5
+      reasons.push({
+        type: 'graph_source_boost',
+        label: 'Persisted measurement graph',
+        impact: 5,
+        direction: 'boost',
+        details: 'Canonical geometry was saved to the database.',
+      })
+      graphEvidenceReasons.push('Persisted graph source +5')
+    } else if (ge.graphSource === 'prediction_graph') {
+      graphEvidenceScore += 2
+      reasons.push({
+        type: 'graph_source_boost',
+        label: 'Prediction-derived graph',
+        impact: 2,
+        direction: 'boost',
+        details: 'Graph derived from latest AI prediction.',
+      })
+      graphEvidenceReasons.push('Prediction graph source +2')
+    }
+
+    // Graph completeness boost
+    const gComp = ge.graphCompleteness ?? 0
+    if (gComp >= 0.85) {
+      graphEvidenceScore += 6
+      reasons.push({
+        type: 'graph_completeness_boost',
+        label: 'High graph completeness',
+        impact: 6,
+        direction: 'boost',
+        details: `Graph completeness ${(gComp * 100).toFixed(0)}%.`,
+      })
+      graphEvidenceReasons.push(`Graph completeness ${(gComp * 100).toFixed(0)}% +6`)
+    } else if (gComp >= 0.65) {
+      graphEvidenceScore += 2
+      reasons.push({
+        type: 'graph_completeness_boost',
+        label: 'Moderate graph completeness',
+        impact: 2,
+        direction: 'boost',
+        details: `Graph completeness ${(gComp * 100).toFixed(0)}%.`,
+      })
+      graphEvidenceReasons.push(`Graph completeness ${(gComp * 100).toFixed(0)}% +2`)
+    } else if (gComp < 0.4 && ge.graphSource !== 'fallback') {
+      graphEvidenceScore -= 4
+      reasons.push({
+        type: 'graph_completeness_boost',
+        label: 'Low graph completeness',
+        impact: 4,
+        direction: 'penalty',
+        details: `Graph completeness ${(gComp * 100).toFixed(0)}%.`,
+      })
+      graphEvidenceReasons.push(`Graph completeness ${(gComp * 100).toFixed(0)}% -4`)
+    }
+
+    // Human-corrected segments boost
+    const corrected = ge.correctedSegmentCount ?? 0
+    if (corrected >= 3) {
+      graphEvidenceScore += 5
+      reasons.push({
+        type: 'graph_human_correction_boost',
+        label: 'Multiple human-corrected segments',
+        impact: 5,
+        direction: 'boost',
+        details: `${corrected} segments corrected by human review.`,
+      })
+      graphEvidenceReasons.push(`${corrected} human-corrected segments +5`)
+    } else if (corrected >= 1) {
+      graphEvidenceScore += 2
+      reasons.push({
+        type: 'graph_human_correction_boost',
+        label: 'Human-corrected segment(s)',
+        impact: 2,
+        direction: 'boost',
+        details: `${corrected} segment(s) corrected by human review.`,
+      })
+      graphEvidenceReasons.push(`${corrected} human-corrected segment(s) +2`)
+    }
+
+    // Inferred geometry penalty
+    const inferred = ge.inferredSegmentCount ?? 0
+    if (inferred >= 4) {
+      graphEvidenceScore -= 6
+      reasons.push({
+        type: 'graph_inferred_penalty',
+        label: 'Many inferred graph segments',
+        impact: 6,
+        direction: 'penalty',
+        details: `${inferred} segments use inferred geometry.`,
+      })
+      graphEvidenceReasons.push(`${inferred} inferred segments -6`)
+    } else if (inferred >= 2) {
+      graphEvidenceScore -= 3
+      reasons.push({
+        type: 'graph_inferred_penalty',
+        label: 'Some inferred graph segments',
+        impact: 3,
+        direction: 'penalty',
+        details: `${inferred} segments use inferred geometry.`,
+      })
+      graphEvidenceReasons.push(`${inferred} inferred segments -3`)
+    }
+
+    // Low-confidence segment penalty
+    const lowConf = ge.lowConfidenceSegmentCount ?? 0
+    if (lowConf >= 3) {
+      graphEvidenceScore -= 5
+      reasons.push({
+        type: 'graph_low_confidence_penalty',
+        label: 'Several low-confidence segments',
+        impact: 5,
+        direction: 'penalty',
+        details: `${lowConf} segments with confidence < 0.5.`,
+      })
+      graphEvidenceReasons.push(`${lowConf} low-confidence segments -5`)
+    } else if (lowConf >= 1) {
+      graphEvidenceScore -= 2
+      reasons.push({
+        type: 'graph_low_confidence_penalty',
+        label: 'Low-confidence segment(s)',
+        impact: 2,
+        direction: 'penalty',
+        details: `${lowConf} segment(s) with confidence < 0.5.`,
+      })
+      graphEvidenceReasons.push(`${lowConf} low-confidence segment(s) -2`)
+    }
+
+    // Missing circumferences penalty
+    if (ge.missingCircumferences) {
+      graphEvidenceScore -= 5
+      reasons.push({
+        type: 'graph_missing_circumference_penalty',
+        label: 'No circumference values in graph',
+        impact: 5,
+        direction: 'penalty',
+        details: 'Circumference measurements increase gross score accuracy.',
+      })
+      graphEvidenceReasons.push('No circumferences in graph -5')
+    }
+
+    // Large legacy-vs-graph delta penalty
+    const delta = ge.legacyGraphGrossDelta
+    if (delta != null && delta > 15) {
+      graphEvidenceScore -= 8
+      reasons.push({
+        type: 'graph_legacy_delta_penalty',
+        label: 'Large AI vs graph score discrepancy',
+        impact: 8,
+        direction: 'penalty',
+        details: `|legacy - graph| gross delta: ${delta.toFixed(1)} inches.`,
+      })
+      graphEvidenceReasons.push(`Legacy-graph delta ${delta.toFixed(1)}" -8`)
+    } else if (delta != null && delta > 8) {
+      graphEvidenceScore -= 4
+      reasons.push({
+        type: 'graph_legacy_delta_penalty',
+        label: 'Moderate AI vs graph score discrepancy',
+        impact: 4,
+        direction: 'penalty',
+        details: `|legacy - graph| gross delta: ${delta.toFixed(1)} inches.`,
+      })
+      graphEvidenceReasons.push(`Legacy-graph delta ${delta.toFixed(1)}" -4`)
+    }
+
+    total += graphEvidenceScore
+  }
+
   const finalConfidence = clamp(Math.round(total), 5, 99)
 
   let confidenceBand: ConfidenceResult['confidenceBand'] = 'low'
@@ -441,6 +655,18 @@ export function computeConfidence(inputs: ConfidenceInputs): ConfidenceResult {
       calibrationScore,
       symmetryScore,
       deductionScore,
+      graphEvidenceScore,
     },
+    confidenceEvidence: ge
+      ? {
+          graphSource: ge.graphSource ?? null,
+          graphCompleteness: ge.graphCompleteness ?? null,
+          correctedSegmentCount: ge.correctedSegmentCount ?? null,
+          inferredSegmentCount: ge.inferredSegmentCount ?? null,
+          lowConfidenceSegmentCount: ge.lowConfidenceSegmentCount ?? null,
+          legacyGraphGrossDelta: ge.legacyGraphGrossDelta ?? null,
+          reasons: graphEvidenceReasons,
+        }
+      : null,
   }
 }
