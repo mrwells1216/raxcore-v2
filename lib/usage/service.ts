@@ -281,6 +281,18 @@ export async function createUsageRecord(input: UsageRecordInput): Promise<UsageR
   return data
 }
 
+/**
+ * Returns true when the Supabase/PostgREST error is a PostgreSQL 42703
+ * "undefined_column" — typically caused by a database trigger or generated
+ * column referencing `updated_at` when the table schema has drifted.
+ * This is non-fatal for usage bookkeeping.
+ */
+function isUpdatedAtSchemaMismatch(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const e = error as Record<string, unknown>
+  return String(e.code ?? '') === '42703'
+}
+
 export async function updateUsageRecord(
   requestId: string,
   updates: UsageRecordUpdate
@@ -296,6 +308,10 @@ export async function updateUsageRecord(
   .maybeSingle() // Use maybeSingle to handle zero rows gracefully
 
   if (error) {
+    if (isUpdatedAtSchemaMismatch(error)) {
+      console.warn('[usage] schema mismatch (42703) on usage_records update — skipping updated_at-dependent bookkeeping')
+      return null
+    }
     console.error('Error updating usage record:', error)
     return null
   }
