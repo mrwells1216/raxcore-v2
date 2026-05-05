@@ -47,6 +47,8 @@ function RaxcoreLogo() {
         height: 36,
         width: 'auto',
         borderRadius: 4,
+        outline: '2px solid rgba(255,255,255,0.85)',
+        outlineOffset: '0px',
       }}
     />
   )

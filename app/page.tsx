@@ -112,25 +112,21 @@ export default function HomePage() {
                 AI-Powered Antler Scoring
               </div>
 
-              {/* Heading */}
-              <div className="space-y-2">
-                <h1
-                  className="text-4xl md:text-5xl font-bold tracking-wider text-balance"
+              {/* Heading — logo plate replaces text wordmark */}
+              <div>
+                <img
+                  src="/raxcore-logo.jpg"
+                  alt="RAXcore Antler Analytics"
                   style={{
-                    background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 60%, var(--bronze-dark) 100%)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    letterSpacing: '0.10em',
+                    display: 'block',
+                    height: 'auto',
+                    width: '100%',
+                    maxWidth: 360,
+                    borderRadius: 6,
+                    outline: '2px solid rgba(255,255,255,0.85)',
+                    outlineOffset: '0px',
                   }}
-                >
-                  RAXCORE
-                </h1>
-                <p
-                  className="text-xs font-mono tracking-[0.35em] uppercase"
-                  style={{ color: 'var(--muted-foreground)' }}
-                >
-                  Antler Analytics
-                </p>
+                />
               </div>
 
               <p className="text-sm leading-relaxed max-w-md" style={{ color: 'oklch(0.78 0.010 55)' }}>
