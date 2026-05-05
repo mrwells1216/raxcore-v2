@@ -42,6 +42,8 @@ import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-gr
 import type { MultiImageDetectionResult } from '@/lib/detection/types'
 import { buildPrecisionReferenceProfile } from '@/lib/scoring/reference-mode'
 import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
+import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
+import { scoreFromGraph as scoreFromGraphNative } from '@/lib/scoring/score-from-graph'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -707,6 +709,58 @@ export async function POST(request: Request) {
       detail: graphPersistence.detail ?? null,
     })
 
+    // Build B: graph-native score comparison (fire-and-forget, best-effort)
+    // Loads the just-persisted (or derived) graph and computes a parallel score.
+    // The result is surfaced in the response as scoreComparison but does NOT
+    // replace the legacy AI score — that only happens once completeness >= 0.80
+    // and the difference is within 3 inches.
+    let scoreComparison: {
+      activeSource: 'graph_native' | 'legacy'
+      legacyGross: number
+      graphGross: number
+      legacyNet: number
+      graphNet: number
+      grossDelta: number
+      netDelta: number
+      graphCompleteness: number
+    } | null = null
+
+    try {
+      const effective = await loadEffectiveMeasurementGraph(buck.id)
+      if (effective.source !== 'fallback') {
+        const graphScore = scoreFromGraphNative(effective.graph)
+        const legacyGross = scoringResult.predictedGross ?? 0
+        const legacyNet = scoringResult.predictedNet ?? 0
+        const grossDelta = Math.abs(graphScore.grossScore - legacyGross)
+        const netDelta = Math.abs(graphScore.netScore - legacyNet)
+        const activeSource =
+          graphScore.completeness >= 0.80 && grossDelta <= 3
+            ? 'graph_native'
+            : 'legacy'
+
+        scoreComparison = {
+          activeSource,
+          legacyGross,
+          graphGross: graphScore.grossScore,
+          legacyNet,
+          graphNet: graphScore.netScore,
+          grossDelta,
+          netDelta,
+          graphCompleteness: graphScore.completeness,
+        }
+
+        console.log('[score] graph-native comparison', {
+          buckId: buck.id,
+          graphSource: effective.source,
+          activeSource,
+          grossDelta,
+          graphCompleteness: graphScore.completeness,
+        })
+      }
+    } catch (compErr) {
+      console.warn('[score] graph comparison failed (non-blocking):', compErr instanceof Error ? compErr.message : String(compErr))
+    }
+
     // Update status to completed
     await updateBuckStatus(buck.id, 'completed')
 
@@ -924,6 +978,8 @@ export async function POST(request: Request) {
       detection: detectionSummary ?? null,
       bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? null,
       measurementGraph: detectionSummary?.graph ?? null,
+      // Build B: graph-native score comparison
+      scoreComparison,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

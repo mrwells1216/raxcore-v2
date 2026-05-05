@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { MeshOverlay } from '@/components/admin/mesh-overlay';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { scoreFromGraph, getGraphConfidence, getLowConfidenceMeasurements } from '@/lib/scoring';
+import { scoreFromGraph, getGraphConfidence, getLowConfidenceMeasurements, recalculateMeasurements } from '@/lib/scoring';
 import { convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion';
 import type { MeasurementGraph } from '@/lib/types';
 import type { AntlerMeasurementGraph } from '@/lib/detection/types';
@@ -187,7 +187,9 @@ export default function MeshReviewPage() {
   }, [buckId]);
 
   const handleGraphChange = (nextGraph: MeasurementGraph) => {
-    setGraph(nextGraph);
+    // Always recompute beam lengths, tine lengths, and spread distance from
+    // current point positions so the score panel reflects the nudge immediately.
+    setGraph(recalculateMeasurements(nextGraph));
   };
 
   const handleSave = async () => {
@@ -203,13 +205,73 @@ export default function MeshReviewPage() {
 
     setIsSaving(true);
     try {
+      // Stamp human-correction provenance on all segments that were moved.
+      // Segments whose provenance already says 'human' keep their existing notes.
+      const correctionNote = 'Manual mesh correction via mesh review';
+      const saveGraph: MeasurementGraph = {
+        ...graph,
+        beams: {
+          left: {
+            ...graph.beams.left,
+            provenance: {
+              ...graph.beams.left.provenance,
+              origin: 'human',
+              visibility: 'corrected',
+              notes: graph.beams.left.provenance?.origin === 'human'
+                ? graph.beams.left.provenance.notes
+                : correctionNote,
+            },
+          },
+          right: {
+            ...graph.beams.right,
+            provenance: {
+              ...graph.beams.right.provenance,
+              origin: 'human',
+              visibility: 'corrected',
+              notes: graph.beams.right.provenance?.origin === 'human'
+                ? graph.beams.right.provenance.notes
+                : correctionNote,
+            },
+          },
+        },
+        tines: graph.tines.map((t) => ({
+          ...t,
+          provenance: {
+            ...t.provenance,
+            origin: 'human' as const,
+            visibility: 'corrected' as const,
+            notes: t.provenance?.origin === 'human' ? t.provenance.notes : correctionNote,
+          },
+        })),
+        spread: {
+          ...graph.spread,
+          provenance: {
+            ...graph.spread.provenance,
+            origin: 'human',
+            visibility: 'corrected',
+            notes: graph.spread.provenance?.origin === 'human'
+              ? graph.spread.provenance.notes
+              : correctionNote,
+          },
+        },
+        circumferences: graph.circumferences.map((c) => ({
+          ...c,
+          provenance: {
+            ...c.provenance,
+            origin: 'human' as const,
+            visibility: 'corrected' as const,
+            notes: c.provenance?.origin === 'human' ? c.provenance.notes : correctionNote,
+          },
+        })),
+      };
+
       const response = await fetch('/api/admin/mesh-adjustments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           buck_id: buckId,
-          adjusted_graph: graph,
-          notes: 'Manual adjustment via mesh review',
+          adjusted_graph: saveGraph,
+          notes: correctionNote,
         }),
       });
 

@@ -1,4 +1,4 @@
-import type { MeasurementGraph, Beam, CircumferencePoint, Tine, Vec2 } from '@/lib/types'
+import type { MeasurementGraph, Beam, CircumferencePoint, Tine, Vec2, MeasurementProvenance } from '@/lib/types'
 import type { AntlerMeasurementGraph, MeasurementGraphNode } from '@/lib/detection/types'
 
 const TINE_LABELS = ['G1', 'G2', 'G3', 'G4'] as const
@@ -133,12 +133,27 @@ function buildBeam(
       ? sourceIndexToLabel(uniqueSourceIndexes[0])
       : 'fused'
 
+  const confidence = average(pointSources.map((n) => n.confidence))
+  const hasRealNodes = pointSources.length > 0
+
+  const provenance: MeasurementProvenance = {
+    origin: 'ai',
+    visibility: hasRealNodes ? 'visible' : 'inferred',
+    sourceImageIndex: uniqueSourceIndexes.length === 1 ? uniqueSourceIndexes[0] : null,
+    sourceImageAngle:
+      uniqueSourceIndexes.length === 1
+        ? sourceIndexToLabel(uniqueSourceIndexes[0])
+        : 'unknown',
+    confidence,
+  }
+
   return {
     id: `beam-${side}`,
     points,
     length: polylineLength(points),
-    confidence: average(pointSources.map((n) => n.confidence)),
+    confidence,
     source,
+    provenance,
   }
 }
 
@@ -163,6 +178,16 @@ function buildTines(graph: AntlerMeasurementGraph): Tine[] {
       const tipPt = toVec2(tipNodes[i], { x: side === 'left' ? 130 : 370, y: 300 - i * 55 })
       const dx = tipPt.x - base.x
       const dy = tipPt.y - base.y
+      const tineConf = average([baseNodes[i]?.confidence ?? 0, tipNodes[i]?.confidence ?? 0])
+      const baseSrcIdx = typeof baseNodes[i]?.sourceImageIndex === 'number' ? baseNodes[i].sourceImageIndex : null
+
+      const tineProvenance: MeasurementProvenance = {
+        origin: 'ai',
+        visibility: baseNodes[i]?.point && tipNodes[i]?.point ? 'visible' : 'inferred',
+        sourceImageIndex: baseSrcIdx,
+        sourceImageAngle: baseSrcIdx != null ? sourceIndexToLabel(baseSrcIdx) : 'unknown',
+        confidence: tineConf,
+      }
 
       tines.push({
         id: `${TINE_LABELS[i].toLowerCase()}-${side}`,
@@ -172,10 +197,8 @@ function buildTines(graph: AntlerMeasurementGraph): Tine[] {
         tipPoint: tipPt,
         length: Math.sqrt(dx * dx + dy * dy),
         label: TINE_LABELS[i],
-        confidence: average([
-          baseNodes[i]?.confidence ?? 0,
-          tipNodes[i]?.confidence ?? 0,
-        ]),
+        confidence: tineConf,
+        provenance: tineProvenance,
       })
     }
   }
@@ -204,15 +227,24 @@ function buildSpread(
   const rightPoint = toVec2(rightAnchor, fallbackRight)
   const dx = rightPoint.x - leftPoint.x
   const dy = rightPoint.y - leftPoint.y
+  const spreadConf = average([
+    leftAnchor?.confidence ?? leftBeam.confidence,
+    rightAnchor?.confidence ?? rightBeam.confidence,
+  ])
+
+  const spreadProvenance: MeasurementProvenance = {
+    origin: 'ai',
+    visibility: leftAnchor?.point && rightAnchor?.point ? 'visible' : 'inferred',
+    sourceImageAngle: 'front',
+    confidence: spreadConf,
+  }
 
   return {
     leftPoint,
     rightPoint,
     distance: Math.sqrt(dx * dx + dy * dy),
-    confidence: average([
-      leftAnchor?.confidence ?? leftBeam.confidence,
-      rightAnchor?.confidence ?? rightBeam.confidence,
-    ]),
+    confidence: spreadConf,
+    provenance: spreadProvenance,
   }
 }
 
@@ -225,13 +257,21 @@ function buildCircumferences(leftBeam: Beam, rightBeam: Beam): CircumferencePoin
     const beam = side === 'left' ? leftBeam : rightBeam
 
     CIRCUMFERENCE_RATIOS.forEach((ratio, index) => {
+      const circConf = Math.max(0.2, beam.confidence * 0.7)
       circumferences.push({
         id: `${CIRCUMFERENCE_LABELS[index].toLowerCase()}-${side}`,
         side,
         label: CIRCUMFERENCE_LABELS[index],
         position: samplePointOnPolyline(beam.points, ratio),
         circumference: 0,
-        confidence: Math.max(0.2, beam.confidence * 0.7),
+        confidence: circConf,
+        provenance: {
+          origin: 'ai',
+          visibility: 'inferred',
+          sourceImageAngle: beam.source === 'fused' ? 'unknown' : beam.source,
+          confidence: circConf,
+          notes: 'Sampled from beam polyline — not directly measured',
+        },
       })
     })
   }

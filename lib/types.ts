@@ -4567,6 +4567,31 @@ export type GraphSource = 'front' | 'left' | 'right' | 'fused'
 /** Tine label identifiers */
 export type TineLabel = 'G1' | 'G2' | 'G3' | 'G4' | 'unknown'
 
+/** Whether a measurement was directly seen, inferred from other points, or manually corrected */
+export type MeasurementVisibility = 'visible' | 'inferred' | 'corrected'
+
+/** What produced this measurement value */
+export type MeasurementOrigin = 'ai' | 'human' | 'fused'
+
+/**
+ * Audit trail for a single graph segment.
+ * All fields are optional so existing graphs without provenance remain valid.
+ */
+export interface MeasurementProvenance {
+  /** Index into the images array that was the primary source (0=front, 1=left, 2=right) */
+  sourceImageIndex?: number | null
+  /** Resolved angle label for the source image */
+  sourceImageAngle?: 'front' | 'left' | 'right' | 'unknown' | null
+  /** Whether the geometry was directly observed, interpolated, or manually edited */
+  visibility?: MeasurementVisibility
+  /** What produced this geometry value */
+  origin?: MeasurementOrigin
+  /** Per-segment confidence override (may differ from parent segment confidence) */
+  confidence?: number | null
+  /** Free-text note, e.g. "Manual mesh correction" */
+  notes?: string | null
+}
+
 /** Main beam geometry with confidence tracking */
 export interface Beam {
   id: string
@@ -4574,6 +4599,8 @@ export interface Beam {
   length: number
   confidence: number
   source: GraphSource
+  /** Optional provenance audit trail */
+  provenance?: MeasurementProvenance
 }
 
 /** Individual tine measurement */
@@ -4586,6 +4613,8 @@ export interface Tine {
   length: number
   label: TineLabel
   confidence: number
+  /** Optional provenance audit trail */
+  provenance?: MeasurementProvenance
 }
 
 /** Spread measurement between antler tips */
@@ -4594,6 +4623,8 @@ export interface Spread {
   rightPoint: Vec2
   distance: number
   confidence: number
+  /** Optional provenance audit trail */
+  provenance?: MeasurementProvenance
 }
 
 /** Circumference measurement point (H1-H4) */
@@ -4604,6 +4635,8 @@ export interface CircumferencePoint {
   position: Vec2
   circumference: number
   confidence: number
+  /** Optional provenance audit trail */
+  provenance?: MeasurementProvenance
 }
 
 /** Full measurement graph structure - core engine data */
