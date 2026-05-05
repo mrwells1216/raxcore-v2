@@ -6,12 +6,17 @@ import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { ShareBuckButton } from '@/components/scoring/share-buck-button'
+import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const { buck, images, prediction } = await getBuckBundle(id)
   if (!buck || !prediction) return notFound()
+
+  // Build B: load canonical graph — persisted first, prediction second, fallback last.
+  // This is best-effort and never blocks the results page from rendering.
+  const effectiveGraphResult = await loadEffectiveMeasurementGraph(buck.id).catch(() => null)
 
   // Fetch latest completed precision pass run for this prediction
   const supabase = await createServerSupabaseClient()
@@ -80,6 +85,13 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       review_completeness: trainingSample.review_completeness ?? 0,
     } : null,
     precisionPassGross: latestPrecisionPassRun?.best_summary?.predicted_gross ?? null,
+    // Build B: canonical graph for mesh editor and results display
+    // Fallback source is excluded — callers should use legacy prediction values in that case.
+    effectiveGraph: effectiveGraphResult && effectiveGraphResult.source !== 'fallback'
+      ? effectiveGraphResult.graph
+      : null,
+    effectiveGraphSource: effectiveGraphResult?.source ?? null,
+    effectiveGraphVersion: effectiveGraphResult?.version ?? null,
   }
 
   const formData: ScoringFormData = {

@@ -473,6 +473,10 @@ export interface ScoringResult {
   }
   // Phase 10: Extended learning data (for admin)
   extendedLearningSummary?: ExtendedLearningSummary
+  // Build B: canonical measurement graph preferred over raw prediction JSON
+  effectiveGraph?: MeasurementGraph | null
+  effectiveGraphSource?: 'persisted_graph' | 'prediction_graph' | 'fallback' | null
+  effectiveGraphVersion?: number | null
 }
 
 // Legacy API response types (for backward compatibility)
