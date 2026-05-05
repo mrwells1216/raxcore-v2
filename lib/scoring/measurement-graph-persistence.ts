@@ -32,9 +32,11 @@ function isMissingTableError(error: unknown): boolean {
   const message = String(e.message ?? '').toLowerCase()
   return (
     code === '42P01' ||
+    code === '42703' ||
     code === 'PGRST116' ||
     message.includes('does not exist') ||
     message.includes('relation') ||
+    message.includes('column') ||
     message.includes('undefined table')
   )
 }

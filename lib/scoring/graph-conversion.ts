@@ -82,10 +82,11 @@ function getBestNode(
   return matches.sort((a, b) => b.confidence - a.confidence)[0]
 }
 
-function sourceIndexToLabel(index: number): 'front' | 'left' | 'right' {
+function sourceIndexToAngle(index: number | null | undefined): 'front' | 'left' | 'right' | 'unknown' {
   if (index === 0) return 'front'
   if (index === 1) return 'left'
-  return 'right'
+  if (index === 2) return 'right'
+  return 'unknown'
 }
 
 // ── beam builder ──────────────────────────────────────────────────────────────
@@ -128,23 +129,24 @@ function buildBeam(
     ),
   ]
 
-  const source =
-    uniqueSourceIndexes.length === 1
-      ? sourceIndexToLabel(uniqueSourceIndexes[0])
-      : 'fused'
+  const sourceAngle =
+    uniqueSourceIndexes.length === 1 ? sourceIndexToAngle(uniqueSourceIndexes[0]) : 'unknown'
+  const source = sourceAngle === 'unknown' ? 'fused' : sourceAngle
 
   const confidence = average(pointSources.map((n) => n.confidence))
-  const hasRealNodes = pointSources.length > 0
+  const hasFallbackGeometry = !burr?.point || !tip?.point
+  const hasVisibleBeamPath = !hasFallbackGeometry && pointSources.length >= 2
 
   const provenance: MeasurementProvenance = {
     origin: 'ai',
-    visibility: hasRealNodes ? 'visible' : 'inferred',
+    visibility: hasVisibleBeamPath ? 'visible' : 'inferred',
     sourceImageIndex: uniqueSourceIndexes.length === 1 ? uniqueSourceIndexes[0] : null,
     sourceImageAngle:
       uniqueSourceIndexes.length === 1
-        ? sourceIndexToLabel(uniqueSourceIndexes[0])
+        ? sourceIndexToAngle(uniqueSourceIndexes[0])
         : 'unknown',
     confidence,
+    notes: hasFallbackGeometry ? 'Beam geometry contains inferred fallback endpoint(s)' : null,
   }
 
   return {
@@ -185,7 +187,7 @@ function buildTines(graph: AntlerMeasurementGraph): Tine[] {
         origin: 'ai',
         visibility: baseNodes[i]?.point && tipNodes[i]?.point ? 'visible' : 'inferred',
         sourceImageIndex: baseSrcIdx,
-        sourceImageAngle: baseSrcIdx != null ? sourceIndexToLabel(baseSrcIdx) : 'unknown',
+        sourceImageAngle: sourceIndexToAngle(baseSrcIdx),
         confidence: tineConf,
       }
 
@@ -235,8 +237,15 @@ function buildSpread(
   const spreadProvenance: MeasurementProvenance = {
     origin: 'ai',
     visibility: leftAnchor?.point && rightAnchor?.point ? 'visible' : 'inferred',
-    sourceImageAngle: 'front',
+    sourceImageAngle:
+      leftAnchor?.sourceImageIndex === rightAnchor?.sourceImageIndex
+        ? sourceIndexToAngle(leftAnchor?.sourceImageIndex)
+        : 'unknown',
     confidence: spreadConf,
+    notes:
+      leftAnchor?.point && rightAnchor?.point
+        ? null
+        : 'Spread geometry contains inferred fallback anchor(s)',
   }
 
   return {
@@ -270,7 +279,7 @@ function buildCircumferences(leftBeam: Beam, rightBeam: Beam): CircumferencePoin
           visibility: 'inferred',
           sourceImageAngle: beam.source === 'fused' ? 'unknown' : beam.source,
           confidence: circConf,
-          notes: 'Sampled from beam polyline — not directly measured',
+          notes: 'Sampled from beam polyline; not directly measured',
         },
       })
     })

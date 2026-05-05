@@ -1,5 +1,13 @@
 import type { MeasurementGraph, Tine } from '@/lib/types';
 
+function finitePositive(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function finiteNumberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
 /**
  * Scoring engine that calculates scores directly from MeasurementGraph
  * 
@@ -30,29 +38,29 @@ export interface ScoreBreakdown {
  */
 export function scoreFromGraph(graph: MeasurementGraph): ScoreBreakdown {
   // Beam lengths
-  const leftBeam = graph.beams.left.length;
-  const rightBeam = graph.beams.right.length;
+  const leftBeam = finiteNumberOrZero(graph.beams.left.length);
+  const rightBeam = finiteNumberOrZero(graph.beams.right.length);
 
   // Tines by side
   const leftTines = graph.tines
     .filter(t => t.side === 'left')
-    .map(t => ({ label: t.label, length: t.length }));
+    .map(t => ({ label: t.label, length: finiteNumberOrZero(t.length) }));
   
   const rightTines = graph.tines
     .filter(t => t.side === 'right')
-    .map(t => ({ label: t.label, length: t.length }));
+    .map(t => ({ label: t.label, length: finiteNumberOrZero(t.length) }));
 
   // Spread
-  const spread = graph.spread.distance;
+  const spread = finiteNumberOrZero(graph.spread.distance);
 
   // Circumferences by side
   const leftCircs = graph.circumferences
     .filter(c => c.side === 'left')
-    .map(c => ({ label: c.label, value: c.circumference }));
+    .map(c => ({ label: c.label, value: finiteNumberOrZero(c.circumference) }));
   
   const rightCircs = graph.circumferences
     .filter(c => c.side === 'right')
-    .map(c => ({ label: c.label, value: c.circumference }));
+    .map(c => ({ label: c.label, value: finiteNumberOrZero(c.circumference) }));
 
   // Calculate gross score
   let grossScore = 0;
@@ -75,7 +83,7 @@ export function scoreFromGraph(graph: MeasurementGraph): ScoreBreakdown {
   // Calculate deductions (differences between left/right)
   const deductions = calculateDeductions(graph);
 
-  const netScore = grossScore - deductions;
+  const netScore = grossScore - finiteNumberOrZero(deductions);
 
   return {
     leftBeam,
@@ -83,9 +91,9 @@ export function scoreFromGraph(graph: MeasurementGraph): ScoreBreakdown {
     tines: { left: leftTines, right: rightTines },
     spread,
     circumferences: { left: leftCircs, right: rightCircs },
-    grossScore,
-    deductions,
-    netScore
+    grossScore: finiteNumberOrZero(grossScore),
+    deductions: finiteNumberOrZero(deductions),
+    netScore: finiteNumberOrZero(netScore)
   };
 }
 
@@ -96,7 +104,9 @@ function calculateDeductions(graph: MeasurementGraph): number {
   let deductions = 0;
 
   // Beam difference
-  deductions += Math.abs(graph.beams.left.length - graph.beams.right.length);
+  if (finitePositive(graph.beams.left.length) && finitePositive(graph.beams.right.length)) {
+    deductions += Math.abs(graph.beams.left.length - graph.beams.right.length);
+  }
 
   // Tine differences by matching labels
   const leftTineMap = new Map<string, number>();
@@ -104,18 +114,20 @@ function calculateDeductions(graph: MeasurementGraph): number {
   
   graph.tines.forEach(t => {
     if (t.side === 'left') {
-      leftTineMap.set(t.label, t.length);
+      leftTineMap.set(t.label, finiteNumberOrZero(t.length));
     } else {
-      rightTineMap.set(t.label, t.length);
+      rightTineMap.set(t.label, finiteNumberOrZero(t.length));
     }
   });
 
   // Compare matching tines
   const allLabels = new Set([...leftTineMap.keys(), ...rightTineMap.keys()]);
   allLabels.forEach(label => {
-    const leftLen = leftTineMap.get(label) ?? 0;
-    const rightLen = rightTineMap.get(label) ?? 0;
-    deductions += Math.abs(leftLen - rightLen);
+    const leftLen = leftTineMap.get(label);
+    const rightLen = rightTineMap.get(label);
+    if (finitePositive(leftLen) && finitePositive(rightLen)) {
+      deductions += Math.abs(leftLen - rightLen);
+    }
   });
 
   // Circumference differences by matching labels
@@ -124,21 +136,23 @@ function calculateDeductions(graph: MeasurementGraph): number {
   
   graph.circumferences.forEach(c => {
     if (c.side === 'left') {
-      leftCircMap.set(c.label, c.circumference);
+      leftCircMap.set(c.label, finiteNumberOrZero(c.circumference));
     } else {
-      rightCircMap.set(c.label, c.circumference);
+      rightCircMap.set(c.label, finiteNumberOrZero(c.circumference));
     }
   });
 
   // Compare matching circumferences
   const allCircLabels = new Set([...leftCircMap.keys(), ...rightCircMap.keys()]);
   allCircLabels.forEach(label => {
-    const leftVal = leftCircMap.get(label) ?? 0;
-    const rightVal = rightCircMap.get(label) ?? 0;
-    deductions += Math.abs(leftVal - rightVal);
+    const leftVal = leftCircMap.get(label);
+    const rightVal = rightCircMap.get(label);
+    if (finitePositive(leftVal) && finitePositive(rightVal)) {
+      deductions += Math.abs(leftVal - rightVal);
+    }
   });
 
-  return deductions;
+  return finiteNumberOrZero(deductions);
 }
 
 /**
@@ -171,9 +185,17 @@ export function recalculateMeasurements(graph: MeasurementGraph): MeasurementGra
  * Calculate distance between two points
  */
 function calculateDistance(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  if (
+    !Number.isFinite(p1?.x) ||
+    !Number.isFinite(p1?.y) ||
+    !Number.isFinite(p2?.x) ||
+    !Number.isFinite(p2?.y)
+  ) {
+    return 0;
+  }
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
-  return Math.sqrt(dx * dx + dy * dy);
+  return finiteNumberOrZero(Math.sqrt(dx * dx + dy * dy));
 }
 
 /**
@@ -184,7 +206,7 @@ function calculatePolylineLength(points: { x: number; y: number }[]): number {
   for (let i = 1; i < points.length; i++) {
     total += calculateDistance(points[i - 1], points[i]);
   }
-  return total;
+  return finiteNumberOrZero(total);
 }
 
 /**
@@ -234,7 +256,7 @@ export function getGraphConfidence(graph: MeasurementGraph): number {
     graph.spread.confidence,
     ...graph.tines.map(t => t.confidence),
     ...graph.circumferences.map(c => c.confidence)
-  ];
+  ].filter((value) => typeof value === 'number' && Number.isFinite(value));
 
   if (confidences.length === 0) return 0;
   return confidences.reduce((a, b) => a + b, 0) / confidences.length;

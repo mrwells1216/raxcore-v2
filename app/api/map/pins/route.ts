@@ -5,6 +5,7 @@ import {
   getMapPinsByPropertyId,
   getMapPinsByBuckId
 } from '@/lib/storage/service'
+import { validateCoordinate } from '@/lib/mapping/service'
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,13 +52,23 @@ export async function POST(request: NextRequest) {
       notes
     } = body
 
+    if (
+      (latitude !== undefined || longitude !== undefined) &&
+      !validateCoordinate({ lat: Number(latitude), lng: Number(longitude) })
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid latitude/longitude' },
+        { status: 400 }
+      )
+    }
+
     const pin = await createMapPin({
       property_id,
       buck_id,
       label,
       location_type: location_type || 'unknown',
-      latitude,
-      longitude,
+      latitude: latitude === undefined || latitude === null ? undefined : Number(latitude),
+      longitude: longitude === undefined || longitude === null ? undefined : Number(longitude),
       is_approximate: is_approximate || false,
       confidence_radius_meters,
       pin_date,

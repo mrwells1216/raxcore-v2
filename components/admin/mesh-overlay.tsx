@@ -38,6 +38,27 @@ function getColorForConfidence(confidence: number, isSelected: boolean): string 
   return COLORS.low;
 }
 
+function distance(a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const value = Math.sqrt(dx * dx + dy * dy);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function polylineLength(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += distance(points[i - 1], points[i]);
+  }
+  return Number.isFinite(total) ? total : 0;
+}
+
+const correctedProvenance = {
+  origin: 'human' as const,
+  visibility: 'corrected' as const,
+  notes: 'Manual mesh correction',
+};
+
 /** Human-readable provenance origin label for the selection panel */
 function provenanceLabel(provenance: { origin?: string; visibility?: string; notes?: string } | undefined): string | null {
   if (!provenance) return null;
@@ -133,8 +154,10 @@ export function MeshOverlay({
       case 'beam': {
         const newBeam: Beam = {
           ...found.item,
-          points: found.item.points.map(p => movePoint(p, dx, dy))
+          points: found.item.points.map(p => movePoint(p, dx, dy)),
+          provenance: correctedProvenance,
         };
+        newBeam.length = polylineLength(newBeam.points);
         newGraph.beams = {
           ...newGraph.beams,
           [found.side]: newBeam
@@ -145,8 +168,10 @@ export function MeshOverlay({
         const newTine: Tine = {
           ...found.item,
           basePoint: movePoint(found.item.basePoint, dx, dy),
-          tipPoint: movePoint(found.item.tipPoint, dx, dy)
+          tipPoint: movePoint(found.item.tipPoint, dx, dy),
+          provenance: correctedProvenance,
         };
+        newTine.length = distance(newTine.basePoint, newTine.tipPoint);
         newGraph.tines = [...graph.tines];
         newGraph.tines[found.index] = newTine;
         break;
@@ -155,15 +180,18 @@ export function MeshOverlay({
         const newSpread: Spread = {
           ...found.item,
           leftPoint: movePoint(found.item.leftPoint, dx, dy),
-          rightPoint: movePoint(found.item.rightPoint, dx, dy)
+          rightPoint: movePoint(found.item.rightPoint, dx, dy),
+          provenance: correctedProvenance,
         };
+        newSpread.distance = distance(newSpread.leftPoint, newSpread.rightPoint);
         newGraph.spread = newSpread;
         break;
       }
       case 'circumference': {
         const newCirc: CircumferencePoint = {
           ...found.item,
-          position: movePoint(found.item.position, dx, dy)
+          position: movePoint(found.item.position, dx, dy),
+          provenance: correctedProvenance,
         };
         newGraph.circumferences = [...graph.circumferences];
         newGraph.circumferences[found.index] = newCirc;

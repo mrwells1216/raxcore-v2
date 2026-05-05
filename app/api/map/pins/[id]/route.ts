@@ -4,6 +4,7 @@ import {
   updateMapPin, 
   deleteMapPin 
 } from '@/lib/storage/service'
+import { validateCoordinate } from '@/lib/mapping/service'
 
 export async function GET(
   request: NextRequest,
@@ -37,6 +38,22 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
+
+    if ('latitude' in body || 'longitude' in body) {
+      const lat = body.latitude
+      const lng = body.longitude
+      if (
+        (lat === undefined || lat === null || lng === undefined || lng === null) ||
+        !validateCoordinate({ lat: Number(lat), lng: Number(lng) })
+      ) {
+        return NextResponse.json(
+          { error: 'Invalid latitude/longitude' },
+          { status: 400 }
+        )
+      }
+      body.latitude = Number(lat)
+      body.longitude = Number(lng)
+    }
 
     const success = await updateMapPin(id, body)
 

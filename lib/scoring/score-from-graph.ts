@@ -1,23 +1,15 @@
 /**
- * Graph-native scoring module — production-grade.
+ * Graph-native scoring module.
  *
- * Wraps the base scoreFromGraph from lib/scoring.ts and adds:
- *  - polyline-length fallback when beam.length is missing/zero
- *  - anchor-distance fallback when spread.distance is missing/zero
- *  - per-tine length fallback via basePoint → tipPoint
- *  - circumference: real values only, no invented measurements
- *  - abnormal point passthrough (warns if schema doesn't support it yet)
- *  - weighted completeness: core 40% / tines 35% / circumferences 25%
- *  - structured warnings list
- *  - full ScoreBreakdown passthrough (left/right tines + circumferences)
+ * This scorer treats the MeasurementGraph as the structural truth while staying
+ * honest about missing measurements. It never invents circumference values and
+ * never returns NaN.
  */
 
-import { scoreFromGraph as _scoreFromGraph, getGraphConfidence } from '@/lib/scoring'
-import type { MeasurementGraph } from '@/lib/types'
+import { getGraphConfidence } from '@/lib/scoring'
+import type { MeasurementGraph, Vec2 } from '@/lib/types'
 
 export type { ScoreBreakdown } from '@/lib/scoring'
-
-// ── Output type ───────────────────────────────────────────────────────────────
 
 export interface GraphScoreResult {
   grossScore: number
@@ -40,219 +32,280 @@ export interface GraphScoreResult {
   completeness: number
   missingMeasurements: string[]
   warnings: string[]
-  /** Average confidence across all graph segments */
   confidence: number
 }
 
-// ── Geometry helpers ──────────────────────────────────────────────────────────
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
 
-function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+function finitePositive(value: unknown): value is number {
+  return finiteNumber(value) && value > 0
+}
+
+function safeValue(value: unknown): number {
+  return finitePositive(value) ? value : 0
+}
+
+function isPoint(point: unknown): point is Vec2 {
+  return (
+    !!point &&
+    typeof point === 'object' &&
+    finiteNumber((point as Vec2).x) &&
+    finiteNumber((point as Vec2).y)
+  )
+}
+
+function dist(a: unknown, b: unknown): number {
+  if (!isPoint(a) || !isPoint(b)) return 0
   const dx = b.x - a.x
   const dy = b.y - a.y
   return Math.sqrt(dx * dx + dy * dy)
 }
 
-function polylineLength(pts: { x: number; y: number }[]): number {
+function polylineLength(points: unknown): number {
+  if (!Array.isArray(points) || points.length < 2) return 0
   let total = 0
-  for (let i = 1; i < pts.length; i++) total += dist(pts[i - 1], pts[i])
-  return total
+  for (let i = 1; i < points.length; i++) {
+    total += dist(points[i - 1], points[i])
+  }
+  return Number.isFinite(total) ? total : 0
 }
 
-function finite(v: number): boolean {
-  return typeof v === 'number' && isFinite(v) && v > 0
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(1, value))
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+function resolveBeamLength(
+  storedLength: unknown,
+  points: unknown,
+  warningLabel: string,
+  warnings: string[],
+): number {
+  if (finitePositive(storedLength)) return storedLength
+  const fallback = polylineLength(points)
+  if (finitePositive(fallback)) {
+    warnings.push(`${warningLabel} length derived from beam polyline fallback`)
+    return fallback
+  }
+  return 0
+}
 
-/**
- * Score a MeasurementGraph with full B&C rule logic.
- *
- * Completeness is weighted:
- *   core (beams + spread)  = 40%
- *   tines                  = 35%
- *   circumferences         = 25%
- *
- * Circumference values are never invented — if a position exists but the
- * circumference value is 0/missing it is counted as missing.
- */
+function resolveTineLength(tine: { length?: unknown; basePoint?: unknown; tipPoint?: unknown }): number {
+  if (finitePositive(tine.length)) return tine.length
+  return dist(tine.basePoint, tine.tipPoint)
+}
+
+function calculatePairedDeduction(
+  left: number | null,
+  right: number | null,
+  label: string,
+  warnings: string[],
+): number {
+  if (finitePositive(left) && finitePositive(right)) {
+    return Math.abs(left - right)
+  }
+  if (finitePositive(left) || finitePositive(right)) {
+    warnings.push(`${label} deduction incomplete because one side is missing`)
+  }
+  return 0
+}
+
 export function scoreFromGraph(graph: MeasurementGraph): GraphScoreResult {
   const warnings: string[] = []
-  const missing: string[] = []
+  const missingMeasurements: string[] = []
   const measurements: GraphScoreResult['measurements'] = []
 
-  // ── 1. Beams ───────────────────────────────────────────────────────────────
-
-  let leftBeam = graph.beams.left.length
-  if (!finite(leftBeam)) {
-    leftBeam = polylineLength(graph.beams.left.points)
-  }
-  const leftBeamMissing = !finite(leftBeam)
-  if (leftBeamMissing) missing.push('beam-left')
+  const leftBeam = resolveBeamLength(
+    graph.beams?.left?.length,
+    graph.beams?.left?.points,
+    'Left main beam',
+    warnings,
+  )
+  const leftBeamMissing = !finitePositive(leftBeam)
+  if (leftBeamMissing) missingMeasurements.push('beam-left')
   measurements.push({
     id: 'beam-left',
     label: 'Left Main Beam',
     side: 'left',
     type: 'beam',
-    value: leftBeam,
+    value: safeValue(leftBeam),
     isMissing: leftBeamMissing,
   })
 
-  let rightBeam = graph.beams.right.length
-  if (!finite(rightBeam)) {
-    rightBeam = polylineLength(graph.beams.right.points)
-  }
-  const rightBeamMissing = !finite(rightBeam)
-  if (rightBeamMissing) missing.push('beam-right')
+  const rightBeam = resolveBeamLength(
+    graph.beams?.right?.length,
+    graph.beams?.right?.points,
+    'Right main beam',
+    warnings,
+  )
+  const rightBeamMissing = !finitePositive(rightBeam)
+  if (rightBeamMissing) missingMeasurements.push('beam-right')
   measurements.push({
     id: 'beam-right',
     label: 'Right Main Beam',
     side: 'right',
     type: 'beam',
-    value: rightBeam,
+    value: safeValue(rightBeam),
     isMissing: rightBeamMissing,
   })
 
-  // ── 2. Spread ─────────────────────────────────────────────────────────────
-
-  let spread = graph.spread.distance
-  if (!finite(spread)) {
-    spread = dist(graph.spread.leftPoint, graph.spread.rightPoint)
+  const insideSpread = finitePositive(graph.spread?.distance)
+    ? graph.spread.distance
+    : dist(graph.spread?.leftPoint, graph.spread?.rightPoint)
+  const spreadMissing = !finitePositive(insideSpread)
+  if (spreadMissing) missingMeasurements.push('spread')
+  if (!finitePositive(graph.spread?.distance) && finitePositive(insideSpread)) {
+    warnings.push('Inside spread derived from anchor-point fallback')
   }
-  const spreadMissing = !finite(spread)
-  if (spreadMissing) missing.push('spread')
   measurements.push({
     id: 'spread',
     label: 'Inside Spread',
     side: 'n/a',
     type: 'spread',
-    value: spread,
+    value: safeValue(insideSpread),
     isMissing: spreadMissing,
   })
 
-  // Core completeness: beams + spread (40% weight)
   const corePresent = [!leftBeamMissing, !rightBeamMissing, !spreadMissing].filter(Boolean).length
-  const coreTotal = 3
-  const coreScore = corePresent / coreTotal
-
-  // ── 3. Tines ───────────────────────────────────────────────────────────────
+  const coreScore = corePresent / 3
 
   let tineTotal = 0
   let tinePresent = 0
+  const tineBySide = new Map<string, { left?: number; right?: number }>()
 
-  for (const tine of graph.tines) {
-    let len = tine.length
-    if (!finite(len)) {
-      len = dist(tine.basePoint, tine.tipPoint)
-    }
-    const isMissing = !finite(len)
+  for (const tine of graph.tines ?? []) {
+    const length = resolveTineLength(tine)
+    const isMissing = !finitePositive(length)
     if (isMissing) {
-      missing.push(tine.id)
+      missingMeasurements.push(tine.id)
     } else {
-      tineTotal += len
+      tineTotal += length
       tinePresent++
     }
+
+    const pair = tineBySide.get(tine.label) ?? {}
+    pair[tine.side] = finitePositive(length) ? length : undefined
+    tineBySide.set(tine.label, pair)
+
     measurements.push({
       id: tine.id,
-      label: `${tine.label} ${tine.side.charAt(0).toUpperCase() + tine.side.slice(1)}`,
+      label: `${tine.label} ${tine.side.charAt(0).toUpperCase()}${tine.side.slice(1)}`,
       side: tine.side,
       type: 'tine',
-      value: len,
+      value: safeValue(length),
       isMissing,
     })
   }
 
-  // Tine completeness relative to what's in the graph (35% weight)
-  const tineTotal_ = graph.tines.length
-  const tineScore = tineTotal_ > 0 ? tinePresent / tineTotal_ : 1
-
-  // ── 4. Circumferences ─────────────────────────────────────────────────────
-  // ONLY use real circumference values — never invent them from position points.
+  const tineCount = graph.tines?.length ?? 0
+  const tineScore = tineCount > 0 ? tinePresent / tineCount : 1
 
   let circumferenceTotal = 0
-  let circPresent = 0
+  let circumferencePresent = 0
+  const circumferenceBySide = new Map<string, { left?: number; right?: number }>()
 
-  for (const c of graph.circumferences) {
-    const val = c.circumference
-    // A circumference entry with value <= 0 is a position-only placeholder
-    const isMissing = !finite(val)
+  for (const circumference of graph.circumferences ?? []) {
+    const value = circumference.circumference
+    const isMissing = !finitePositive(value)
     if (isMissing) {
-      missing.push(c.id)
+      missingMeasurements.push(circumference.id)
     } else {
-      circumferenceTotal += val
-      circPresent++
+      circumferenceTotal += value
+      circumferencePresent++
     }
+
+    const pair = circumferenceBySide.get(circumference.label) ?? {}
+    pair[circumference.side] = finitePositive(value) ? value : undefined
+    circumferenceBySide.set(circumference.label, pair)
+
     measurements.push({
-      id: c.id,
-      label: `${c.label} ${c.side.charAt(0).toUpperCase() + c.side.slice(1)}`,
-      side: c.side,
+      id: circumference.id,
+      label: `${circumference.label} ${circumference.side.charAt(0).toUpperCase()}${circumference.side.slice(1)}`,
+      side: circumference.side,
       type: 'circumference',
-      value: val,
+      value: safeValue(value),
       isMissing,
     })
   }
 
-  // Circumference completeness (25% weight). Honest: zero present = 0.
-  const circTotal_ = graph.circumferences.length
-  const circScore = circTotal_ > 0 ? circPresent / circTotal_ : 0
-  if (circTotal_ > 0 && circPresent === 0) {
-    warnings.push('No circumference values present — circumferences excluded from gross score')
+  const circumferenceCount = graph.circumferences?.length ?? 0
+  const circumferenceScore =
+    circumferenceCount > 0 ? circumferencePresent / circumferenceCount : 0
+  if (circumferenceCount === 0) {
+    warnings.push('Graph has no circumference measurements; completeness reduced')
+  } else if (circumferencePresent === 0) {
+    warnings.push('No circumference values present; circumferences excluded from gross score')
   }
-  if (circTotal_ === 0) {
-    warnings.push('Graph has no circumference measurements — completeness reduced accordingly')
-  }
-
-  // ── 5. Abnormal points ────────────────────────────────────────────────────
 
   let abnormalTotal = 0
-  const graphAny = graph as unknown as Record<string, unknown>
-  if (Array.isArray(graphAny.abnormalPoints) && (graphAny.abnormalPoints as unknown[]).length > 0) {
-    for (const pt of graphAny.abnormalPoints as Array<Record<string, unknown>>) {
-      const len = typeof pt.length === 'number' ? pt.length : 0
-      abnormalTotal += len
+  const graphRecord = graph as unknown as Record<string, unknown>
+  if ('abnormalPoints' in graphRecord) {
+    const abnormalPoints = graphRecord.abnormalPoints
+    if (Array.isArray(abnormalPoints)) {
+      for (const point of abnormalPoints) {
+        const length = (point as { length?: unknown })?.length
+        if (finitePositive(length)) abnormalTotal += length
+      }
     }
   } else {
-    warnings.push('Abnormal point graph support not present — abnormalTotal = 0')
+    warnings.push('Abnormal point graph support not present')
   }
 
-  // ── 6. Gross / net / deductions ───────────────────────────────────────────
-
-  // Use the base scorer so deduction formula stays consistent with legacy
-  let grossScore = 0
   let deductionTotal = 0
-  let netScore = 0
+  deductionTotal += calculatePairedDeduction(
+    leftBeamMissing ? null : leftBeam,
+    rightBeamMissing ? null : rightBeam,
+    'Main beam',
+    warnings,
+  )
 
-  try {
-    const base = _scoreFromGraph(graph)
-    grossScore = base.grossScore
-    deductionTotal = base.deductions
-    netScore = base.netScore
-  } catch {
-    // Manual fallback if base scorer fails (e.g. malformed graph)
-    grossScore = leftBeam + rightBeam + spread + tineTotal + circumferenceTotal + abnormalTotal
-    deductionTotal = 0
-    netScore = grossScore
-    warnings.push('Base scorer failed — deductions calculated as 0')
+  for (const [label, pair] of tineBySide) {
+    deductionTotal += calculatePairedDeduction(
+      pair.left ?? null,
+      pair.right ?? null,
+      `${label} tine`,
+      warnings,
+    )
   }
 
-  // ── 7. Weighted completeness ──────────────────────────────────────────────
+  for (const [label, pair] of circumferenceBySide) {
+    deductionTotal += calculatePairedDeduction(
+      pair.left ?? null,
+      pair.right ?? null,
+      `${label} circumference`,
+      warnings,
+    )
+  }
 
-  // core 40%, tines 35%, circumferences 25%
-  const completeness = coreScore * 0.4 + tineScore * 0.35 + circScore * 0.25
+  const grossScore =
+    safeValue(leftBeam) +
+    safeValue(rightBeam) +
+    safeValue(insideSpread) +
+    safeValue(tineTotal) +
+    safeValue(circumferenceTotal) +
+    safeValue(abnormalTotal)
+
+  const safeDeductionTotal = safeValue(deductionTotal)
+  const netScore = grossScore - safeDeductionTotal
+  const completeness = clamp01(coreScore * 0.4 + tineScore * 0.35 + circumferenceScore * 0.25)
+  const confidence = getGraphConfidence(graph)
 
   return {
     grossScore,
-    netScore,
-    deductionTotal,
-    abnormalTotal,
-    leftBeam,
-    rightBeam,
-    insideSpread: spread,
-    tineTotal,
-    circumferenceTotal,
+    netScore: Number.isFinite(netScore) ? netScore : 0,
+    deductionTotal: safeDeductionTotal,
+    abnormalTotal: safeValue(abnormalTotal),
+    leftBeam: safeValue(leftBeam),
+    rightBeam: safeValue(rightBeam),
+    insideSpread: safeValue(insideSpread),
+    tineTotal: safeValue(tineTotal),
+    circumferenceTotal: safeValue(circumferenceTotal),
     measurements,
     completeness,
-    missingMeasurements: missing,
+    missingMeasurements,
     warnings,
-    confidence: getGraphConfidence(graph),
+    confidence: Number.isFinite(confidence) ? confidence : 0,
   }
 }

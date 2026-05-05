@@ -477,6 +477,27 @@ export interface ScoringResult {
   effectiveGraph?: MeasurementGraph | null
   effectiveGraphSource?: 'persisted_graph' | 'prediction_graph' | 'fallback' | null
   effectiveGraphVersion?: number | null
+  scoreComparison?: {
+    activeSource: 'graph_native' | 'legacy'
+    legacyGross: number | null
+    graphGross: number | null
+    legacyNet: number | null
+    graphNet: number | null
+    grossDelta: number | null
+    netDelta: number | null
+    graphCompleteness: number
+    graphSource: 'persisted_graph' | 'prediction_graph' | 'fallback'
+    reason: string
+  } | null
+  confidenceEvidence?: {
+    graphSource: string | null
+    graphCompleteness: number | null
+    correctedSegmentCount: number | null
+    inferredSegmentCount: number | null
+    lowConfidenceSegmentCount: number | null
+    legacyGraphGrossDelta: number | null
+    reasons: string[]
+  } | null
 }
 
 // Legacy API response types (for backward compatibility)
@@ -2447,7 +2468,7 @@ export interface TrainingExampleWithInfluence extends TrainingExampleWithHealth 
 export interface LearningCorrectionLog {
   id: string
   buck_id: string | null
-  prediction_id: string | null
+  prediction_id: string
   gross_correction: number
   net_correction: number | null
   confidence_boost: number | null
@@ -3193,7 +3214,14 @@ export type ReferenceSourceType =
   | 'weak_fallback'
   | 'none'
 export type GeometryConsistencyTier = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
-export type AsymmetryCause = 'real_asymmetry' | 'poor_angle' | 'weak_reference' | 'unknown'
+export type AsymmetryCause =
+  | 'real_asymmetry'
+  | 'poor_angle'
+  | 'weak_reference'
+  | 'perspective_induced'
+  | 'missing_visibility'
+  | 'mixed'
+  | 'unknown'
 
 export interface EnhancedLandmarkData {
   // Quality scores per landmark type
@@ -3359,7 +3387,7 @@ export type SplitAssignment = 'train' | 'validation' | 'test'
 export interface TrainingExample {
   id: string
   buck_id: string | null
-  prediction_id: string | null
+  prediction_id: string
   // Ground truth
   ground_truth_gross: number
   ground_truth_net: number | null
@@ -4005,7 +4033,7 @@ export interface VariantComparisonWithDetails extends VariantComparison {
 
 export type LandmarkQualityTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'missing'
 export type GeometryTier45 = 'excellent' | 'good' | 'fair' | 'poor' | 'implausible'
-export type AsymmetryCause = 'real_asymmetry' | 'perspective_induced' | 'missing_visibility' | 'mixed' | 'unknown'
+export type Phase45AsymmetryCause = 'real_asymmetry' | 'perspective_induced' | 'missing_visibility' | 'mixed' | 'unknown'
 
 export interface Phase45Metadata {
   // Landmark coverage
@@ -4027,7 +4055,7 @@ export interface Phase45Metadata {
   
   // Asymmetry
   asymmetry_likely_real: boolean
-  asymmetry_cause: AsymmetryCause
+  asymmetry_cause: Phase45AsymmetryCause
   asymmetry_percent: number
   
   // Trust scores
@@ -4051,7 +4079,7 @@ export interface Phase45Flag {
 
 export interface Phase45AsymmetryAnalysis {
   is_likely_real: boolean
-  apparent_cause: AsymmetryCause
+  apparent_cause: Phase45AsymmetryCause
   left_side_visibility: number
   right_side_visibility: number
   overall_asymmetry_percent: number

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import type { MeasurementGraph } from '@/lib/types';
+import { recalculateMeasurements } from '@/lib/scoring';
 
 type StoredGraphRecord = {
   id: string;
@@ -231,12 +232,13 @@ export async function POST(request: NextRequest) {
         ? graphState.allVersions[graphState.allVersions.length - 1].version + 1
         : 1;
 
-    const confidence = calculateGraphConfidence(adjustedGraph);
+    const normalizedGraph = recalculateMeasurements(adjustedGraph);
+    const confidence = calculateGraphConfidence(normalizedGraph);
 
     const inserted = await insertGraphVersion(
       supabase,
       buckId,
-      adjustedGraph,
+      normalizedGraph,
       confidence,
       nextVersion,
       graphState.foreignKey

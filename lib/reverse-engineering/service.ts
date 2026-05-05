@@ -27,7 +27,10 @@ function buildFallbackMeasurements(pred: Prediction): Measurements {
   // Require the actual saved gross from the prediction row — never synthesize
   // from a hardcoded value like 100. If the prediction has no gross score, the
   // precision pass cannot produce a meaningful baseline and must fail clearly.
-  const gross = pred.predicted_gross ?? pred.estimated_score
+  const predRecord = pred as unknown as Record<string, unknown>
+  const gross =
+    pred.predicted_gross ??
+    (typeof predRecord.estimated_score === 'number' ? predRecord.estimated_score : null)
   if (!gross) {
     throw new Error(
       `[precision-pass] Cannot build fallback measurements: prediction ${pred.id} ` +
@@ -212,6 +215,14 @@ export async function startPrecisionPass(params: {
         confidence_percent: predRecord.confidence_percent ?? null,
         error_band_low: predRecord.error_band_low ?? null,
         error_band_high: predRecord.error_band_high ?? null,
+        active_source: params.scoreComparison?.activeSource ?? null,
+        legacy_gross: params.scoreComparison?.legacyGross ?? null,
+        graph_gross: params.scoreComparison?.graphGross ?? null,
+        legacy_net: params.scoreComparison?.legacyNet ?? null,
+        graph_net: params.scoreComparison?.graphNet ?? null,
+        graph_completeness: params.scoreComparison?.graphCompleteness ?? null,
+        graph_source: params.scoreComparison?.graphSource ?? null,
+        score_comparison_reason: params.scoreComparison?.reason ?? null,
       },
     })
     .select()
@@ -555,7 +566,10 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
           scalingReference: 'precision_pass_refinement',
           rackType: ((buck as Buck)?.rack_type as 'typical' | 'non-typical') ?? 'typical',
           confidenceNotes: ['Generated from winning precision-pass hypothesis'],
-          mainFramePoints: (pred as Prediction)?.main_frame_points ?? 10,
+          mainFramePoints:
+            typeof (pred as unknown as Record<string, unknown>).main_frame_points === 'number'
+              ? ((pred as unknown as Record<string, unknown>).main_frame_points as number)
+              : 10,
         })
       : null
 
@@ -577,22 +591,29 @@ export async function executePrecisionPass(reverseRunId: string): Promise<void> 
     const bestCandidate = (insertedCandidates as HypothesisCandidateRow[])?.find(
       c => c.id === best.candidateId
     )
-    const bestEval = evalRows.find(
-      (e: { candidate_id: string }) => e.candidate_id === best.candidateId
-    ) as { predicted_gross: number; predicted_net: number; delta_gross: number; delta_net: number } | undefined
+    const bestEval = (evalRows as Array<{
+      candidate_id: string
+      predicted_gross: number
+      predicted_net: number
+      delta_gross: number
+      delta_net: number
+    }>).find((e) => e.candidate_id === best.candidateId)
 
     if (bestEval) {
       try {
         await onReversePassComplete({
           reverseRunId,
-          predictionId: run.prediction_id,
-          buckId: run.buck_id,
+          predictionId: String(run.prediction_id),
+          buckId: String(run.buck_id),
           baselineGross: baseGross,
           baselineNet: baseNet,
           refinedGross: bestEval.predicted_gross,
           refinedNet: bestEval.predicted_net,
           winningHypothesisType: bestCandidate?.hypothesis_type ?? null,
-          errorDecompositionCauses: decomposition.causes,
+          errorDecompositionCauses: decomposition.causes.map((cause) => ({
+            cause: cause.cause,
+            confidence: cause.weight,
+          })),
         })
       } catch (hookError) {
         // Log but don't fail the main operation

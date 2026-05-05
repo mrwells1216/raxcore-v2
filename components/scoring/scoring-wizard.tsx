@@ -304,10 +304,18 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
   const canSubmit = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
 
+  const displayCaptureAngles = gridImages.length > 0
+    ? resolveImageRoles(
+        gridImages.map((img, index) => ({
+          angleType: selectedImageAngles[index] ?? (img.angleType as CaptureAngle),
+        })),
+      ).map((entry) => entry.resolvedAngle as CaptureAngle)
+    : []
+
   const captureQuality = gridImages.length > 0
     ? buildCaptureQualitySummary({
         images: gridImages.map(img => ({ name: `Image ${img.id}` })),
-        selectedAngles: selectedImageAngles.map(a => a ?? undefined),
+        selectedAngles: displayCaptureAngles,
       })
     : null
 

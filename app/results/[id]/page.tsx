@@ -4,9 +4,11 @@ import { AppHeader } from '@/components/app-header'
 import { ResultClient } from './result-client'
 import { ArrowLeft } from 'lucide-react'
 import { getBuckBundle } from '@/lib/storage/service'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { ShareBuckButton } from '@/components/scoring/share-buck-button'
 import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
+import { scoreFromGraph as scoreFromGraphNative } from '@/lib/scoring/score-from-graph'
+import { buildScoreComparison } from '@/lib/scoring/score-comparison'
 import type { ScoringResult, ScoringFormData } from '@/lib/types'
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +21,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   const effectiveGraphResult = await loadEffectiveMeasurementGraph(buck.id).catch(() => null)
 
   // Fetch latest completed precision pass run for this prediction
-  const supabase = await createServerSupabaseClient()
+  const supabase = await createClient()
   const { data: latestPrecisionPassRun } = await supabase
     .from('reverse_runs')
     .select('id,best_summary,completed_at,status')
@@ -48,6 +50,22 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
   const scoringMethod = rawResponse?.scoringMethod as ScoringResult['scoringMethod'] || 'heuristic'
   const visionModelUsed = rawResponse?.visionModelUsed || null
   const visionConfidence = rawResponse?.visionConfidence || null
+  const scoreComparison = effectiveGraphResult
+    ? buildScoreComparison({
+        legacyGross:
+          (prediction as any).predicted_gross ??
+          (prediction as any).estimated_score ??
+          (rawResponse as any)?.predictedGross ??
+          null,
+        legacyNet: (prediction as any).predicted_net ?? (rawResponse as any)?.predictedNet ?? null,
+        graphScore: scoreFromGraphNative(effectiveGraphResult.graph),
+        graphSource: effectiveGraphResult.source,
+        confidencePercent:
+          (prediction as any).confidence_percent ??
+          (rawResponse as any)?.confidencePercent ??
+          null,
+      })
+    : null
 
   const result: ScoringResult & { 
     latestPrecisionPassRun?: typeof latestPrecisionPassRun
@@ -92,6 +110,8 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       : null,
     effectiveGraphSource: effectiveGraphResult?.source ?? null,
     effectiveGraphVersion: effectiveGraphResult?.version ?? null,
+    scoreComparison,
+    confidenceEvidence: (rawResponse as any)?.confidenceEvidence ?? null,
   }
 
   const formData: ScoringFormData = {

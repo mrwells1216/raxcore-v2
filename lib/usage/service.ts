@@ -309,7 +309,7 @@ export async function updateUsageRecord(
 
   if (error) {
     if (isUpdatedAtSchemaMismatch(error)) {
-      console.warn('[usage] schema mismatch (42703) on usage_records update — skipping updated_at-dependent bookkeeping')
+      console.warn('[usage] schema mismatch, skipping updated_at-dependent bookkeeping')
       return null
     }
     console.error('Error updating usage record:', error)
@@ -477,7 +477,7 @@ async function incrementRateLimitState(
     // Fallback: get state and update manually
     const state = await getOrCreateRateLimitState(clientKey, windowType, burstSeconds)
     
-    const { data: updated } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('rate_limit_state')
       .update({
         request_count: state.request_count + requestCount,
@@ -489,6 +489,14 @@ async function incrementRateLimitState(
       .eq('id', state.id)
       .select()
       .single()
+
+    if (updateError) {
+      if (isUpdatedAtSchemaMismatch(updateError)) {
+        console.warn('[usage] schema mismatch, skipping updated_at-dependent bookkeeping')
+        return state
+      }
+      throw updateError
+    }
 
     return updated || state
   }
@@ -797,7 +805,7 @@ export async function getUsageReportSummary(
       return acc
     }, {} as Record<string, number>)
 
-  const topErrorTypes = Object.entries(errorTypes)
+  const topErrorTypes = (Object.entries(errorTypes) as Array<[string, number]>)
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5)

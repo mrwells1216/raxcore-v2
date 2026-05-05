@@ -123,11 +123,12 @@ export async function POST(req: Request) {
   // Part 5: Patch canonical measurement graph with human-corrected values.
   // Each edited measurement is stamped: origin='human', visibility='corrected'.
   // Fields that cannot map to graph segments are noted as warnings, not errors.
-  // This is best-effort and never blocks the save response.
+  // This is best-effort: failures are reported as warnings but do not fail the save.
+  let graphPatchWarnings: string[] = []
   {
     const m = reviewedSheet?.measurements ?? {}
     const graphWarnings: string[] = []
-    ;(async () => {
+    await (async () => {
       try {
         const effective = await loadEffectiveMeasurementGraph(buckId)
         if (effective.source === 'fallback') return
@@ -221,7 +222,20 @@ export async function POST(req: Request) {
           .insert(insertPayload)
 
         if (graphErr) {
-          console.warn('[review-save] graph patch insert failed (non-blocking):', graphErr.message)
+          if ((graphErr as { code?: string }).code === '42703' && 'buck_id' in insertPayload) {
+            delete insertPayload.buck_id
+            insertPayload.rack_id = buckId
+            const { error: rackErr } = await adminDb
+              .from('measurement_graphs')
+              .insert(insertPayload)
+            if (rackErr) {
+              graphWarnings.push(`Graph patch persistence failed: ${rackErr.message}`)
+              console.warn('[review-save] graph patch insert failed (non-blocking):', rackErr.message)
+            }
+          } else {
+            graphWarnings.push(`Graph patch persistence failed: ${graphErr.message}`)
+            console.warn('[review-save] graph patch insert failed (non-blocking):', graphErr.message)
+          }
         } else {
           console.log('[review-save] graph patch persisted', {
             buckId,
@@ -233,6 +247,7 @@ export async function POST(req: Request) {
         console.warn('[review-save] graph patch error (non-blocking):', gErr instanceof Error ? gErr.message : String(gErr))
       }
     })()
+    graphPatchWarnings = graphWarnings
   }
 
   // Load original prediction for training truth build
@@ -251,6 +266,7 @@ export async function POST(req: Request) {
         updated,
         reviewCompleteness,
         isOfficial,
+        graphWarnings: graphPatchWarnings,
         warning: 'Reviewed sheet saved, but training sample was not refreshed',
       },
       { status: 200 }
@@ -280,6 +296,7 @@ export async function POST(req: Request) {
         updated,
         reviewCompleteness,
         isOfficial,
+        graphWarnings: graphPatchWarnings,
         warning: 'Reviewed sheet saved, but training sample refresh failed',
       },
       { status: 200 }
@@ -292,6 +309,7 @@ export async function POST(req: Request) {
     updated,
     reviewCompleteness,
     isOfficial,
+    graphWarnings: graphPatchWarnings,
   })
 }
 

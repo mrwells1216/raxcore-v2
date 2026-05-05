@@ -44,6 +44,9 @@ import { buildPrecisionReferenceProfile } from '@/lib/scoring/reference-mode'
 import { persistInitialMeasurementGraph } from '@/lib/scoring/measurement-graph-persistence'
 import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
 import { scoreFromGraph as scoreFromGraphNative } from '@/lib/scoring/score-from-graph'
+import { convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion'
+import { collectGraphEvidence } from '@/lib/scoring/graph-evidence'
+import { buildScoreComparison, type ScoreComparison } from '@/lib/scoring/score-comparison'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -545,48 +548,18 @@ export async function POST(request: Request) {
     try {
       const graphForConf = detectionSummary?.graph
         ? (() => {
-            const { convertDetectionGraphToMeasurementGraph } = require('@/lib/scoring/graph-conversion')
             return convertDetectionGraphToMeasurementGraph(detectionSummary.graph)
           })()
         : null
 
       if (graphForConf) {
-        const { scoreFromGraph: sfgConf } = require('@/lib/scoring/score-from-graph')
-        const { getLowConfidenceMeasurements } = require('@/lib/scoring')
-        const graphScoreConf = sfgConf(graphForConf)
-        const legacyGrossConf = scoringResult.predictedGross ?? null
-
-        let correctedSegmentCount = 0
-        let inferredSegmentCount = 0
-
-        const allSegments = [
-          graphForConf.beams?.left,
-          graphForConf.beams?.right,
-          graphForConf.spread,
-          ...(graphForConf.tines ?? []),
-          ...(graphForConf.circumferences ?? []),
-        ].filter(Boolean)
-
-        for (const seg of allSegments) {
-          const p = (seg as any)?.provenance
-          if (p?.origin === 'human' || p?.visibility === 'corrected') correctedSegmentCount++
-          if (p?.visibility === 'inferred') inferredSegmentCount++
-        }
-
-        const lowConfSegs = getLowConfidenceMeasurements(graphForConf, 0.5)
-
-        graphEvidenceForConfidence = {
+        const graphScoreConf = scoreFromGraphNative(graphForConf)
+        graphEvidenceForConfidence = collectGraphEvidence({
+          graph: graphForConf,
+          graphScore: graphScoreConf,
           graphSource: 'prediction_graph',
-          graphCompleteness: graphScoreConf.completeness,
-          correctedSegmentCount,
-          inferredSegmentCount,
-          lowConfidenceSegmentCount: lowConfSegs.length,
-          legacyGraphGrossDelta: legacyGrossConf != null
-            ? Math.abs(graphScoreConf.grossScore - legacyGrossConf)
-            : null,
-          missingCircumferences: graphForConf.circumferences.length === 0 ||
-            graphForConf.circumferences.every((c: any) => !(c.circumference > 0)),
-        }
+          legacyGross: scoringResult.predictedGross ?? null,
+        })
       }
     } catch {
       // non-blocking — confidence engine works fine without graph evidence
@@ -775,28 +748,24 @@ export async function POST(request: Request) {
     //                      AND completeness >= 0.75
     //                      AND graphGross is finite and > 0
     //   legacy otherwise
-    let scoreComparison: {
-      activeSource: 'graph_native' | 'legacy'
-      legacyGross: number | null
-      graphGross: number | null
-      legacyNet: number | null
-      graphNet: number | null
-      grossDelta: number | null
-      netDelta: number | null
-      graphCompleteness: number
-      graphSource: 'persisted_graph' | 'prediction_graph' | 'fallback'
-      reason: string
-    } | null = null
+    let scoreComparison: ScoreComparison | null = null
 
     try {
       const effective = await loadEffectiveMeasurementGraph(buck.id)
       const graphScore = scoreFromGraphNative(effective.graph)
-      const legacyGross = scoringResult.predictedGross ?? null
-      const legacyNet = scoringResult.predictedNet ?? null
-      const graphGross = graphScore.grossScore
-      const graphNet = graphScore.netScore
-      const grossDelta = legacyGross != null ? Math.abs(graphGross - legacyGross) : null
-      const netDelta = legacyNet != null ? Math.abs(graphNet - legacyNet) : null
+      const helperComparison = buildScoreComparison({
+        legacyGross: scoringResult.predictedGross ?? null,
+        legacyNet: scoringResult.predictedNet ?? null,
+        graphScore,
+        graphSource: effective.source,
+        confidencePercent: adjustedConfidence,
+      })
+      const legacyGross = helperComparison.legacyGross
+      const legacyNet = helperComparison.legacyNet
+      const graphGross = helperComparison.graphGross
+      const graphNet = helperComparison.graphNet
+      const grossDelta = helperComparison.grossDelta
+      const netDelta = helperComparison.netDelta
 
       // Active source decision
       let activeSource: 'graph_native' | 'legacy' = 'legacy'
@@ -813,18 +782,10 @@ export async function POST(request: Request) {
         reason = `Graph completeness ${(graphScore.completeness * 100).toFixed(0)}%, source: ${effective.source}`
       }
 
-      scoreComparison = {
-        activeSource,
-        legacyGross,
-        graphGross,
-        legacyNet,
-        graphNet,
-        grossDelta,
-        netDelta,
-        graphCompleteness: graphScore.completeness,
-        graphSource: effective.source,
-        reason,
-      }
+      activeSource = helperComparison.activeSource
+      reason = helperComparison.reason
+
+      scoreComparison = helperComparison
 
       console.log('[score] graph-native comparison', {
         buckId: buck.id,
@@ -988,6 +949,7 @@ export async function POST(request: Request) {
             await startPrecisionPass({
               predictionId: prediction.id,
               requestedByUserId: userId,
+              scoreComparison,
             })
           } catch (shadowErr) {
             console.error('[score] Phase 50 shadow precision pass enqueue failed (non-blocking):', shadowErr)
