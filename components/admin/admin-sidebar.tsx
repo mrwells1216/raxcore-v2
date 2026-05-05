@@ -30,6 +30,7 @@ import {
   Boxes,
   Eye,
   Zap,
+  ClipboardCheck,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -60,6 +61,7 @@ const navigation = [
   { name: 'Supervision', href: '/admin/supervision', icon: Eye },
   { name: 'Training Packs', href: '/admin/training-packs', icon: Zap },
   { name: 'Sandbox', href: '/admin/sandbox', icon: TestTubes },
+  { name: 'Official Score', href: '/admin/official-score', icon: ClipboardCheck },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ]
 
