@@ -32,45 +32,23 @@ interface HeaderProps {
   usageSlot?: React.ReactNode
 }
 
-/** RAXCORE logo — the circuit-board plate brand image */
-function RaxcoreLogo({ size = 28 }: { size?: number }) {
+/**
+ * RAXCORE brand plate — the logo image is the full brand identity
+ * (antler + RAXCORE + Antler Analytics).  No separate text wordmark needed.
+ */
+function RaxcoreLogo() {
   return (
     <img
       src="/raxcore-logo.jpg"
-      alt="RAXcore Antler Analytics logo"
-      width={size * 1.75}
-      height={size}
+      alt="RAXcore Antler Analytics"
+      height={36}
       style={{
         display: 'block',
-        objectFit: 'cover',
+        height: 36,
+        width: 'auto',
         borderRadius: 4,
       }}
     />
-  )
-}
-
-/** Wordmark: RAXCORE — copper "RAX" + silver-outline "CORE", matching the brand plate */
-function RaxcoreWordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn('flex items-baseline gap-0', className)}>
-      <span
-        className="font-black leading-none"
-        style={{ color: '#c8845a', letterSpacing: '0.1em', fontSize: '1rem' }}
-      >
-        RAX
-      </span>
-      <span
-        className="font-black leading-none"
-        style={{
-          color: 'transparent',
-          WebkitTextStroke: '1.1px #d9cfc4',
-          letterSpacing: '0.1em',
-          fontSize: '1rem',
-        }}
-      >
-        CORE
-      </span>
-    </span>
   )
 }
 
@@ -130,18 +108,9 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
       >
         <div className="container flex h-14 max-w-screen-xl items-center px-4 gap-4">
 
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <RaxcoreLogo size={30} />
-            <div className="flex flex-col gap-0">
-              <RaxcoreWordmark />
-              <span
-                className="text-[9px] font-mono tracking-[0.28em] uppercase leading-none"
-                style={{ color: 'var(--muted-foreground)' }}
-              >
-                Antler Analytics
-              </span>
-            </div>
+          {/* Logo — the plate image already contains the full brand identity */}
+          <Link href="/" className="flex items-center shrink-0">
+            <RaxcoreLogo />
           </Link>
 
           {/* Desktop nav */}
@@ -210,10 +179,7 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
                     className="flex items-center justify-between p-4"
                     style={{ borderBottom: '1px solid var(--bronze-dark)' }}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <RaxcoreLogo size={26} />
-                      <RaxcoreWordmark />
-                    </div>
+                    <RaxcoreLogo />
                     <Button
                       variant="ghost"
                       size="icon"

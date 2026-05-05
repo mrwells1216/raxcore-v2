@@ -55,48 +55,48 @@
   --popover: #222018;
   --popover-foreground: #e4dcd0;
 
-  /* Copper is the primary brand metal */
-  --primary: #b87650;
+  /* Copper — matched to the exact tone on the brand plate logo */
+  --primary: #a86840;
   --primary-foreground: #0e0c0a;
-  --secondary: #2a2620;
-  --secondary-foreground: #c8b8a0;
-  --muted: #2a2620;
-  --muted-foreground: #7e7060;
-  --accent: #c8845a;
+  --secondary: #272320;
+  --secondary-foreground: #c0a888;
+  --muted: #272320;
+  --muted-foreground: #7a6a58;
+  --accent: #b87248;
   --accent-foreground: #0e0c0a;
   --destructive: #8b2c2c;
   --destructive-foreground: #e4dcd0;
-  --border: #3c3428;
-  --input: #2c2820;
-  --ring: #b87650;
+  --border: #3a2e22;
+  --input: #2a2420;
+  --ring: #a86840;
 
   /* Charts */
-  --chart-1: #b87650;
-  --chart-2: #c8845a;
+  --chart-1: #a86840;
+  --chart-2: #b87248;
   --chart-3: #4a7c44;
-  --chart-4: #c8903a;
-  --chart-5: #7a5020;
+  --chart-4: #c08030;
+  --chart-5: #6e3e18;
 
-  /* Sidebar — slightly darker than main bg, matching the panel border in logo */
-  --sidebar: #141210;
+  /* Sidebar — slightly darker than main bg, matching the plate background */
+  --sidebar: #131110;
   --sidebar-foreground: #e4dcd0;
-  --sidebar-primary: #b87650;
+  --sidebar-primary: #a86840;
   --sidebar-primary-foreground: #0e0c0a;
-  --sidebar-accent: #2a2620;
-  --sidebar-accent-foreground: #c8b8a0;
-  --sidebar-border: #3c3428;
-  --sidebar-ring: #b87650;
+  --sidebar-accent: #272320;
+  --sidebar-accent-foreground: #c0a888;
+  --sidebar-border: #3a2e22;
+  --sidebar-ring: #a86840;
 
   /* Semantic */
   --success: #4a7c44;
   --success-foreground: #e4dcd0;
-  --warning: #c8903a;
+  --warning: #c08030;
   --warning-foreground: #0e0c0a;
 
-  /* RAXCORE copper scale — matched to screenshot wordmark and circuit traces */
-  --bronze-light: #c8845a;
-  --bronze-mid:   #b87650;
-  --bronze-dark:  #5e3820;
+  /* RAXCORE copper scale — matched exactly to the logo plate */
+  --bronze-light: #b87248;
+  --bronze-mid:   #a86840;
+  --bronze-dark:  #5c3418;
 
   /* Scan / tactical green */
   --scan-green: #5ab850;
