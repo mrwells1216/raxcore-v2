@@ -153,6 +153,23 @@ export interface MeasureStore {
   renderMode: RenderMode
   setRenderMode: (m: RenderMode) => void
 
+  /** Whether the zone-color overlay is drawn on top of the solid mesh */
+  showZones: boolean
+  setShowZones: (v: boolean) => void
+
+  /** Opacity of the zone overlay (0–1) */
+  zoneOpacity: number
+  setZoneOpacity: (v: number) => void
+
+  /** Whether an edge-based wireframe is overlaid on the solid mesh */
+  showWireframe: boolean
+  setShowWireframe: (v: boolean) => void
+
+  /** Two points defining the cross-section plane for circumference slicing */
+  crossSectionPoints: Point3D[]
+  setCrossSectionPoint: (index: 0 | 1, p: Point3D) => void
+  clearCrossSection: () => void
+
   measurements3D: Record<FieldId, Measurement3D>
   addPoint3D: (fieldId: FieldId, point: Point3D) => void
   undoPoint3D: (fieldId: FieldId) => void
@@ -332,6 +349,23 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
   renderMode: 'solid',
   setRenderMode: (m) => set({ renderMode: m }),
 
+  showZones: false,
+  setShowZones: (v) => set({ showZones: v }),
+
+  zoneOpacity: 0.45,
+  setZoneOpacity: (v) => set({ zoneOpacity: v }),
+
+  showWireframe: false,
+  setShowWireframe: (v) => set({ showWireframe: v }),
+
+  crossSectionPoints: [],
+  setCrossSectionPoint: (index, p) => set((s) => {
+    const next = [...s.crossSectionPoints] as Point3D[]
+    next[index] = p
+    return { crossSectionPoints: next }
+  }),
+  clearCrossSection: () => set({ crossSectionPoints: [] }),
+
   measurements3D: buildEmpty3D(),
   addPoint3D: (fieldId, point) => set((s) => {
     const m = s.measurements3D[fieldId]
@@ -387,5 +421,9 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     phase: 'photo',
     stageScale: 1,
     stagePos: { x: 0, y: 0 },
+    showZones: false,
+    zoneOpacity: 0.45,
+    showWireframe: false,
+    crossSectionPoints: [],
   }),
 }))
