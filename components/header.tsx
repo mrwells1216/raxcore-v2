@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X, Target, History, Map, Library, Shield } from 'lucide-react'
+import { Menu, X, Target, History, Map, Library, Shield, Ruler } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet'
@@ -12,13 +12,15 @@ import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 
 const publicNavigation = [
-  { name: 'Score', href: '/score', icon: Target },
-  { name: 'Map',   href: '/map',   icon: Map },
+  { name: 'Score',   href: '/score',   icon: Target },
+  { name: 'Measure', href: '/measure', icon: Ruler },
+  { name: 'Map',     href: '/map',     icon: Map },
   { name: 'History', href: '/history', icon: History },
 ]
 
 const authenticatedNavigation = [
   { name: 'Score',   href: '/score',   icon: Target },
+  { name: 'Measure', href: '/measure', icon: Ruler },
   { name: 'Library', href: '/library', icon: Library },
   { name: 'Map',     href: '/map',     icon: Map },
 ]

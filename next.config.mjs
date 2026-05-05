@@ -15,6 +15,10 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // jspdf and html2canvas bundle Node.js CJS code that breaks SSR.
+  // Marking them as server-external prevents them from being included in
+  // the SSR bundle; they are only imported dynamically on the client.
+  serverExternalPackages: ['jspdf', 'html2canvas'],
 };
 
 export default nextConfig;
