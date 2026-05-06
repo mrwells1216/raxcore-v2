@@ -382,7 +382,8 @@ export async function evaluateGuardrails(
 ): Promise<GuardrailEvaluationResult> {
   // Phase 52 Patch 2: Import supervision hooks for regression detection
   const { createSupervisionEvent } = await import('@/lib/supervision/service')
-  
+  const supabase = await createClient()
+
   // Get the benchmark run with its config
   const run = await getBenchmarkRun(benchmarkRunId)
   if (!run) throw new Error('Benchmark run not found')
@@ -560,14 +561,14 @@ export async function evaluateGuardrails(
       const segmentRegressions = subgroupResults
         .filter(s => !s.passed)
         .map(s => ({
-          segment: s.segment || 'unknown',
+          segment: s.subgroup_value || 'unknown',
           regression_inches: s.regression_inches || 0,
-          metric: s.metric || 'unknown',
+          metric: 'gross_error',
         }))
 
       await createSupervisionEvent({
         supervision_type: criticalFailures > 0 ? 'benchmark_failure_cluster' : 'segment_regression_detected',
-        source: 'benchmark_system',
+        source: 'benchmark',
         confidence: Math.max(0.6, 1 - (warningFailures / (criticalFailures + warningFailures + 1))),
         benchmark_run_id: benchmarkRunId,
         variant_id: run.candidate_model_version_id || undefined,
@@ -580,13 +581,11 @@ export async function evaluateGuardrails(
           candidate_vs_active_regression_inches: regressionInches || 0,
           candidate_vs_active_regression_percent: regressionPercent || 0,
         },
-        labels: [
-          ...failedChecks.map(check => ({
-            label: mapCheckToLabel(check.name),
-            confidence: check.severity === 'critical' ? 0.8 : 0.6,
-            source: 'auto' as const,
-          })),
-        ],
+        labels: failedChecks.map(check => ({
+          label: mapCheckToLabel(check.name) as import('@/lib/supervision/types').FailureCauseLabel,
+          confidence: check.severity === 'critical' ? 0.8 : 0.6,
+          source: 'benchmark-derived' as const,
+        })),
       })
     } catch (hookError) {
       console.error('[Phase 52] Benchmark regression supervision hook failed:', hookError)
