@@ -16,10 +16,13 @@ import {
   type FieldId,
   type Point2D,
 } from './measure-store'
+import { curveAccuracyWarning } from '@/lib/advanced-scoring/geometry'
 
 const SNAP_RADIUS = 12
 const MAX_SCALE   = 12
 const MIN_SCALE   = 0.1
+// Two clicks within this many ms triggers finalize (double-click equivalent)
+const DBL_CLICK_MS = 280
 
 // ─── Filter helpers ───────────────────────────────────────────────────────────
 
@@ -35,14 +38,14 @@ function applyFilter(
 
   if (filter === 'thermal') {
     ctx.drawImage(imgEl, 0, 0)
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const d  = ctx.getImageData(0, 0, canvas.width, canvas.height)
     const px = d.data
     for (let i = 0; i < px.length; i += 4) {
-      const t = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255
-      px[i]     = Math.floor(255 * Math.min(1, t * 2))
-      px[i + 1] = Math.floor(255 * Math.max(0, 1 - Math.abs(t - 0.5) * 2))
-      px[i + 2] = Math.floor(255 * Math.max(0, 1 - t * 2))
-      px[i + 3] = 255
+      const t    = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255
+      px[i]      = Math.floor(255 * Math.min(1, t * 2))
+      px[i + 1]  = Math.floor(255 * Math.max(0, 1 - Math.abs(t - 0.5) * 2))
+      px[i + 2]  = Math.floor(255 * Math.max(0, 1 - t * 2))
+      px[i + 3]  = 255
     }
     ctx.putImageData(d, 0, 0)
     return canvas
@@ -63,7 +66,7 @@ function dist(a: Point2D, b: Point2D) {
 
 function snapPoint(raw: Point2D, existing: Point2D[], scale: number): Point2D {
   const threshold = SNAP_RADIUS / scale
-  let best: Point2D | null = null, bestD = Infinity
+  let best: Point2D | null = null; let bestD = Infinity
   for (const p of existing) {
     const d = dist(raw, p)
     if (d < threshold && d < bestD) { bestD = d; best = p }
@@ -78,16 +81,19 @@ export function PhotoCanvas() {
   const [size, setSize] = useState({ w: 800, h: 600 })
   const [htmlImage, setHtmlImage] = useState<HTMLImageElement | null>(null)
   const [filteredEl, setFilteredEl] = useState<HTMLImageElement | HTMLCanvasElement | null>(null)
-  const [dblTimer, setDblTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
+
+  // Use a ref (not state) for the double-click timer to avoid stale-closure issues
+  // and prevent unnecessary re-renders on each click.
+  const dblTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const {
     photoDataUrl, photoFilter,
     mode, activeField, calibration,
     stageScale, stagePos, setStageViewport,
     measurements2D,
-    addPoint2D, undoPoint2D, movePoint2D, finalizeField2D,
+    addPoint2D, undoPoint2D, movePoint2D, finalizeField2D, removePoint2D,
     setCalibrationPoint, finalizeCalibration,
-    setMode,
+    setMode, setMeasurementWarning2D,
   } = useMeasureStore()
 
   // Container resize
@@ -126,18 +132,32 @@ export function PhotoCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [htmlImage, size.w, size.h])
 
+  // Curve accuracy warning: recompute whenever points change for active field
+  useEffect(() => {
+    if (!activeField) return
+    const m = measurements2D[activeField]
+    if (!m || m.points.length < 2) return
+    const warn = curveAccuracyWarning(m.points, calibration.pixelsPerInch, 3)
+    setMeasurementWarning2D(activeField, warn)
+  }, [activeField, measurements2D, calibration.pixelsPerInch, setMeasurementWarning2D])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Backspace' || e.key === 'Delete') { if (activeField) undoPoint2D(activeField) }
-      if (e.key === 'Enter')  { if (activeField) finalizeField2D(activeField) }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && activeField) {
+        undoPoint2D(activeField)
+      }
+      if (e.key === 'Enter' && activeField) {
+        finalizeField2D(activeField)
+        if (dblTimerRef.current) { clearTimeout(dblTimerRef.current); dblTimerRef.current = null }
+      }
       if (e.key === 'Escape') setMode('view')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [activeField, undoPoint2D, finalizeField2D, setMode])
 
-  // Wheel zoom
+  // Wheel zoom — does NOT interfere with point placement
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
     const stage = e.target.getStage()
@@ -145,43 +165,76 @@ export function PhotoCanvas() {
     const old = stage.scaleX()
     const ptr = stage.getPointerPosition()
     if (!ptr) return
-    const by = 1.08
+    const by   = 1.08
     const next = e.evt.deltaY < 0 ? Math.min(old * by, MAX_SCALE) : Math.max(old / by, MIN_SCALE)
     const mpt  = { x: (ptr.x - stage.x()) / old, y: (ptr.y - stage.y()) / old }
     setStageViewport(next, { x: ptr.x - mpt.x * next, y: ptr.y - mpt.y * next })
   }, [setStageViewport])
 
-  // Stage click
+  // Stage click — stable via refs to avoid stale captures
+  const stageScaleRef = useRef(stageScale)
+  const stagePosRef   = useRef(stagePos)
+  stageScaleRef.current = stageScale
+  stagePosRef.current   = stagePos
+
   const handleClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.evt.button !== 0) return
     const stage = e.target.getStage()
     if (!stage) return
+    // Only fire on background clicks
     if (e.target !== stage && e.target.name() !== 'bg-image') return
     const ptr = stage.getPointerPosition()
     if (!ptr) return
-    const raw: Point2D = { x: (ptr.x - stagePos.x) / stageScale, y: (ptr.y - stagePos.y) / stageScale }
 
-    if (mode === 'calibrate') { setCalibrationPoint(raw); return }
-    if (mode === 'measure' && activeField) {
-      const all: Point2D[] = []
-      for (const fd of FIELD_DEFS) all.push(...measurements2D[fd.id].points)
-      const snapped = snapPoint(raw, all, stageScale)
-      if (dblTimer) {
-        clearTimeout(dblTimer); setDblTimer(null); finalizeField2D(activeField); return
-      }
-      addPoint2D(activeField, snapped)
-      const t = setTimeout(() => setDblTimer(null), 300)
-      setDblTimer(t)
+    const sc = stageScaleRef.current
+    const pos = stagePosRef.current
+    const raw: Point2D = { x: (ptr.x - pos.x) / sc, y: (ptr.y - pos.y) / sc }
+
+    if (useMeasureStore.getState().mode === 'calibrate') {
+      setCalibrationPoint(raw)
+      return
     }
-  }, [mode, activeField, stageScale, stagePos, measurements2D, addPoint2D, finalizeField2D, setCalibrationPoint, dblTimer])
+
+    const currentField = useMeasureStore.getState().activeField
+    if (useMeasureStore.getState().mode === 'measure' && currentField) {
+      // Double-click detection via ref: no re-render on timer
+      if (dblTimerRef.current) {
+        clearTimeout(dblTimerRef.current)
+        dblTimerRef.current = null
+        // Double-click: finalize
+        finalizeField2D(currentField)
+        return
+      }
+
+      // Snap to existing points across all fields
+      const all: Point2D[] = []
+      const state = useMeasureStore.getState()
+      for (const fd of FIELD_DEFS) all.push(...state.measurements2D[fd.id].points)
+      const snapped = snapPoint(raw, all, sc)
+      addPoint2D(currentField, snapped)
+
+      dblTimerRef.current = setTimeout(() => {
+        dblTimerRef.current = null
+      }, DBL_CLICK_MS)
+    }
+  }, [addPoint2D, finalizeField2D, setCalibrationPoint])
 
   const handlePointDragEnd = useCallback((fieldId: FieldId, index: number, e: Konva.KonvaEventObject<DragEvent>) => {
     movePoint2D(fieldId, index, { x: e.target.x(), y: e.target.y() })
   }, [movePoint2D])
 
-  const fmt   = (v: number) => `${v.toFixed(2)}"`
-  const afd   = activeField ? FIELD_DEFS.find(f => f.id === activeField) : null
-  const cursor = mode !== 'view' ? 'crosshair' : 'grab'
+  // Drag end for stage pan
+  const handleStageDragEnd = useCallback((e: Konva.KonvaEventObject<DragEvent>) => {
+    const s = e.target.getStage()
+    if (s) setStageViewport(s.scaleX(), { x: s.x(), y: s.y() })
+  }, [setStageViewport])
+
+  const fmt    = (v: number) => `${v.toFixed(2)}"`
+  const afd    = activeField ? FIELD_DEFS.find(f => f.id === activeField) : null
+
+  // Pan is only allowed when not actively placing points
+  const panEnabled = mode === 'view'
+  const cursor     = mode !== 'view' ? 'crosshair' : 'grab'
 
   if (!filteredEl) {
     return (
@@ -193,6 +246,16 @@ export function PhotoCanvas() {
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden select-none" style={{ cursor, background: '#0a0907' }}>
+      {/* Calibration warning banner */}
+      {mode === 'measure' && !calibration.finalized && (
+        <div
+          className="absolute top-0 inset-x-0 z-20 px-3 py-1.5 text-xs font-medium text-center"
+          style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', borderBottom: '1px solid rgba(251,191,36,0.3)' }}
+        >
+          No calibration set — measurements will be uncalibrated (lower confidence). Set scale first for accurate inch values.
+        </div>
+      )}
+
       <Stage
         width={size.w}
         height={size.h}
@@ -202,11 +265,8 @@ export function PhotoCanvas() {
         y={stagePos.y}
         onWheel={handleWheel}
         onClick={handleClick}
-        draggable={mode === 'view'}
-        onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
-          const s = e.target.getStage()
-          if (s) setStageViewport(s.scaleX(), { x: s.x(), y: s.y() })
-        }}
+        draggable={panEnabled}
+        onDragEnd={handleStageDragEnd}
       >
         <Layer>
           <KImage
@@ -295,25 +355,21 @@ export function PhotoCanvas() {
                   />
                 )}
 
-                {/* Segment-too-long warning */}
-                {isActive && m.points.length >= 2 && calibration.pixelsPerInch > 0 && (() => {
+                {/* Segment-too-long / curve accuracy warning */}
+                {isActive && m.warnings.length > 0 && m.points.length >= 2 && (() => {
                   const last = m.points.slice(-2)
-                  const segIn = dist(last[0], last[1]) / calibration.pixelsPerInch
-                  if (segIn > 3) {
-                    const mx = (last[0].x + last[1].x) / 2
-                    const my = (last[0].y + last[1].y) / 2
-                    return (
-                      <Text
-                        key="warn"
-                        x={mx}
-                        y={my + 6 / stageScale}
-                        text="Add more points"
-                        fill="#fbbf24"
-                        fontSize={9 / stageScale}
-                      />
-                    )
-                  }
-                  return null
+                  const mx = (last[0].x + last[1].x) / 2
+                  const my = (last[0].y + last[1].y) / 2
+                  return (
+                    <Text
+                      key="warn"
+                      x={mx}
+                      y={my + 6 / stageScale}
+                      text={m.warnings[0]}
+                      fill="#fbbf24"
+                      fontSize={9 / stageScale}
+                    />
+                  )
                 })()}
 
                 {/* Draggable handles */}
@@ -330,7 +386,7 @@ export function PhotoCanvas() {
                     onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => handlePointDragEnd(fd.id, i, e)}
                     onContextMenu={(e: Konva.KonvaEventObject<MouseEvent>) => {
                       e.evt.preventDefault()
-                      if (!m.finalized) useMeasureStore.getState().removePoint2D(fd.id, i)
+                      if (!m.finalized) removePoint2D(fd.id, i)
                     }}
                   />
                 ))}
@@ -359,6 +415,14 @@ export function PhotoCanvas() {
            'Set reference length below and click Set Scale'}
         </div>
       )}
+
+      {/* Zoom indicator */}
+      <div
+        className="absolute bottom-3 right-3 px-2 py-1 rounded text-xs font-mono pointer-events-none"
+        style={{ background: 'rgba(0,0,0,0.5)', color: 'rgba(200,169,110,0.6)' }}
+      >
+        {Math.round(stageScale * 100)}%
+      </div>
     </div>
   )
 }

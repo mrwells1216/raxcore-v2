@@ -41,11 +41,8 @@ export async function GET(
       pins 
     })
   } catch (error) {
-    console.error('Error fetching buck mapping:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch buck mapping data' },
-      { status: 500 }
-    )
+    console.warn('[map] remote storage unavailable, using empty fallback', error)
+    return NextResponse.json({ buck: null, property: null, pins: [] })
   }
 }
 
@@ -77,7 +74,7 @@ export async function PATCH(
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Error updating buck mapping:', error)
+    console.warn('[map] remote storage unavailable, buck mapping not updated', error)
     return NextResponse.json(
       { error: 'Failed to update buck mapping' },
       { status: 500 }

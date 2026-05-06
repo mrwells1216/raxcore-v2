@@ -113,7 +113,7 @@ export async function onReversePassComplete(
     source: 'reverse_pass',
     confidence: 0.75,
     prediction_id: input.predictionId,
-    buck_id: input.buckId,
+    buck_id: input.buckId ?? undefined,
     reverse_run_id: input.reverseRunId,
     delta_gross: grossDelta,
     delta_net: netDelta,
@@ -179,7 +179,7 @@ export async function onConflictDetected(
   const labels: CreateSupervisionEventInput['labels'] = []
   if (input.disagreementClassifications) {
     for (const dc of input.disagreementClassifications) {
-      const mappedLabel = mapDisagreementTypeToLabel(dc.primaryType)
+      const mappedLabel = mapDisagreementTypeToFailureLabel(dc.primaryType)
       if (mappedLabel) {
         labels.push({
           label: mappedLabel,
@@ -210,12 +210,13 @@ export async function onConflictDetected(
     source: 'conflict_engine',
     confidence: Math.min(0.9, 0.5 + input.disagreementScore),
     prediction_id: input.predictionId,
-    buck_id: input.buckId,
+    buck_id: input.buckId ?? undefined,
     metadata_json: {
       disagreement_score: input.disagreementScore,
       affected_measurement_families: input.highDisagreementFamilies,
       dominant_views: input.dominantViews ?? null,
-      rejected_views: input.rejectedViews ?? null,
+      rejected_views: input.rejectedViews?.map(v => v.imageIndex) ?? undefined,
+      rejected_view_reasons: input.rejectedViews?.map(v => v.reason) ?? undefined,
       disagreement_classifications: input.disagreementClassifications ?? null,
     },
     labels,
@@ -399,7 +400,7 @@ export async function onIntervalMiss(
 
   const event = await createSupervisionEvent({
     supervision_type: 'interval_miss',
-    source: 'confidence_system',
+    source: 'auto',
     confidence: Math.min(0.9, 0.5 + (totalDeviation / intervalWidth) * 0.4),
     prediction_id: input.predictionId,
     buck_id: input.buckId,
@@ -467,7 +468,7 @@ export async function onHighConfidenceMiss(
 
   const event = await createSupervisionEvent({
     supervision_type: 'confidence_overclaim',
-    source: 'confidence_system',
+    source: 'auto',
     confidence: Math.min(1.0, 0.7 + (input.missMagnitude / 10) * 0.3),
     prediction_id: input.predictionId,
     buck_id: input.buckId,

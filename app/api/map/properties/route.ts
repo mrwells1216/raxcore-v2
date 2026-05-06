@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ id: property.id })
   } catch (error) {
-    console.error('Error creating property:', error)
+    console.warn('[map] remote storage unavailable, property not created', error)
     return NextResponse.json(
       { error: 'Failed to create property' },
       { status: 500 }
