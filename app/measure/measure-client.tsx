@@ -1,11 +1,13 @@
 'use client'
 
+import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useMeasureStore, FIELD_DEFS, type MeasurePhase, type FieldId } from '@/components/measure/measure-store'
 import { MeasureToolbar } from '@/components/measure/measure-toolbar'
 import { FieldList } from '@/components/measure/field-list'
 import { ScorePanel } from '@/components/measure/score-panel'
 import { PhotogrammetryPanel } from '@/components/measure/photogrammetry-panel'
+import { X } from 'lucide-react'
 
 // Dynamically import heavy canvas/3D components (no SSR)
 const PhotoCanvas = dynamic(
@@ -71,14 +73,31 @@ export function MeasureClient() {
         color: '#e8d8b8',
       }}
     >
-      {/* Phase tabs */}
+      {/* Phase tabs + back button */}
       <div
-        className="flex flex-shrink-0"
+        className="flex items-center justify-between flex-shrink-0"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
       >
-        {PHASES.map(p => (
-          <PhaseTab key={p.id} id={p.id} label={p.label} active={phase === p.id} />
-        ))}
+        <div className="flex">
+          {PHASES.map(p => (
+            <PhaseTab key={p.id} id={p.id} label={p.label} active={phase === p.id} />
+        </div>
+      </div>
+        <Link
+          href="/score"
+          className="flex items-center gap-1 px-3 py-2.5 text-xs font-bold tracking-widest uppercase transition-all mr-2"
+          style={{
+            color: 'rgba(255,255,255,0.38)',
+            textDecoration: 'none',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#c8a96e')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.38)')}
+          title="Return to Score page"
+        >
+          <X size={16} />
+          Exit
+        </Link>
+      </div>
       </div>
 
       {/* Toolbar (photo / 3D only) */}
