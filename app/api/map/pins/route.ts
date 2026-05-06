@@ -28,11 +28,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ pins })
   } catch (error) {
-    console.error('Error fetching pins:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch pins' },
-      { status: 500 }
-    )
+    console.warn('[map] remote storage unavailable, using empty fallback', error)
+    return NextResponse.json({ pins: [] })
   }
 }
 
@@ -84,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ id: pin.id })
   } catch (error) {
-    console.error('Error creating pin:', error)
+    console.warn('[map] remote storage unavailable, pin not created', error)
     return NextResponse.json(
       { error: 'Failed to create pin' },
       { status: 500 }

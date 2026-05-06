@@ -176,6 +176,15 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
       // navigation away while the camera was starting.
       if (!isActiveRef.current) return
 
+      // AbortError is a benign teardown signal (StrictMode, fast navigation).
+      // Treat it as a no-op; do not surface an error state to the user.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        if (isActiveRef.current) {
+          console.debug('[scan-mode] camera initialization aborted')
+        }
+        return
+      }
+
       console.warn('[scan-mode] camera initialization failed', err)
       setCameraError('Camera access denied. Tap to retry.')
       setIsStreaming(false)

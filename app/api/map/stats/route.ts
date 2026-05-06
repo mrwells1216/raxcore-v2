@@ -6,10 +6,7 @@ export async function GET() {
     const stats = await getMapStats()
     return NextResponse.json(stats)
   } catch (error) {
-    console.error('Error fetching map stats:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch map stats' },
-      { status: 500 }
-    )
+    console.warn('[map] remote storage unavailable, using empty fallback', error)
+    return NextResponse.json({ total_bucks: 0, total_pins: 0, total_properties: 0 })
   }
 }
