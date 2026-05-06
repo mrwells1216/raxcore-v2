@@ -36,9 +36,11 @@ interface ScoringWizardProps {
   onComplete: (result: ScoringResult, formData: ScoringFormData) => void
 }
 
-export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }: ScoringWizardProps) {
+export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizardProps) {
   const scoringFormRef = useRef<ScoringFormHandle>(null)
-  const [inputMode, setInputMode] = useState<ScoreInputMode>('smart-scan')
+  const [inputMode, setInputMode] = useState<ScoreInputMode>(
+    initialMode === 'upload' ? 'guided-upload' : 'smart-scan',
+  )
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [gridImages, setGridImages] = useState<GridImage[]>([])
   const [selectedImageAngles, setSelectedImageAngles] = useState<(CaptureAngle | null)[]>([])
@@ -114,7 +116,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       const slotKey = angle === 'front' ? 'front_center' : angle === 'left' ? 'left_side' : 'right_side'
 
       scanImages.push({
-        id: `scan-${angle}-${Date.now()}`,
+        id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `scan-${angle}-${Date.now()}-${i}`,
         url,
         file,
         slotKey: slotKey as any,
@@ -127,7 +129,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
 
     setGridImages(scanImages)
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
-    updateIntakeQuality(scanImages, undefined, 'live_deer')
+    updateIntakeQuality(scanImages)
     setDetailsOpen(true)
   }, [updateIntakeQuality])
 
@@ -358,8 +360,8 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
             active={inputMode === 'smart-scan'}
             onClick={() => setInputMode('smart-scan')}
             icon={<Camera className="h-3.5 w-3.5" />}
-            label="Smart Scan"
-            badge="Best"
+            label="Guided Camera"
+            badge="Manual"
           />
           <ModeTab
             active={inputMode === 'guided-upload'}
@@ -371,7 +373,7 @@ export function ScoringWizard({ initialMode: _initialMode, userId, onComplete }:
       </Section>
 
       {/* ── 2. Photo upload / scan ───────────────────────────────────────── */}
-      <Section label={inputMode === 'smart-scan' ? 'Capture' : 'Add Photos'}>
+      <Section label={inputMode === 'smart-scan' ? 'Guided Camera Capture' : 'Add Photos'}>
         {inputMode === 'guided-upload' && (
           <GuidedUploadPanel onChange={handleGridChange} initialImages={gridImages} />
         )}

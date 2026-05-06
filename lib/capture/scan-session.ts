@@ -53,54 +53,95 @@ export type ScanAutoCaptureInput = {
 }
 
 // ─── analyseFrame ─────────────────────────────────────────────────────────────
-// Lightweight canvas-based heuristic — real ML inference is done server-side.
+// Optical-quality analysis only.
+// This must NOT claim deer/rack detection.
 
 export function analyseFrame(canvas: HTMLCanvasElement): SubjectValidation {
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
-  let blurScore = 0
-  let clippingScore = 0
-  let brightnessOk = true
+  let avgBrightness = 0
+  let contrast = 0
+  let edgeEnergy = 0
+  let overexposedRatio = 0
+  let underexposedRatio = 0
 
   if (ctx && canvas.width > 0 && canvas.height > 0) {
     try {
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const data = imageData.data
-      const total = data.length / 4
-      let sum = 0
-      let overexposed = 0
+      const sampleW = Math.min(96, Math.max(24, Math.round(canvas.width / 12)))
+      const sampleH = Math.min(96, Math.max(24, Math.round(canvas.height / 12)))
+      const scratch = document.createElement('canvas')
+      scratch.width = sampleW
+      scratch.height = sampleH
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2]
-        const luma = 0.299 * r + 0.587 * g + 0.114 * b
-        sum += luma
-        if (luma > 240) overexposed++
+      const sctx = scratch.getContext('2d', { willReadFrequently: true })
+      if (sctx) {
+        sctx.drawImage(canvas, 0, 0, sampleW, sampleH)
+        const imageData = sctx.getImageData(0, 0, sampleW, sampleH)
+        const data = imageData.data
+        const lumas = new Float32Array(sampleW * sampleH)
+
+        let sum = 0
+        let over = 0
+        let under = 0
+
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+          const r = data[i]
+          const g = data[i + 1]
+          const b = data[i + 2]
+          const luma = 0.299 * r + 0.587 * g + 0.114 * b
+          lumas[p] = luma
+          sum += luma
+          if (luma > 245) over++
+          if (luma < 10) under++
+        }
+
+        const total = lumas.length
+        avgBrightness = sum / total
+
+        let variance = 0
+        let edges = 0
+
+        for (let y = 0; y < sampleH; y++) {
+          for (let x = 0; x < sampleW; x++) {
+            const idx = y * sampleW + x
+            const luma = lumas[idx]
+            variance += (luma - avgBrightness) ** 2
+            if (x > 0) edges += Math.abs(luma - lumas[idx - 1])
+            if (y > 0) edges += Math.abs(luma - lumas[idx - sampleW])
+          }
+        }
+
+        contrast = Math.sqrt(variance / total)
+        edgeEnergy = edges / Math.max(1, (sampleW - 1) * sampleH + (sampleH - 1) * sampleW)
+        overexposedRatio = over / total
+        underexposedRatio = under / total
       }
-
-      const avgBrightness = sum / total
-      brightnessOk = avgBrightness > 20 && avgBrightness < 235
-      clippingScore = overexposed / total
-      blurScore = avgBrightness < 30 ? 0.8 : 0.1 // very rough proxy
     } catch {
-      // canvas tainted by CORS — treat as unknown
+      // Canvas may be temporarily unreadable. Do not crash scan mode.
     }
   }
 
-  const isSharp = blurScore < 0.4
-  const isClipped = clippingScore > 0.15
+  const brightnessOk = avgBrightness >= 32 && avgBrightness <= 225
+  const isClipped = overexposedRatio > 0.22 || underexposedRatio > 0.35
+  const isSharp = edgeEnergy >= 3.25 && contrast >= 10
 
   let rejectionReason: string | null = null
-  if (!brightnessOk) rejectionReason = 'Poor lighting'
-  else if (!isSharp) rejectionReason = 'Image too blurry'
-  else if (isClipped) rejectionReason = 'Subject clipped'
+  if (!brightnessOk) rejectionReason = avgBrightness < 32 ? 'Too dark for a reliable photo' : 'Too bright / washed out'
+  else if (isClipped) rejectionReason = 'Exposure is clipping detail'
+  else if (!isSharp) rejectionReason = 'Frame looks soft — hold steadier or move closer'
+
+  const brightnessScore = brightnessOk ? 0.34 : 0.1
+  const sharpScore = isSharp ? 0.38 : Math.max(0.08, Math.min(0.24, edgeEnergy / 18))
+  const clippingScore = isClipped ? 0.05 : 0.2
+  const confidence = Math.max(0.05, Math.min(0.92, brightnessScore + sharpScore + clippingScore))
 
   return {
-    hasDeer: true,       // can't determine without ML — assume true for manual flow
-    hasRack: true,
+    hasDeer: false,
+    hasRack: false,
     isSharp,
     isClipped,
     brightnessOk,
-    confidence: rejectionReason ? 0.3 : 0.75,
+    confidence,
     rejectionReason,
   }
 }
@@ -137,8 +178,8 @@ export function buildCoverageProgress(frames: SmartScanFrame[]): CoverageProgres
     if (f.zones.beam_tine_detail) zones.beam_tine_detail = true
   }
 
-  const filled = Object.values(zones).filter(Boolean).length
-  const percent = Math.round((filled / 4) * 100)
+  const requiredFilled = [zones.full_rack, zones.left_antler, zones.right_antler].filter(Boolean).length
+  const percent = Math.round((requiredFilled / 3) * 100)
   const satisfied = zones.full_rack && zones.left_antler && zones.right_antler
 
   return { zones, percent, satisfied }
@@ -155,42 +196,56 @@ export function buildGuidanceState(
     return { status: 'idle', headline: 'Starting camera…', subtext: null }
   }
 
-  if (!validation) {
-    return { status: 'idle', headline: 'Point at the rack', subtext: null }
-  }
-
-  if (validation.rejectionReason) {
+  if (validation?.rejectionReason) {
     return {
       status: 'invalid',
       headline: validation.rejectionReason,
-      subtext: 'Adjust and try again',
+      subtext: 'Fix the frame before capturing this view.',
     }
   }
 
   if (progress.satisfied) {
     return {
       status: 'valid',
-      headline: 'Coverage complete',
-      subtext: 'Tap Continue to score',
+      headline: 'Front, left, and right views captured',
+      subtext: 'Continue to AI validation and scoring.',
     }
   }
 
   if (!progress.zones.full_rack) {
-    return { status: 'valid', headline: 'Capture front view', subtext: 'Hold steady' }
-  }
-  if (!progress.zones.left_antler) {
-    return { status: 'valid', headline: 'Move left, capture left antler', subtext: null }
-  }
-  if (!progress.zones.right_antler) {
-    return { status: 'valid', headline: 'Move right, capture right antler', subtext: null }
+    return {
+      status: 'valid',
+      headline: 'Manually capture the full front rack',
+      subtext: 'Both beams and inside spread should be visible.',
+    }
   }
 
-  return { status: 'valid', headline: 'Hold steady', subtext: null }
+  if (!progress.zones.left_antler) {
+    return {
+      status: 'valid',
+      headline: 'Capture the left antler view',
+      subtext: 'Angle for beam curve and tine heights.',
+    }
+  }
+
+  if (!progress.zones.right_antler) {
+    return {
+      status: 'valid',
+      headline: 'Capture the right antler view',
+      subtext: 'Match distance and framing when possible.',
+    }
+  }
+
+  return {
+    status: 'valid',
+    headline: 'Optional detail shot',
+    subtext: 'Use only for abnormal points or unclear tines.',
+  }
 }
 
 // ─── shouldAutoCaptureFrame ───────────────────────────────────────────────────
-// Overloaded to support both the new 4-arg call in scan-mode-panel and the
-// original 1-arg ScanAutoCaptureInput form.
+// Kept only for backward compatibility.
+// ScanModePanel must not call this for live auto-capture anymore.
 
 export function shouldAutoCaptureFrame(
   validationOrInput: SubjectValidation | ScanAutoCaptureInput,
@@ -198,7 +253,6 @@ export function shouldAutoCaptureFrame(
   progress?: CoverageProgress,
   stableCount?: number,
 ): boolean {
-  // Legacy 1-arg form
   if ('hasRackDetected' in validationOrInput || 'hasDeerDetected' in validationOrInput) {
     const input = validationOrInput as ScanAutoCaptureInput
     return (
@@ -211,20 +265,20 @@ export function shouldAutoCaptureFrame(
     )
   }
 
-  // New 4-arg form from scan-mode-panel
-  const val = validationOrInput as SubjectValidation
-  if (!val.hasDeer || !val.hasRack || !val.isSharp || val.isClipped || !val.brightnessOk) {
+  const validation = validationOrInput as SubjectValidation
+  if (!validation.hasDeer || !validation.hasRack || !validation.isSharp || validation.isClipped || !validation.brightnessOk) {
     return false
   }
+
   if ((stableCount ?? 0) < 3) return false
 
-  // Only auto-capture if this frame adds new zone coverage
   if (zones && progress) {
     const addsNew =
       (zones.full_rack        && !progress.zones.full_rack)        ||
       (zones.left_antler      && !progress.zones.left_antler)      ||
       (zones.right_antler     && !progress.zones.right_antler)     ||
       (zones.beam_tine_detail && !progress.zones.beam_tine_detail)
+
     if (!addsNew) return false
   }
 
