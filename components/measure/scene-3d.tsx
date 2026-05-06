@@ -25,21 +25,17 @@ function polyline3DLength(points: Point3D[]): number {
   return total
 }
 
-/**
- * Zone color lookup: returns a color tinted toward the field's measurement
- * type so the overlay is semantically meaningful.
- */
 function zoneColor(type: string): THREE.Color {
   switch (type) {
-    case 'beam': return new THREE.Color('#4a90d9')
-    case 'tine': return new THREE.Color('#4fc36e')
+    case 'beam':          return new THREE.Color('#4a90d9')
+    case 'tine':          return new THREE.Color('#4fc36e')
     case 'circumference': return new THREE.Color('#d94a4a')
-    case 'spread': return new THREE.Color('#40c8c8')
-    default: return new THREE.Color('#c8a96e')
+    case 'spread':        return new THREE.Color('#40c8c8')
+    default:              return new THREE.Color('#c8a96e')
   }
 }
 
-// ─── Base material factory ────────────────────────────────────────────────────
+// ─── Base material factory ─────────────────────────────────────────────────────
 
 function buildBaseMaterial(renderMode: string): THREE.Material {
   switch (renderMode) {
@@ -47,32 +43,23 @@ function buildBaseMaterial(renderMode: string): THREE.Material {
       return new THREE.MeshBasicMaterial({ color: '#c8a96e', wireframe: true })
     case 'xray':
       return new THREE.MeshPhysicalMaterial({
-        color: '#4a90d9',
-        transparent: true,
-        opacity: 0.28,
-        side: THREE.DoubleSide,
-        depthWrite: false,
+        color: '#4a90d9', transparent: true, opacity: 0.28,
+        side: THREE.DoubleSide, depthWrite: false,
       })
     case 'thermal':
       return new THREE.MeshStandardMaterial({
-        color: '#ff6030',
-        emissive: '#ff2000',
-        emissiveIntensity: 0.4,
-        roughness: 0.3,
-        metalness: 0.1,
+        color: '#ff6030', emissive: '#ff2000', emissiveIntensity: 0.4,
+        roughness: 0.3, metalness: 0.1,
       })
     default: // solid / zones
       return new THREE.MeshPhysicalMaterial({
-        color: '#8B6530',
-        roughness: 0.55,
-        metalness: 0.05,
-        clearcoat: 0.15,
-        clearcoatRoughness: 0.8,
+        color: '#8B6530', roughness: 0.55, metalness: 0.05,
+        clearcoat: 0.15, clearcoatRoughness: 0.8,
       })
   }
 }
 
-// ─── AntlerModel — solid mesh + optional wireframe overlay ───────────────────
+// ─── AntlerModel — solid mesh + optional wireframe / zone overlays ─────────────
 
 function AntlerModel({
   url,
@@ -90,7 +77,6 @@ function AntlerModel({
   const { scene } = useGLTF(url)
   const measurements3D = useMeasureStore(s => s.measurements3D)
 
-  // Solid / base clone
   const solidClone = useMemo(() => {
     const clone = scene.clone(true)
     const mat = buildBaseMaterial(renderMode)
@@ -105,53 +91,32 @@ function AntlerModel({
     return clone
   }, [scene, renderMode])
 
-  // Wireframe overlay clone (amber edges)
   const wireClone = useMemo(() => {
     if (!showWireframe || renderMode === 'wireframe') return null
     const clone = scene.clone(true)
     const mat = new THREE.MeshBasicMaterial({
-      color: '#c8a96e',
-      wireframe: true,
-      transparent: true,
-      opacity: 0.18,
-      depthTest: true,
+      color: '#c8a96e', wireframe: true, transparent: true, opacity: 0.18, depthTest: true,
     })
-    clone.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh) {
-        (obj as THREE.Mesh).material = mat
-      }
-    })
+    clone.traverse((obj) => { if ((obj as THREE.Mesh).isMesh) (obj as THREE.Mesh).material = mat })
     return clone
   }, [scene, showWireframe, renderMode])
 
-  // Zone overlay: one semi-transparent pass per measurement type that has points
   const zoneOverlays = useMemo(() => {
     if (!showZones || renderMode === 'wireframe') return []
     const typesSeen = new Set<string>()
-    const overlays: { type: string; clone: THREE.Group | THREE.Object3D }[] = []
-
+    const overlays: { type: string; clone: THREE.Object3D }[] = []
     for (const fd of FIELD_DEFS) {
       const m = measurements3D[fd.id]
       if (!m || m.points.length === 0 || typesSeen.has(fd.type)) continue
       typesSeen.add(fd.type)
-
       const clone = scene.clone(true)
       const color = zoneColor(fd.type)
       const mat = new THREE.MeshStandardMaterial({
-        color,
-        transparent: true,
-        opacity: zoneOpacity,
-        depthTest: true,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-        side: THREE.FrontSide,
+        color, transparent: true, opacity: zoneOpacity,
+        depthTest: true, polygonOffset: true,
+        polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.FrontSide,
       })
-      clone.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) {
-          (obj as THREE.Mesh).material = mat
-        }
-      })
+      clone.traverse((obj) => { if ((obj as THREE.Mesh).isMesh) (obj as THREE.Mesh).material = mat })
       overlays.push({ type: fd.type, clone })
     }
     return overlays
@@ -168,29 +133,76 @@ function AntlerModel({
   )
 }
 
-// ─── Cross-section ring ───────────────────────────────────────────────────────
+// ─── Point cloud renderer ─────────────────────────────────────────────────────
 
-/**
- * Compute the intersection ring of a mesh with a plane, then draw it as a
- * LineLoop.  Falls back gracefully if geometry is unavailable.
- */
-function CrossSectionRing({
-  scene,
-  p0,
-  p1,
-}: {
-  scene: THREE.Object3D
-  p0: Point3D
-  p1: Point3D
-}) {
+function PointCloudRenderer() {
+  const { points, visible, pointSize } = useMeasureStore(s => s.pointCloud)
+
+  // Build a stable BufferGeometry; only recreate when the points array reference changes.
+  const geometry = useMemo(() => {
+    if (!points.length) return null
+
+    const positions = new Float32Array(points.length * 3)
+    const colors    = new Float32Array(points.length * 3)
+    let hasColor = false
+
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i]
+      positions[i * 3]     = p.x
+      positions[i * 3 + 1] = p.y
+      positions[i * 3 + 2] = p.z
+      if (p.color) {
+        hasColor = true
+        colors[i * 3]     = p.color.r
+        colors[i * 3 + 1] = p.color.g
+        colors[i * 3 + 2] = p.color.b
+      } else {
+        // Default: warm amber tint
+        colors[i * 3]     = 0.78
+        colors[i * 3 + 1] = 0.66
+        colors[i * 3 + 2] = 0.43
+      }
+    }
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3))
+    geo.userData.hasColor = hasColor
+    return geo
+  }, [points])
+
+  // Dispose geometry when it changes to prevent GPU leak
+  useEffect(() => {
+    return () => { geometry?.dispose() }
+  }, [geometry])
+
+  if (!visible || !geometry || !points.length) return null
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial
+        size={pointSize}
+        vertexColors
+        sizeAttenuation
+        depthWrite={false}
+        transparent
+        opacity={0.85}
+      />
+    </points>
+  )
+}
+
+// ─── Cross-section ring ────────────────────────────────────────────────────────
+
+function CrossSectionRing({ scene, p0, p1 }: { scene: THREE.Object3D; p0: Point3D; p1: Point3D }) {
   const ring = useMemo(() => {
     const v0 = new THREE.Vector3(p0.x, p0.y, p0.z)
     const v1 = new THREE.Vector3(p1.x, p1.y, p1.z)
     const normal = v1.clone().sub(v0).normalize()
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, v0.clone().lerp(v1, 0.5))
+    const plane  = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, v0.clone().lerp(v1, 0.5))
 
     const intersectionPts: THREE.Vector3[] = []
-    const _edge = new THREE.Line3()
+    const _edge   = new THREE.Line3()
     const _target = new THREE.Vector3()
 
     scene.traverse((obj) => {
@@ -198,44 +210,35 @@ function CrossSectionRing({
       const mesh = obj as THREE.Mesh
       const geom = mesh.geometry
       if (!geom.index) return
-
       const pos = geom.attributes.position as THREE.BufferAttribute
       const idx = geom.index!
-      const worldMatrix = mesh.matrixWorld
-
+      const wm  = mesh.matrixWorld
       for (let i = 0; i < idx.count; i += 3) {
-        const a = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i)).applyMatrix4(worldMatrix)
-        const b = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i + 1)).applyMatrix4(worldMatrix)
-        const c = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i + 2)).applyMatrix4(worldMatrix)
-
-        const edges: [THREE.Vector3, THREE.Vector3][] = [[a, b], [b, c], [c, a]]
-        for (const [ea, eb] of edges) {
+        const a = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i)).applyMatrix4(wm)
+        const b = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i + 1)).applyMatrix4(wm)
+        const c = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i + 2)).applyMatrix4(wm)
+        for (const [ea, eb] of [[a, b], [b, c], [c, a]] as [THREE.Vector3, THREE.Vector3][]) {
           _edge.set(ea, eb)
-          if (plane.intersectLine(_edge, _target)) {
-            intersectionPts.push(_target.clone())
-          }
+          if (plane.intersectLine(_edge, _target)) intersectionPts.push(_target.clone())
         }
       }
     })
 
     if (intersectionPts.length < 3) return null
 
-    // Sort points around plane normal for a clean ring
     const centroid = intersectionPts.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(intersectionPts.length)
     const u = intersectionPts[0].clone().sub(centroid).normalize()
     const v = new THREE.Vector3().crossVectors(normal, u).normalize()
     intersectionPts.sort((a, b) => {
-      const angleA = Math.atan2(v.dot(a.clone().sub(centroid)), u.dot(a.clone().sub(centroid)))
-      const angleB = Math.atan2(v.dot(b.clone().sub(centroid)), u.dot(b.clone().sub(centroid)))
-      return angleA - angleB
+      const aA = Math.atan2(v.dot(a.clone().sub(centroid)), u.dot(a.clone().sub(centroid)))
+      const aB = Math.atan2(v.dot(b.clone().sub(centroid)), u.dot(b.clone().sub(centroid)))
+      return aA - aB
     })
 
-    const geom = new THREE.BufferGeometry().setFromPoints(intersectionPts)
-    return geom
+    return new THREE.BufferGeometry().setFromPoints(intersectionPts)
   }, [scene, p0, p1])
 
   if (!ring) return null
-
   return (
     <lineLoop geometry={ring}>
       <lineBasicMaterial color="#ff3333" linewidth={2} />
@@ -243,18 +246,17 @@ function CrossSectionRing({
   )
 }
 
-// ─── CrossSectionHandler — click-to-place two boundary points ─────────────────
+// ─── CrossSectionHandler ──────────────────────────────────────────────────────
 
 function CrossSectionHandler() {
   const { gl, camera, scene } = useThree()
-  const { crossSectionPoints, setCrossSectionPoint } = useMeasureStore()
-  const clickCount = useRef(crossSectionPoints.length)
+  const setCrossSectionPoint = useMeasureStore(s => s.setCrossSectionPoint)
+  const crossLen = useMeasureStore(s => s.crossSectionPoints.length)
+  const clickCountRef = useRef(crossLen)
   const raycaster = useRef(new THREE.Raycaster())
-  const mouse = useRef(new THREE.Vector2())
+  const mouse     = useRef(new THREE.Vector2())
 
-  useEffect(() => {
-    clickCount.current = crossSectionPoints.length
-  }, [crossSectionPoints.length])
+  useEffect(() => { clickCountRef.current = crossLen }, [crossLen])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -264,8 +266,8 @@ function CrossSectionHandler() {
       raycaster.current.setFromCamera(mouse.current, camera)
       const hits = raycaster.current.intersectObjects(scene.children, true)
       if (hits.length > 0) {
-        const idx = (clickCount.current % 2) as 0 | 1
-        const pt = hits[0].point
+        const idx = (clickCountRef.current % 2) as 0 | 1
+        const pt  = hits[0].point
         setCrossSectionPoint(idx, { x: pt.x, y: pt.y, z: pt.z })
       }
     }
@@ -276,21 +278,14 @@ function CrossSectionHandler() {
   return null
 }
 
-// ─── CrossSectionLength — computes and shows circumference label ───────────────
+// ─── CrossSection circumference ───────────────────────────────────────────────
 
-function crossSectionCircumference(
-  scene: THREE.Object3D,
-  p0: Point3D,
-  p1: Point3D,
-): number {
+function crossSectionCircumference(scene: THREE.Object3D, p0: Point3D, p1: Point3D): number {
   const v0 = new THREE.Vector3(p0.x, p0.y, p0.z)
   const v1 = new THREE.Vector3(p1.x, p1.y, p1.z)
   const normal = v1.clone().sub(v0).normalize()
-  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, v0.clone().lerp(v1, 0.5))
-
-  let total = 0
-  const _edge = new THREE.Line3()
-  const _target = new THREE.Vector3()
+  const plane  = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, v0.clone().lerp(v1, 0.5))
+  const _edge = new THREE.Line3(), _target = new THREE.Vector3()
   const pts: THREE.Vector3[] = []
 
   scene.traverse((obj) => {
@@ -300,7 +295,7 @@ function crossSectionCircumference(
     if (!geom.index) return
     const pos = geom.attributes.position as THREE.BufferAttribute
     const idx = geom.index!
-    const wm = mesh.matrixWorld
+    const wm  = mesh.matrixWorld
     for (let i = 0; i < idx.count; i += 3) {
       const a = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i)).applyMatrix4(wm)
       const b = new THREE.Vector3().fromBufferAttribute(pos, idx.getX(i + 1)).applyMatrix4(wm)
@@ -312,7 +307,7 @@ function crossSectionCircumference(
     }
   })
 
-  // Perimeter of sorted ring
+  let total = 0
   if (pts.length >= 3) {
     const centroid = pts.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(pts.length)
     const u = pts[0].clone().sub(centroid).normalize()
@@ -330,47 +325,43 @@ function crossSectionCircumference(
 
 // ─── Measurement tube ─────────────────────────────────────────────────────────
 
-function MeasurementTube({
-  points,
-  color,
-  active,
-}: {
-  points: Point3D[]
-  color: string
-  active: boolean
-}) {
+function MeasurementTube({ points, color, active }: { points: Point3D[]; color: string; active: boolean }) {
   if (points.length < 2) return null
-  const threePoints = points.map(p => new THREE.Vector3(p.x, p.y, p.z))
-  const curve = new THREE.CatmullRomCurve3(threePoints, false, 'chordal', 0.5)
-  const geometry = new THREE.TubeGeometry(
-    curve,
-    Math.max(threePoints.length * 4, 12),
-    active ? 0.003 : 0.0018,
-    6,
-    false,
+  const threePoints = useMemo(
+    () => points.map(p => new THREE.Vector3(p.x, p.y, p.z)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(points)],
   )
-  const material = new THREE.MeshBasicMaterial({
-    color,
-    depthTest: false,
-    transparent: true,
-    opacity: active ? 1 : 0.8,
-  })
+  const geometry = useMemo(() => {
+    const curve = new THREE.CatmullRomCurve3(threePoints, false, 'chordal', 0.5)
+    return new THREE.TubeGeometry(
+      curve,
+      Math.max(threePoints.length * 4, 12),
+      active ? 0.003 : 0.0018,
+      6,
+      false,
+    )
+  }, [threePoints, active])
+  const material = useMemo(() => new THREE.MeshBasicMaterial({
+    color, depthTest: false, transparent: true, opacity: active ? 1 : 0.8,
+  }), [color, active])
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose()
+      material.dispose()
+    }
+  }, [geometry, material])
+
   return <mesh geometry={geometry} material={material} renderOrder={999} />
 }
 
 // ─── Point sphere ─────────────────────────────────────────────────────────────
 
-function PointSphere({
-  position,
-  color,
-  active,
-}: {
-  position: Point3D
-  color: string
-  active: boolean
-}) {
+function PointSphere({ position, color, active }: { position: Point3D; color: string; active: boolean }) {
   const ref = useRef<THREE.Mesh>(null)
   useFrame(({ clock }) => {
+    // Guard: only update scale when active to avoid unnecessary per-frame work
     if (ref.current && active) {
       ref.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 3) * 0.15)
     }
@@ -385,15 +376,7 @@ function PointSphere({
 
 // ─── Running total label ──────────────────────────────────────────────────────
 
-function RunningTotalLabel({
-  point,
-  length,
-  color,
-}: {
-  point: Point3D
-  length: number
-  color: string
-}) {
+function RunningTotalLabel({ point, length, color }: { point: Point3D; length: number; color: string }) {
   return (
     <Html position={[point.x, point.y + 0.015, point.z]} zIndexRange={[100, 0]} center>
       <div
@@ -406,18 +389,27 @@ function RunningTotalLabel({
   )
 }
 
+// ─── Mesh fallback warning label ──────────────────────────────────────────────
+
+function MeshFallbackLabel({ point }: { point: Point3D }) {
+  return (
+    <Html position={[point.x, point.y + 0.03, point.z]} zIndexRange={[100, 0]} center>
+      <div
+        className="px-1.5 py-0.5 rounded text-xs font-mono pointer-events-none whitespace-nowrap"
+        style={{ background: 'rgba(200,100,30,0.85)', color: '#ffe0a0', border: '1px solid #e08030' }}
+      >
+        mesh fallback
+      </div>
+    </Html>
+  )
+}
+
 // ─── Measure click handler ────────────────────────────────────────────────────
 
-function MeasureClickHandler({
-  active,
-  onPlace,
-}: {
-  active: boolean
-  onPlace: (p: Point3D) => void
-}) {
+function MeasureClickHandler({ active, onPlace }: { active: boolean; onPlace: (p: Point3D) => void }) {
   const { gl, camera, scene } = useThree()
   const raycaster = useRef(new THREE.Raycaster())
-  const mouse = useRef(new THREE.Vector2())
+  const mouse     = useRef(new THREE.Vector2())
 
   useEffect(() => {
     if (!active) return
@@ -443,31 +435,19 @@ function MeasureClickHandler({
 
 function SceneInner() {
   const {
-    glbUrl,
-    renderMode,
-    showWireframe,
-    showZones,
-    zoneOpacity,
-    activeField,
-    mode,
-    measurements3D,
-    addPoint3D,
-    crossSectionPoints,
+    glbUrl, renderMode, showWireframe, showZones, zoneOpacity,
+    activeField, mode, measurements3D, addPoint3D, crossSectionPoints,
   } = useMeasureStore()
 
   const { scene: threeScene } = useThree()
 
   const handlePlace = useCallback(
-    (p: Point3D) => {
-      if (!activeField) return
-      addPoint3D(activeField, p)
-    },
+    (p: Point3D) => { if (activeField) addPoint3D(activeField, p) },
     [activeField, addPoint3D],
   )
 
   const isMeasuring = mode === 'measure' && !!activeField
 
-  // Circumference from cross-section
   const crossLength = useMemo(() => {
     if (crossSectionPoints.length < 2) return null
     return crossSectionCircumference(threeScene, crossSectionPoints[0], crossSectionPoints[1])
@@ -477,12 +457,7 @@ function SceneInner() {
     <>
       {/* Lights */}
       <ambientLight intensity={0.4} />
-      <directionalLight
-        position={[5, 8, 5]}
-        intensity={1.2}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-      />
+      <directionalLight position={[5, 8, 5]} intensity={1.2} castShadow shadow-mapSize={[2048, 2048]} />
       <pointLight position={[-4, 3, -4]} intensity={0.5} color="#c8a96e" />
       <pointLight position={[4, 1, 4]} intensity={0.3} color="#6090d0" />
       <hemisphereLight args={['#a07040', '#202018', 0.3]} />
@@ -492,6 +467,9 @@ function SceneInner() {
         <planeGeometry args={[20, 20]} />
         <shadowMaterial opacity={0.3} />
       </mesh>
+
+      {/* Point cloud — always rendered if loaded, independent of mesh mode */}
+      <PointCloudRenderer />
 
       {/* GLB model with overlays */}
       {glbUrl && (
@@ -504,22 +482,11 @@ function SceneInner() {
             zoneOpacity={zoneOpacity}
           />
 
-          {/* Cross-section ring */}
           {crossSectionPoints.length === 2 && (
-            <CrossSectionRing
-              scene={threeScene}
-              p0={crossSectionPoints[0]}
-              p1={crossSectionPoints[1]}
-            />
+            <CrossSectionRing scene={threeScene} p0={crossSectionPoints[0]} p1={crossSectionPoints[1]} />
           )}
-
-          {/* Cross-section label */}
           {crossSectionPoints.length === 2 && crossLength !== null && crossLength > 0 && (
-            <RunningTotalLabel
-              point={crossSectionPoints[1]}
-              length={crossLength}
-              color="#ff3333"
-            />
+            <RunningTotalLabel point={crossSectionPoints[1]} length={crossLength} color="#ff3333" />
           )}
         </Suspense>
       )}
@@ -548,14 +515,16 @@ function SceneInner() {
                 color={fd.color}
               />
             )}
+            {/* Mesh-fallback warning on last point */}
+            {isActive && m.method === 'three_d_mesh_fallback' && m.points.length >= 1 && (
+              <MeshFallbackLabel point={m.points[m.points.length - 1]} />
+            )}
           </group>
         )
       })}
 
-      {/* Click handlers */}
       <MeasureClickHandler active={isMeasuring} onPlace={handlePlace} />
 
-      {/* Orbit controls */}
       <OrbitControls
         enabled={!isMeasuring}
         autoRotate={!isMeasuring && !glbUrl}
@@ -566,20 +535,20 @@ function SceneInner() {
   )
 }
 
-// ─── Render-modes floating panel ──────────────────────────────────────────────
+// ─── Render-modes panel ───────────────────────────────────────────────────────
 
 function RenderModesPanel() {
   const {
     renderMode, setRenderMode,
     showWireframe, setShowWireframe,
-    showZones, setShowZones,
-    zoneOpacity, setZoneOpacity,
+    showZones, setShowZones, zoneOpacity, setZoneOpacity,
     crossSectionPoints, clearCrossSection,
+    pointCloud, setPointCloudVisible, setPointCloudPointSize,
   } = useMeasureStore()
 
   const modes: { id: typeof renderMode; label: string }[] = [
     { id: 'solid',     label: 'Solid' },
-    { id: 'wireframe', label: 'Wire' },
+    { id: 'wireframe', label: 'Wire'  },
     { id: 'xray',      label: 'X-Ray' },
     { id: 'thermal',   label: 'Thermal' },
     { id: 'zones',     label: 'Zones' },
@@ -612,22 +581,12 @@ function RenderModesPanel() {
       {/* Toggles */}
       <div className="flex flex-col gap-1.5">
         <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showWireframe}
-            onChange={e => setShowWireframe(e.target.checked)}
-            className="accent-amber-400"
-          />
+          <input type="checkbox" checked={showWireframe} onChange={e => setShowWireframe(e.target.checked)} className="accent-amber-400" />
           <span className="text-xs" style={{ color: '#c8a96e' }}>Wireframe overlay</span>
         </label>
 
         <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showZones}
-            onChange={e => setShowZones(e.target.checked)}
-            className="accent-amber-400"
-          />
+          <input type="checkbox" checked={showZones} onChange={e => setShowZones(e.target.checked)} className="accent-amber-400" />
           <span className="text-xs" style={{ color: '#c8a96e' }}>Zone map</span>
         </label>
 
@@ -635,27 +594,106 @@ function RenderModesPanel() {
           <div className="flex items-center gap-2 pl-5">
             <span className="text-xs" style={{ color: 'rgba(200,169,110,0.7)' }}>Opacity</span>
             <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.05}
-              value={zoneOpacity}
+              type="range" min={0.1} max={1} step={0.05} value={zoneOpacity}
               onChange={e => setZoneOpacity(parseFloat(e.target.value))}
-              className="flex-1 h-1 accent-amber-400"
+              className="flex-1 accent-amber-400"
             />
           </div>
         )}
 
-        {crossSectionPoints.length > 0 && (
-          <button
-            className="text-xs text-left px-1"
-            style={{ color: '#ff6060' }}
-            onClick={clearCrossSection}
-          >
-            Clear cross-section ({crossSectionPoints.length}/2 pts)
-          </button>
+        {/* Point cloud controls */}
+        {pointCloud.loaded && (
+          <>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={pointCloud.visible} onChange={e => setPointCloudVisible(e.target.checked)} className="accent-amber-400" />
+              <span className="text-xs" style={{ color: '#c8a96e' }}>
+                Point cloud ({pointCloud.points.length.toLocaleString()} pts)
+              </span>
+            </label>
+            {pointCloud.visible && (
+              <div className="flex items-center gap-2 pl-5">
+                <span className="text-xs" style={{ color: 'rgba(200,169,110,0.7)' }}>Size</span>
+                <input
+                  type="range" min={0.001} max={0.02} step={0.001} value={pointCloud.pointSize}
+                  onChange={e => setPointCloudPointSize(parseFloat(e.target.value))}
+                  className="flex-1 accent-amber-400"
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {crossSectionPoints.length > 0 && (
+        <button className="text-xs text-left px-1" style={{ color: '#ff6060' }} onClick={clearCrossSection}>
+          Clear cross-section ({crossSectionPoints.length}/2 pts)
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Point cloud upload panel ─────────────────────────────────────────────────
+
+function PointCloudUploadPanel() {
+  const { pointCloud, loadPointCloudText, clearPointCloud } = useMeasureStore()
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result
+      if (typeof text === 'string') {
+        loadPointCloudText(text, file.name)
+      }
+    }
+    reader.readAsText(file)
+    // Reset input so same file can be re-uploaded
+    e.target.value = ''
+  }, [loadPointCloudText])
+
+  if (pointCloud.loaded) {
+    return (
+      <div
+        className="absolute top-3 left-3 z-10 flex items-center gap-2 px-2 py-1.5 rounded"
+        style={{ background: 'rgba(10,9,7,0.82)', border: '1px solid rgba(200,169,110,0.2)' }}
+      >
+        <span className="text-xs" style={{ color: '#4fc36e' }}>
+          Point cloud: {pointCloud.filename} ({pointCloud.points.length.toLocaleString()} pts)
+        </span>
+        <button
+          className="text-xs"
+          style={{ color: '#f87171' }}
+          onClick={clearPointCloud}
+        >
+          Remove
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="absolute top-3 left-3 z-10">
+      <button
+        className="px-2 py-1.5 rounded text-xs font-medium"
+        style={{
+          background: 'rgba(10,9,7,0.82)',
+          border: '1px solid rgba(200,169,110,0.2)',
+          color: '#c8a96e',
+        }}
+        onClick={() => fileRef.current?.click()}
+      >
+        Upload Point Cloud (.xyz / .pts / .csv)
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".xyz,.pts,.csv,.txt"
+        className="hidden"
+        onChange={handleFile}
+      />
     </div>
   )
 }
@@ -664,14 +702,16 @@ function RenderModesPanel() {
 
 export function Scene3D() {
   const { glbUrl, setGlbUrl, activeField, mode } = useMeasureStore()
-  const fileRef = useRef<HTMLInputElement>(null)
+  const fileRef   = useRef<HTMLInputElement>(null)
   const isMeasuring = mode === 'measure' && !!activeField
+  const afd         = activeField ? FIELD_DEFS.find(f => f.id === activeField) : null
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     const url = URL.createObjectURL(file)
     setGlbUrl(url)
+    e.target.value = ''
   }
 
   return (
@@ -689,13 +729,7 @@ export function Scene3D() {
           >
             Upload GLB
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".glb,.gltf"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
+          <input ref={fileRef} type="file" accept=".glb,.gltf" className="hidden" onChange={handleFileUpload} />
         </div>
       )}
 
@@ -705,41 +739,36 @@ export function Scene3D() {
           <div className="absolute top-3 right-3 z-10">
             <button
               className="px-2 py-1 rounded text-xs"
-              style={{
-                background: 'rgba(0,0,0,0.6)',
-                color: '#c8a96e',
-                border: '1px solid rgba(200,169,110,0.3)',
-              }}
+              style={{ background: 'rgba(0,0,0,0.6)', color: '#c8a96e', border: '1px solid rgba(200,169,110,0.3)' }}
               onClick={() => fileRef.current?.click()}
             >
               Replace GLB
             </button>
           </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".glb,.gltf"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
+          <input ref={fileRef} type="file" accept=".glb,.gltf" className="hidden" onChange={handleFileUpload} />
         </>
       )}
 
+      {/* Point cloud upload/status */}
+      <PointCloudUploadPanel />
+
       {/* Measure mode banner */}
-      {isMeasuring && (
+      {isMeasuring && afd && (
         <div
-          className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded text-xs font-bold tracking-wider pointer-events-none"
+          className="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded text-xs font-bold tracking-wider pointer-events-none"
           style={{
             background: 'rgba(0,0,0,0.78)',
-            border: `1px solid ${FIELD_DEFS.find(f => f.id === activeField)?.color ?? '#c8a96e'}`,
-            color: FIELD_DEFS.find(f => f.id === activeField)?.color ?? '#c8a96e',
+            border: `1px solid ${afd.color}`,
+            color: afd.color,
           }}
         >
-          Click mesh to place points — orbit disabled while measuring
+          {useMeasureStore.getState().pointCloud.loaded
+            ? 'Click mesh — snaps to nearest point cloud point'
+            : 'Click mesh to place points (mesh fallback — no point cloud)'}
         </div>
       )}
 
-      {/* Render-modes panel (only when model is loaded) */}
+      {/* Render-modes panel */}
       {glbUrl && <RenderModesPanel />}
 
       <Canvas
