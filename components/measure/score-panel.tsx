@@ -1,10 +1,12 @@
 'use client'
 
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useState } from 'react'
 import { useMeasureStore, FIELD_DEFS, type FieldId } from './measure-store'
 import { computeVerifiedScoreStatus } from '@/lib/advanced-scoring/cross-validation'
 import { computeSessionConfidence, confidenceTier } from '@/lib/advanced-scoring/confidence'
-import type { AdvancedMeasurementSession } from '@/lib/advanced-scoring/types'
+import type { AdvancedMeasurementSession, Calibration2D, Calibration3D } from '@/lib/advanced-scoring/types'
+import { buildVerifiedPdfExportData } from '@/lib/export/build-verified-pdf-data'
+import { buildVerifiedScorePdf } from '@/lib/export/score-pdf-builder'
 
 // ─── Confidence indicator ─────────────────────────────────────────────────────
 
@@ -173,6 +175,7 @@ function CalibrationWarning() {
 
 export function ScorePanel() {
   const scoreCardRef = useRef<HTMLDivElement>(null)
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null)
 
   // Use stable selectors — no getState() during render
   const measurements2D = useMeasureStore(s => s.measurements2D)
@@ -180,6 +183,10 @@ export function ScorePanel() {
   const calibration    = useMeasureStore(s => s.calibration)
   const calibration3D  = useMeasureStore(s => s.calibration3D)
   const getAdvancedMeasurements = useMeasureStore(s => s.getAdvancedMeasurements)
+  const photoDataUrl = useMeasureStore(s => s.photoDataUrl)
+  const reconstructionJob = useMeasureStore(s => s.reconstructionJob)
+  const reconstructionAssets = useMeasureStore(s => s.reconstructionAssets)
+  const pointCloud = useMeasureStore(s => s.pointCloud)
 
   const rows = useMemo(
     () => buildRows(measurements2D, measurements3D),
@@ -242,6 +249,68 @@ export function ScorePanel() {
     return computeVerifiedScoreStatus(session)
   }, [getAdvancedMeasurements, calibration, calibration3D, measurements2D, measurements3D])
 
+  const buildCalibration2D = (): Calibration2D | null => (
+    calibration.finalized
+      ? {
+          photoId: 'primary',
+          pixelsPerInch: calibration.pixelsPerInch,
+          referenceLengthInches: calibration.realInches,
+          referenceLine: {
+            start: calibration.linePoints[0] ?? { x: 0, y: 0 },
+            end: calibration.linePoints[1] ?? { x: 0, y: 0 },
+          },
+          source: calibration.source,
+        }
+      : null
+  )
+
+  const buildCalibration3D = (): Calibration3D | null => (
+    calibration3D.finalized
+      ? {
+          unitsPerInch: calibration3D.unitsPerInch,
+          referenceLengthInches: 1,
+          source: calibration3D.source,
+        }
+      : null
+  )
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const handleExportVerifiedPDF = async () => {
+    setPdfExportError(null)
+    try {
+      const advMeasurements = getAdvancedMeasurements()
+      const exportData = buildVerifiedPdfExportData({
+        grossScore,
+        netScore,
+        verifiedStatus,
+        measurements: advMeasurements,
+        fieldDefinitions: FIELD_DEFS.map((field) => ({
+          measurementField: field.measurementField,
+          label: field.label,
+        })),
+        calibration2D: buildCalibration2D(),
+        calibration3D: buildCalibration3D(),
+        reconstructionJob,
+        reconstructionAssets,
+        pointCloudPointCount: pointCloud.points.length,
+        overallConfidence: sessionConfidence,
+        photoThumbnails: photoDataUrl ? [photoDataUrl] : [],
+      })
+      const blob = await buildVerifiedScorePdf(exportData)
+      downloadBlob(blob, verifiedStatus.verified ? 'rax-core-verified-score.pdf' : 'rax-core-advanced-score.pdf')
+    } catch (error) {
+      setPdfExportError(error instanceof Error ? error.message : 'PDF export failed.')
+    }
+  }
+
   // ── PDF export ────────────────────────────────────────────────────────────────
   const handleExportPDF = async () => {
     const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
@@ -271,6 +340,8 @@ export function ScorePanel() {
       completeness,
       sessionConfidence,
       verified: verifiedStatus.verified,
+      reconstructionJob: state.reconstructionJob,
+      reconstructionAssets: state.reconstructionAssets,
       exportedAt: new Date().toISOString(),
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -451,12 +522,24 @@ export function ScorePanel() {
       {/* Actions */}
       <div className="flex flex-col gap-2">
         <button
+          onClick={handleExportVerifiedPDF}
+          className="w-full py-2 rounded text-sm font-medium transition-all"
+          style={{ background: verifiedStatus.verified ? '#4fc36e' : '#c8a96e', color: '#0d0a06' }}
+        >
+          {verifiedStatus.verified ? 'Export Verified Score PDF' : 'Export Advanced Score PDF'}
+        </button>
+        <button
           onClick={handleExportPDF}
           className="w-full py-2 rounded text-sm font-medium transition-all"
-          style={{ background: '#c8a96e', color: '#0d0a06' }}
+          style={{ background: 'rgba(200,169,110,0.18)', color: '#c8a96e', border: '1px solid rgba(200,169,110,0.22)' }}
         >
           Export Draft PDF Score Sheet
         </button>
+        {pdfExportError && (
+          <p className="text-xs px-3 py-2 rounded" style={{ background: 'rgba(200,50,50,0.1)', color: '#f87171' }}>
+            {pdfExportError}
+          </p>
+        )}
         <button
           onClick={handleExportJSON}
           className="w-full py-2 rounded text-sm transition-all"

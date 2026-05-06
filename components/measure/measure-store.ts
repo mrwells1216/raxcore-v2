@@ -17,6 +17,12 @@ import {
   type PointCloudIndex,
 } from '@/lib/advanced-scoring/point-cloud'
 import type { PointCloudPoint, MeasurementMethod, AdvancedMeasurement, MeasurementField, CalibrationSource } from '@/lib/advanced-scoring/types'
+import type {
+  ReconstructionAsset,
+  ReconstructionJob,
+  ReconstructionJobStatus,
+  ReconstructionProvider,
+} from '@/lib/reconstruction/types'
 
 // ─── Field definitions ────────────────────────────────────────────────────────
 
@@ -252,6 +258,22 @@ export interface MeasureStore {
   polycamStatus: 'idle' | 'uploading' | 'processing' | 'complete' | 'error'
   setPolycamStatus: (s: MeasureStore['polycamStatus']) => void
 
+  // New reconstruction state is provider-neutral. The older polycam fields
+  // remain only as compatibility aliases for any legacy callers.
+  reconstructionJob: ReconstructionJob | null
+  reconstructionProvider: ReconstructionProvider
+  reconstructionStatus: ReconstructionJobStatus
+  reconstructionProgress: number
+  reconstructionMessage: string | null
+  reconstructionAssets: ReconstructionAsset[]
+  reconstructionError: string | null
+  setReconstructionJob: (job: ReconstructionJob | null) => void
+  setReconstructionStatus: (status: ReconstructionJobStatus, progress?: number, message?: string | null) => void
+  setReconstructionAssets: (assets: ReconstructionAsset[]) => void
+  setReconstructionError: (error: string | null) => void
+  resetReconstruction: () => void
+  attachReconstructionAsset: (asset: ReconstructionAsset) => void
+
   // ── Derived session values (computed on demand, not in render) ─────────────
   /** Returns all AdvancedMeasurement objects computed from current state. */
   getAdvancedMeasurements: () => AdvancedMeasurement[]
@@ -300,6 +322,27 @@ function defaultPointCloud(): PointCloudState {
 
 function defaultCalibration3D() {
   return { unitsPerInch: 1, source: 'estimated' as CalibrationSource, finalized: false }
+}
+
+function defaultReconstructionState(): Pick<
+  MeasureStore,
+  | 'reconstructionJob'
+  | 'reconstructionProvider'
+  | 'reconstructionStatus'
+  | 'reconstructionProgress'
+  | 'reconstructionMessage'
+  | 'reconstructionAssets'
+  | 'reconstructionError'
+> {
+  return {
+    reconstructionJob: null,
+    reconstructionProvider: 'manual',
+    reconstructionStatus: 'idle',
+    reconstructionProgress: 0,
+    reconstructionMessage: null,
+    reconstructionAssets: [],
+    reconstructionError: null,
+  }
 }
 
 /** Recompute confidence tier from calibration and warning state. */
@@ -794,6 +837,86 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
   polycamStatus: 'idle',
   setPolycamStatus: (st) => set({ polycamStatus: st }),
 
+  ...defaultReconstructionState(),
+  setReconstructionJob: (job) => set({
+    reconstructionJob: job,
+    reconstructionProvider: job?.provider ?? 'manual',
+    reconstructionStatus: job?.status ?? 'idle',
+    reconstructionProgress: job?.progress ?? 0,
+    reconstructionMessage: job?.message ?? null,
+    reconstructionAssets: job?.assets ?? [],
+    reconstructionError: job?.error ?? null,
+    polycamJobId: job?.externalJobId ?? null,
+    polycamStatus:
+      job?.status === 'completed'
+        ? 'complete'
+        : job?.status === 'failed' || job?.status === 'cancelled'
+          ? 'error'
+          : job?.status === 'queued' || job?.status === 'uploading' || job?.status === 'processing'
+            ? 'processing'
+            : 'idle',
+  }),
+  setReconstructionStatus: (status, progress, message) => set((s) => {
+    const safeProgress = typeof progress === 'number' && Number.isFinite(progress)
+      ? Math.max(0, Math.min(100, progress))
+      : s.reconstructionProgress
+    return {
+      reconstructionStatus: status,
+      reconstructionProgress: safeProgress,
+      reconstructionMessage: message === undefined ? s.reconstructionMessage : message,
+      reconstructionJob: s.reconstructionJob
+        ? {
+            ...s.reconstructionJob,
+            status,
+            progress: safeProgress,
+            message: message === undefined ? s.reconstructionJob.message : message,
+            updatedAt: new Date().toISOString(),
+          }
+        : null,
+      polycamStatus:
+        status === 'completed'
+          ? 'complete'
+          : status === 'failed' || status === 'cancelled'
+            ? 'error'
+            : status === 'queued' || status === 'uploading' || status === 'processing'
+              ? 'processing'
+              : 'idle',
+    }
+  }),
+  setReconstructionAssets: (assets) => set((s) => ({
+    reconstructionAssets: assets,
+    reconstructionJob: s.reconstructionJob
+      ? { ...s.reconstructionJob, assets, updatedAt: new Date().toISOString() }
+      : s.reconstructionJob,
+  })),
+  setReconstructionError: (error) => set((s) => ({
+    reconstructionError: error,
+    reconstructionJob: s.reconstructionJob
+      ? { ...s.reconstructionJob, error, updatedAt: new Date().toISOString() }
+      : s.reconstructionJob,
+  })),
+  resetReconstruction: () => set({
+    ...defaultReconstructionState(),
+    polycamJobId: null,
+    polycamStatus: 'idle',
+  }),
+  attachReconstructionAsset: (asset) => set((s) => {
+    const assets = s.reconstructionAssets.some((existing) =>
+      existing.id === asset.id || existing.url === asset.url
+    )
+      ? s.reconstructionAssets.map((existing) =>
+          existing.id === asset.id || existing.url === asset.url ? { ...existing, ...asset } : existing
+        )
+      : [...s.reconstructionAssets, asset]
+
+    return {
+      reconstructionAssets: assets,
+      reconstructionJob: s.reconstructionJob
+        ? { ...s.reconstructionJob, assets, updatedAt: new Date().toISOString() }
+        : s.reconstructionJob,
+    }
+  }),
+
   // ── Derived measurements ──────────────────────────────────────────────────
   getAdvancedMeasurements: () => {
     const s = get()
@@ -860,6 +983,7 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     captures: buildCaptures(),
     polycamJobId: null,
     polycamStatus: 'idle',
+    ...defaultReconstructionState(),
     activeField: null,
     mode: 'view',
     phase: 'photo',
