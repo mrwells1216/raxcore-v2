@@ -92,7 +92,7 @@ export function PhotoCanvas() {
     stageScale, stagePos, setStageViewport,
     measurements2D,
     addPoint2D, undoPoint2D, movePoint2D, finalizeField2D, removePoint2D,
-    setCalibrationPoint, finalizeCalibration,
+    setCalibrationPoint,
     setMode, setMeasurementWarning2D,
   } = useMeasureStore()
 
@@ -137,9 +137,13 @@ export function PhotoCanvas() {
     if (!activeField) return
     const m = measurements2D[activeField]
     if (!m || m.points.length < 2) return
+    if (!calibration.finalized) {
+      setMeasurementWarning2D(activeField, null)
+      return
+    }
     const warn = curveAccuracyWarning(m.points, calibration.pixelsPerInch, 3)
     setMeasurementWarning2D(activeField, warn)
-  }, [activeField, measurements2D, calibration.pixelsPerInch, setMeasurementWarning2D])
+  }, [activeField, measurements2D, calibration.finalized, calibration.pixelsPerInch, setMeasurementWarning2D])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -252,7 +256,7 @@ export function PhotoCanvas() {
           className="absolute top-0 inset-x-0 z-20 px-3 py-1.5 text-xs font-medium text-center"
           style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', borderBottom: '1px solid rgba(251,191,36,0.3)' }}
         >
-          No calibration set — measurements will be uncalibrated (lower confidence). Set scale first for accurate inch values.
+          No calibration set - inch values are withheld until a physical scale is set.
         </div>
       )}
 
@@ -322,7 +326,7 @@ export function PhotoCanvas() {
                 />
 
                 {/* Segment labels when finalized */}
-                {m.finalized && calibration.pixelsPerInch > 0 && m.points.map((p, i) => {
+                {m.finalized && calibration.finalized && calibration.pixelsPerInch > 0 && m.points.map((p, i) => {
                   if (i === 0) return null
                   const a = m.points[i - 1]
                   const b = p

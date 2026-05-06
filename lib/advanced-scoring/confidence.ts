@@ -6,6 +6,7 @@
  */
 
 import type { AdvancedMeasurement, MeasurementMethod } from './types'
+import { isFiniteNumber } from './geometry'
 
 // ─── Method base confidence ───────────────────────────────────────────────────
 
@@ -30,6 +31,9 @@ export function methodBaseConfidence(method: MeasurementMethod): number {
  */
 export function computeMeasurementConfidence(m: AdvancedMeasurement): number {
   let score = methodBaseConfidence(m.method)
+  if (isFiniteNumber(m.confidence) && m.confidence > 0) {
+    score = (score + Math.max(0, Math.min(1, m.confidence))) / 2
+  }
 
   // Calibration penalty
   if (m.provenance.calibrationSource === 'estimated') score *= 0.82
@@ -55,7 +59,7 @@ export function computeMeasurementConfidence(m: AdvancedMeasurement): number {
   // Null/zero length measurement
   if (m.lengthInches === null || m.lengthInches === 0) score = 0
 
-  return Math.max(0, Math.min(1, score))
+  return isFiniteNumber(score) ? Math.max(0, Math.min(1, score)) : 0
 }
 
 // ─── Session confidence ───────────────────────────────────────────────────────
@@ -77,7 +81,8 @@ export function computeSessionConfidence(
 
   // Penalize for incompleteness
   const completeness = measured.length / totalExpectedFields
-  return avgConf * completeness
+  const sessionScore = avgConf * completeness
+  return isFiniteNumber(sessionScore) ? Math.max(0, Math.min(1, sessionScore)) : 0
 }
 
 // ─── Tier ────────────────────────────────────────────────────────────────────

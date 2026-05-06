@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { MeshOverlay } from '@/components/admin/mesh-overlay';
@@ -105,7 +105,7 @@ function getPrimaryImageUrl(images: MeshReviewApiResponse['images']): string {
   return first?.public_url || first?.storage_path || '/deer_clean_85.png';
 }
 
-export default function MeshReviewPage() {
+function MeshReviewClient() {
   const searchParams = useSearchParams();
   const buckId = searchParams.get('buckId') ?? searchParams.get('buck_id') ?? searchParams.get('rack_id');
 
@@ -442,5 +442,13 @@ export default function MeshReviewPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MeshReviewPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading mesh review...</div>}>
+      <MeshReviewClient />
+    </Suspense>
   );
 }

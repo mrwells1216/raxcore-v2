@@ -8,9 +8,11 @@ import * as THREE from 'three'
 import {
   useMeasureStore,
   FIELD_DEFS,
-  type FieldId,
   type Point3D,
 } from './measure-store'
+import { unitsToInches } from '@/lib/advanced-scoring/geometry'
+
+const MAX_RENDERED_POINT_CLOUD_POINTS = 120_000
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -141,26 +143,28 @@ function PointCloudRenderer() {
   // Build a stable BufferGeometry; only recreate when the points array reference changes.
   const geometry = useMemo(() => {
     if (!points.length) return null
+    const stride = Math.max(1, Math.ceil(points.length / MAX_RENDERED_POINT_CLOUD_POINTS))
+    const renderedCount = Math.ceil(points.length / stride)
 
-    const positions = new Float32Array(points.length * 3)
-    const colors    = new Float32Array(points.length * 3)
+    const positions = new Float32Array(renderedCount * 3)
+    const colors    = new Float32Array(renderedCount * 3)
     let hasColor = false
 
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i]
-      positions[i * 3]     = p.x
-      positions[i * 3 + 1] = p.y
-      positions[i * 3 + 2] = p.z
+    for (let sourceIndex = 0, renderIndex = 0; sourceIndex < points.length; sourceIndex += stride, renderIndex++) {
+      const p = points[sourceIndex]
+      positions[renderIndex * 3]     = p.x
+      positions[renderIndex * 3 + 1] = p.y
+      positions[renderIndex * 3 + 2] = p.z
       if (p.color) {
         hasColor = true
-        colors[i * 3]     = p.color.r
-        colors[i * 3 + 1] = p.color.g
-        colors[i * 3 + 2] = p.color.b
+        colors[renderIndex * 3]     = p.color.r
+        colors[renderIndex * 3 + 1] = p.color.g
+        colors[renderIndex * 3 + 2] = p.color.b
       } else {
         // Default: warm amber tint
-        colors[i * 3]     = 0.78
-        colors[i * 3 + 1] = 0.66
-        colors[i * 3 + 2] = 0.43
+        colors[renderIndex * 3]     = 0.78
+        colors[renderIndex * 3 + 1] = 0.66
+        colors[renderIndex * 3 + 2] = 0.43
       }
     }
 
@@ -237,6 +241,10 @@ function CrossSectionRing({ scene, p0, p1 }: { scene: THREE.Object3D; p0: Point3
 
     return new THREE.BufferGeometry().setFromPoints(intersectionPts)
   }, [scene, p0, p1])
+
+  useEffect(() => {
+    return () => { ring?.dispose() }
+  }, [ring])
 
   if (!ring) return null
   return (
@@ -376,14 +384,24 @@ function PointSphere({ position, color, active }: { position: Point3D; color: st
 
 // ─── Running total label ──────────────────────────────────────────────────────
 
-function RunningTotalLabel({ point, length, color }: { point: Point3D; length: number; color: string }) {
+function RunningTotalLabel({
+  point,
+  length,
+  color,
+  suffix = '"',
+}: {
+  point: Point3D
+  length: number
+  color: string
+  suffix?: string
+}) {
   return (
     <Html position={[point.x, point.y + 0.015, point.z]} zIndexRange={[100, 0]} center>
       <div
         className="px-1.5 py-0.5 rounded text-xs font-mono font-bold pointer-events-none whitespace-nowrap"
         style={{ background: 'rgba(0,0,0,0.78)', color, border: `1px solid ${color}` }}
       >
-        {length.toFixed(2)}&quot;
+        {length.toFixed(2)}{suffix}
       </div>
     </Html>
   )
@@ -437,6 +455,7 @@ function SceneInner() {
   const {
     glbUrl, renderMode, showWireframe, showZones, zoneOpacity,
     activeField, mode, measurements3D, addPoint3D, crossSectionPoints,
+    calibration3D,
   } = useMeasureStore()
 
   const { scene: threeScene } = useThree()
@@ -452,6 +471,10 @@ function SceneInner() {
     if (crossSectionPoints.length < 2) return null
     return crossSectionCircumference(threeScene, crossSectionPoints[0], crossSectionPoints[1])
   }, [threeScene, crossSectionPoints])
+  const crossLengthDisplay = crossLength !== null && calibration3D.finalized
+    ? unitsToInches(crossLength, calibration3D.unitsPerInch)
+    : crossLength
+  const crossLengthSuffix = calibration3D.finalized ? '"' : ' units'
 
   return (
     <>
@@ -485,8 +508,8 @@ function SceneInner() {
           {crossSectionPoints.length === 2 && (
             <CrossSectionRing scene={threeScene} p0={crossSectionPoints[0]} p1={crossSectionPoints[1]} />
           )}
-          {crossSectionPoints.length === 2 && crossLength !== null && crossLength > 0 && (
-            <RunningTotalLabel point={crossSectionPoints[1]} length={crossLength} color="#ff3333" />
+          {crossSectionPoints.length === 2 && crossLengthDisplay !== null && crossLengthDisplay > 0 && (
+            <RunningTotalLabel point={crossSectionPoints[1]} length={crossLengthDisplay} color="#ff3333" suffix={crossLengthSuffix} />
           )}
         </Suspense>
       )}
@@ -702,6 +725,7 @@ function PointCloudUploadPanel() {
 
 export function Scene3D() {
   const { glbUrl, setGlbUrl, activeField, mode } = useMeasureStore()
+  const pointCloudLoaded = useMeasureStore(s => s.pointCloud.loaded)
   const fileRef   = useRef<HTMLInputElement>(null)
   const isMeasuring = mode === 'measure' && !!activeField
   const afd         = activeField ? FIELD_DEFS.find(f => f.id === activeField) : null
@@ -710,6 +734,8 @@ export function Scene3D() {
     const file = e.target.files?.[0]
     if (!file) return
     const url = URL.createObjectURL(file)
+    const previousUrl = useMeasureStore.getState().glbUrl
+    if (previousUrl?.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
     setGlbUrl(url)
     e.target.value = ''
   }
@@ -762,7 +788,7 @@ export function Scene3D() {
             color: afd.color,
           }}
         >
-          {useMeasureStore.getState().pointCloud.loaded
+          {pointCloudLoaded
             ? 'Click mesh — snaps to nearest point cloud point'
             : 'Click mesh to place points (mesh fallback — no point cloud)'}
         </div>

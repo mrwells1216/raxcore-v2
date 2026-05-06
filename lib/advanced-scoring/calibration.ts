@@ -91,11 +91,15 @@ export interface CalibrationComparisonResult {
  * Warns if any two calibrations differ by more than 8%.
  */
 export function comparePhotoCalibrations(calibrations: Calibration2D[]): CalibrationComparisonResult {
-  if (calibrations.length < 2) {
+  const validCalibrations = calibrations.filter(
+    (calibration) => isFiniteNumber(calibration.pixelsPerInch) && calibration.pixelsPerInch > 0,
+  )
+
+  if (validCalibrations.length < 2) {
     return { consistent: true, maxDeltaPercent: 0, warning: null }
   }
 
-  const ppis = calibrations.map(c => c.pixelsPerInch)
+  const ppis = validCalibrations.map(c => c.pixelsPerInch)
   const minPpi = Math.min(...ppis)
   const maxPpi = Math.max(...ppis)
   const maxDeltaPercent = ((maxPpi - minPpi) / minPpi) * 100

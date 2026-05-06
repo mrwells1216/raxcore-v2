@@ -5,13 +5,16 @@ import {
   polylineLength2D,
   polylineLength3D,
   pixelsToInches,
+  unitsToInches,
   isFiniteNumber,
 } from '@/lib/advanced-scoring/geometry'
 import {
   parsePointCloudText,
-  findNearestPointCloudAnchor,
   pointCloudCoverageWarning,
-  estimatePointDensityAround,
+  createPointCloudIndex,
+  findNearestPointCloudAnchorIndexed,
+  estimatePointDensityAroundIndexed,
+  type PointCloudIndex,
 } from '@/lib/advanced-scoring/point-cloud'
 import type { PointCloudPoint, MeasurementMethod, AdvancedMeasurement, MeasurementField, CalibrationSource } from '@/lib/advanced-scoring/types'
 
@@ -141,6 +144,7 @@ export const CAPTURE_ANGLES = [
 
 export interface PointCloudState {
   points: PointCloudPoint[]
+  index: PointCloudIndex | null
   loaded: boolean
   filename: string | null
   /** Max snap distance in model units. */
@@ -149,6 +153,10 @@ export interface PointCloudState {
   pointSize: number
   visible: boolean
 }
+
+const UNCALIBRATED_2D_WARNING = 'Physical 2D calibration required before inch value is official'
+const UNCALIBRATED_3D_WARNING = 'Physical 3D calibration required before inch value is official'
+const MESH_FALLBACK_WARNING = 'Mesh fallback measurement - point cloud anchor unavailable'
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 
@@ -287,7 +295,7 @@ function defaultCalibration(): CalibrationState {
 }
 
 function defaultPointCloud(): PointCloudState {
-  return { points: [], loaded: false, filename: null, snapDistance: 0.01, pointSize: 0.003, visible: true }
+  return { points: [], index: null, loaded: false, filename: null, snapDistance: 0.01, pointSize: 0.003, visible: true }
 }
 
 function defaultCalibration3D() {
@@ -305,6 +313,30 @@ function computeConf2D(
   return 'high'
 }
 
+function mergeWarning(warnings: string[], warning: string): string[] {
+  return warnings.includes(warning) ? warnings : [...warnings, warning]
+}
+
+function withoutWarning(warnings: string[], warning: string): string[] {
+  return warnings.filter((item) => item !== warning)
+}
+
+function calibrationAware2DLength(pixelLength: number, calibration: CalibrationState): {
+  inchLength: number
+  calibrationSource: CalibrationSource | null
+} {
+  if (!calibration.finalized) return { inchLength: 0, calibrationSource: null }
+  return {
+    inchLength: pixelsToInches(pixelLength, calibration.pixelsPerInch) ?? 0,
+    calibrationSource: calibration.source,
+  }
+}
+
+function calibrationAware3DLength(unitLength: number, calibration3D: MeasureStore['calibration3D']): number {
+  if (!calibration3D.finalized) return 0
+  return unitsToInches(unitLength, calibration3D.unitsPerInch) ?? 0
+}
+
 // ─── Store creation ───────────────────────────────────────────────────────────
 
 export const useMeasureStore = create<MeasureStore>()((set, get) => ({
@@ -319,7 +351,13 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
 
   // ── Photo ──────────────────────────────────────────────────────────────────
   photoDataUrl: null,
-  setPhotoDataUrl: (url) => set({ photoDataUrl: url }),
+  setPhotoDataUrl: (url) => set({
+    photoDataUrl: url,
+    calibration: defaultCalibration(),
+    measurements2D: buildEmpty2D(),
+    stageScale: 1,
+    stagePos: { x: 0, y: 0 },
+  }),
 
   calibration: defaultCalibration(),
 
@@ -347,30 +385,49 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     if (!isFiniteNumber(realIn) || realIn <= 0 || px <= 0) return {}
     const ppi = px / realIn
 
+    const src: CalibrationSource = 'physical_reference'
+
     // Recompute inch lengths for any existing 2D measurements
     const measurements2D = { ...s.measurements2D }
     for (const fd of FIELD_DEFS) {
       const m = measurements2D[fd.id]
       const pl = polylineLength2D(m.points)
       const il = pixelsToInches(pl, ppi) ?? 0
-      const src = s.calibration.source
+      const warnings = withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
       measurements2D[fd.id] = {
         ...m,
         pixelLength: pl,
         inchLength: il,
+        warnings,
         calibrationSource: src,
-        confidence: computeConf2D(true, src, m.warnings),
+        confidence: computeConf2D(true, src, warnings),
       }
     }
 
     return {
-      calibration: { ...s.calibration, pixelsPerInch: ppi, finalized: true },
+      calibration: { ...s.calibration, pixelsPerInch: ppi, finalized: true, source: src },
       measurements2D,
       mode: 'view' as MeasureMode,
     }
   }),
 
-  resetCalibration: () => set({ calibration: defaultCalibration() }),
+  resetCalibration: () => set((s) => {
+    const measurements2D = { ...s.measurements2D }
+    for (const fd of FIELD_DEFS) {
+      const m = measurements2D[fd.id]
+      const warnings = m.points.length >= 2
+        ? mergeWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+        : withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+      measurements2D[fd.id] = {
+        ...m,
+        inchLength: 0,
+        warnings,
+        calibrationSource: null,
+        confidence: computeConf2D(false, null, warnings),
+      }
+    }
+    return { calibration: defaultCalibration(), measurements2D }
+  }),
 
   photoFilter: 'none',
   setPhotoFilter: (f) => set({ photoFilter: f }),
@@ -386,16 +443,20 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     if (m.finalized) return {}
     const points = [...m.points, point]
     const pixelLength = polylineLength2D(points)
-    const ppi = s.calibration.pixelsPerInch
-    const inchLength = pixelsToInches(pixelLength, ppi) ?? 0
-    const src = s.calibration.finalized ? s.calibration.source : null
+    const { inchLength, calibrationSource: src } = calibrationAware2DLength(pixelLength, s.calibration)
+    const warnings = s.calibration.finalized
+      ? withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+      : points.length >= 2
+        ? mergeWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+        : m.warnings
     return {
       measurements2D: {
         ...s.measurements2D,
         [fieldId]: {
           ...m, points, pixelLength, inchLength,
+          warnings,
           calibrationSource: src,
-          confidence: computeConf2D(s.calibration.finalized, src, m.warnings),
+          confidence: computeConf2D(s.calibration.finalized, src, warnings),
         },
       },
     }
@@ -406,11 +467,22 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     if (m.points.length === 0) return {}
     const points = m.points.slice(0, -1)
     const pixelLength = polylineLength2D(points)
-    const ppi = s.calibration.pixelsPerInch
+    const { inchLength, calibrationSource: src } = calibrationAware2DLength(pixelLength, s.calibration)
+    const warnings = s.calibration.finalized || points.length < 2
+      ? withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+      : mergeWarning(m.warnings, UNCALIBRATED_2D_WARNING)
     return {
       measurements2D: {
         ...s.measurements2D,
-        [fieldId]: { ...m, points, pixelLength, inchLength: pixelsToInches(pixelLength, ppi) ?? 0 },
+        [fieldId]: {
+          ...m,
+          points,
+          pixelLength,
+          inchLength,
+          warnings,
+          calibrationSource: src,
+          confidence: computeConf2D(s.calibration.finalized, src, warnings),
+        },
       },
     }
   }),
@@ -419,11 +491,22 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const m = s.measurements2D[fieldId]
     const points = m.points.filter((_, i) => i !== index)
     const pixelLength = polylineLength2D(points)
-    const ppi = s.calibration.pixelsPerInch
+    const { inchLength, calibrationSource: src } = calibrationAware2DLength(pixelLength, s.calibration)
+    const warnings = s.calibration.finalized || points.length < 2
+      ? withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+      : mergeWarning(m.warnings, UNCALIBRATED_2D_WARNING)
     return {
       measurements2D: {
         ...s.measurements2D,
-        [fieldId]: { ...m, points, pixelLength, inchLength: pixelsToInches(pixelLength, ppi) ?? 0 },
+        [fieldId]: {
+          ...m,
+          points,
+          pixelLength,
+          inchLength,
+          warnings,
+          calibrationSource: src,
+          confidence: computeConf2D(s.calibration.finalized, src, warnings),
+        },
       },
     }
   }),
@@ -432,11 +515,24 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const m = s.measurements2D[fieldId]
     const points = m.points.map((p, i) => (i === index ? point : p))
     const pixelLength = polylineLength2D(points)
-    const ppi = s.calibration.pixelsPerInch
+    const { inchLength, calibrationSource: src } = calibrationAware2DLength(pixelLength, s.calibration)
+    const warnings = s.calibration.finalized
+      ? withoutWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+      : points.length >= 2
+        ? mergeWarning(m.warnings, UNCALIBRATED_2D_WARNING)
+        : m.warnings
     return {
       measurements2D: {
         ...s.measurements2D,
-        [fieldId]: { ...m, points, pixelLength, inchLength: pixelsToInches(pixelLength, ppi) ?? 0 },
+        [fieldId]: {
+          ...m,
+          points,
+          pixelLength,
+          inchLength,
+          warnings,
+          calibrationSource: src,
+          confidence: computeConf2D(s.calibration.finalized, src, warnings),
+        },
       },
     }
   }),
@@ -458,7 +554,10 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const m = s.measurements2D[fieldId]
     const warnings = warning
       ? m.warnings.includes(warning) ? m.warnings : [...m.warnings, warning]
-      : []
+      : m.warnings.filter((item) => item === UNCALIBRATED_2D_WARNING)
+    if (warnings.length === m.warnings.length && warnings.every((item, index) => item === m.warnings[index])) {
+      return {}
+    }
     return {
       measurements2D: {
         ...s.measurements2D,
@@ -498,6 +597,7 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     if (m.finalized) return {}
 
     const cloudPoints = s.pointCloud.points
+    const cloudIndex = s.pointCloud.index
     const snapDist = s.pointCloud.snapDistance
     let point = rawPoint
     let snappedToPointCloud = false
@@ -505,11 +605,11 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const warnings = [...m.warnings]
 
     if (cloudPoints.length > 0) {
-      const anchor = findNearestPointCloudAnchor(rawPoint, cloudPoints, snapDist)
+      const anchor = findNearestPointCloudAnchorIndexed(rawPoint, cloudIndex, snapDist)
       if (anchor) {
         point = { x: anchor.x, y: anchor.y, z: anchor.z }
         snappedToPointCloud = true
-        density = estimatePointDensityAround(point, cloudPoints, snapDist * 3)
+        density = estimatePointDensityAroundIndexed(point, cloudIndex, snapDist * 3)
         const densityWarning = pointCloudCoverageWarning(density)
         if (densityWarning && !warnings.includes(densityWarning)) {
           warnings.push(densityWarning)
@@ -518,9 +618,8 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     }
 
     const points = [...m.points, point]
-    const unitsPerInch = s.calibration3D.finalized ? s.calibration3D.unitsPerInch : 1
     const rawLength = polylineLength3D(points)
-    const inchLength = rawLength / unitsPerInch
+    const inchLength = calibrationAware3DLength(rawLength, s.calibration3D)
 
     // Method: if point cloud exists and snapped, use point_cloud; else mesh_fallback
     const method: MeasurementMethod =
@@ -528,9 +627,23 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
         ? 'three_d_point_cloud'
         : 'three_d_mesh_fallback'
 
+    if (method === 'three_d_mesh_fallback') {
+      if (!warnings.includes(MESH_FALLBACK_WARNING)) warnings.push(MESH_FALLBACK_WARNING)
+    }
+    if (!s.calibration3D.finalized && points.length >= 2) {
+      if (!warnings.includes(UNCALIBRATED_3D_WARNING)) warnings.push(UNCALIBRATED_3D_WARNING)
+    } else if (s.calibration3D.finalized) {
+      const calibrationWarningIndex = warnings.indexOf(UNCALIBRATED_3D_WARNING)
+      if (calibrationWarningIndex >= 0) warnings.splice(calibrationWarningIndex, 1)
+    }
+
     // Confidence
     const conf: Measurement3D['confidence'] =
-      method === 'three_d_point_cloud' ? 'high' : 'low'
+      method === 'three_d_point_cloud' && s.calibration3D.finalized && s.calibration3D.source === 'physical_reference'
+        ? 'high'
+        : method === 'three_d_point_cloud'
+          ? 'medium'
+          : 'low'
 
     // Average density across all points
     let avgDensity = density
@@ -544,7 +657,7 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
         [fieldId]: {
           ...m, points, inchLength, warnings, method,
           confidence: conf,
-          snappedToPointCloud: m.snappedToPointCloud && snappedToPointCloud,
+          snappedToPointCloud: points.length === 1 ? snappedToPointCloud : m.snappedToPointCloud && snappedToPointCloud,
           avgPointDensity: avgDensity,
         },
       },
@@ -555,11 +668,15 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const m = s.measurements3D[fieldId]
     if (m.points.length === 0) return {}
     const points = m.points.slice(0, -1)
-    const unitsPerInch = s.calibration3D.finalized ? s.calibration3D.unitsPerInch : 1
+    const unitLength = polylineLength3D(points)
+    const inchLength = calibrationAware3DLength(unitLength, s.calibration3D)
+    const warnings = points.length >= 2 && !s.calibration3D.finalized
+      ? mergeWarning(m.warnings, UNCALIBRATED_3D_WARNING)
+      : withoutWarning(m.warnings, UNCALIBRATED_3D_WARNING)
     return {
       measurements3D: {
         ...s.measurements3D,
-        [fieldId]: { ...m, points, inchLength: polylineLength3D(points) / unitsPerInch },
+        [fieldId]: { ...m, points, inchLength, warnings },
       },
     }
   }),
@@ -581,7 +698,10 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
     const m = s.measurements3D[fieldId]
     const warnings = warning
       ? m.warnings.includes(warning) ? m.warnings : [...m.warnings, warning]
-      : []
+      : m.warnings.filter((item) => item === UNCALIBRATED_3D_WARNING || item === MESH_FALLBACK_WARNING)
+    if (warnings.length === m.warnings.length && warnings.every((item, index) => item === m.warnings[index])) {
+      return {}
+    }
     return {
       measurements3D: {
         ...s.measurements3D,
@@ -595,10 +715,12 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
 
   loadPointCloudText: (text, filename) => set(() => {
     const points = parsePointCloudText(text)
+    const snapDistance = defaultPointCloud().snapDistance
     return {
       pointCloud: {
         ...defaultPointCloud(),
         points,
+        index: points.length > 0 ? createPointCloudIndex(points, snapDistance) : null,
         loaded: points.length > 0,
         filename,
       },
@@ -607,9 +729,18 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
 
   clearPointCloud: () => set({ pointCloud: defaultPointCloud() }),
 
-  setPointCloudSnapDistance: (d) => set((s) => ({
-    pointCloud: { ...s.pointCloud, snapDistance: d },
-  })),
+  setPointCloudSnapDistance: (d) => set((s) => {
+    const snapDistance = isFiniteNumber(d) && d > 0 ? d : s.pointCloud.snapDistance
+    return {
+      pointCloud: {
+        ...s.pointCloud,
+        snapDistance,
+        index: s.pointCloud.points.length > 0
+          ? createPointCloudIndex(s.pointCloud.points, snapDistance)
+          : null,
+      },
+    }
+  }),
 
   setPointCloudPointSize: (size) => set((s) => ({
     pointCloud: { ...s.pointCloud, pointSize: size },
@@ -622,9 +753,33 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
   // ── Calibration 3D ────────────────────────────────────────────────────────
   calibration3D: defaultCalibration3D(),
 
-  setCalibration3D: (unitsPerInch, source) => set(() => ({
-    calibration3D: { unitsPerInch, source, finalized: true },
-  })),
+  setCalibration3D: (unitsPerInch, source) => set((s) => {
+    if (!isFiniteNumber(unitsPerInch) || unitsPerInch <= 0) {
+      return { calibration3D: defaultCalibration3D() }
+    }
+
+    const calibration3D = { unitsPerInch, source, finalized: true }
+    const measurements3D = { ...s.measurements3D }
+
+    for (const fd of FIELD_DEFS) {
+      const m = measurements3D[fd.id]
+      const inchLength = calibrationAware3DLength(polylineLength3D(m.points), calibration3D)
+      const warnings = withoutWarning(m.warnings, UNCALIBRATED_3D_WARNING)
+      measurements3D[fd.id] = {
+        ...m,
+        inchLength,
+        warnings,
+        confidence:
+          m.method === 'three_d_point_cloud' && source === 'physical_reference'
+            ? 'high'
+            : m.method === 'three_d_point_cloud'
+              ? 'medium'
+              : 'low',
+      }
+    }
+
+    return { calibration3D, measurements3D }
+  }),
 
   // ── Photogrammetry ────────────────────────────────────────────────────────
   captures: buildCaptures(),
@@ -678,7 +833,11 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
           warnings: m3.warnings,
           provenance: {
             origin: 'human',
-            visibility: m3.finalized ? 'corrected' : 'visible',
+            visibility: m3.method === 'three_d_mesh_fallback'
+              ? 'inferred'
+              : m3.finalized
+                ? 'corrected'
+                : 'visible',
             source: m3.method,
             snappedToPointCloud: m3.snappedToPointCloud,
             pointCloudDensity: m3.avgPointDensity,

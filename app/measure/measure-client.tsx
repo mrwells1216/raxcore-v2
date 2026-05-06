@@ -81,8 +81,8 @@ export function MeasureClient() {
         <div className="flex">
           {PHASES.map(p => (
             <PhaseTab key={p.id} id={p.id} label={p.label} active={phase === p.id} />
+          ))}
         </div>
-      </div>
         <Link
           href="/score"
           className="flex items-center gap-1 px-3 py-2.5 text-xs font-bold tracking-widest uppercase transition-all mr-2"
@@ -97,7 +97,6 @@ export function MeasureClient() {
           <X size={16} />
           Exit
         </Link>
-      </div>
       </div>
 
       {/* Toolbar (photo / 3D only) */}

@@ -4,6 +4,7 @@ import { useRef } from 'react'
 import { useMeasureStore, CAPTURE_ANGLES } from './measure-store'
 
 const MIN_CAPTURES = 8
+const RECONSTRUCTION_ADAPTER_AVAILABLE = false
 
 export function PhotogrammetryPanel() {
   const {
@@ -20,7 +21,7 @@ export function PhotogrammetryPanel() {
   const fileRefs = useRef<Array<HTMLInputElement | null>>([])
 
   const capturedCount = captures.filter(c => c.captured).length
-  const canProcess    = capturedCount >= MIN_CAPTURES && polycamStatus === 'idle'
+  const canProcess    = RECONSTRUCTION_ADAPTER_AVAILABLE && capturedCount >= MIN_CAPTURES && polycamStatus === 'idle'
 
   // ── Image upload ──────────────────────────────────────────────────────────
   const handleImageUpload = (angleIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,7 +49,7 @@ export function PhotogrammetryPanel() {
     }
 
     try {
-      // POST to Polycam API (requires POLYCAM_API_KEY env var on server)
+      // POST to a server-side reconstruction adapter.
       const res = await fetch('/api/photogrammetry/submit', {
         method: 'POST',
         body: formData,
@@ -113,7 +114,8 @@ export function PhotogrammetryPanel() {
       <div>
         <h2 className="text-base font-semibold" style={{ color: '#c8a96e' }}>Photogrammetry Capture</h2>
         <p className="text-xs mt-1 leading-relaxed" style={{ color: 'rgba(200,169,110,0.6)' }}>
-          Upload photos from at least {MIN_CAPTURES} angles. Polycam will generate a 3D model automatically.
+          Upload photos from at least {MIN_CAPTURES} angles. The server reconstruction adapter is not configured in this build,
+          so use manual GLB upload until the Luma adapter is added.
           You need {Math.max(0, MIN_CAPTURES - capturedCount)} more photo{Math.max(0, MIN_CAPTURES - capturedCount) !== 1 ? 's' : ''}.
         </p>
       </div>
@@ -208,7 +210,7 @@ export function PhotogrammetryPanel() {
             cursor: canProcess ? 'pointer' : 'not-allowed',
           }}
         >
-          Generate 3D Model
+          {RECONSTRUCTION_ADAPTER_AVAILABLE ? 'Generate 3D Model' : 'Server Adapter Not Configured'}
         </button>
       ) : (
         <div className="flex items-center justify-center gap-2 py-2.5">

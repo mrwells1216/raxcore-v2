@@ -2,7 +2,7 @@
 
 import { useRef, useMemo } from 'react'
 import { useMeasureStore, FIELD_DEFS, type FieldId } from './measure-store'
-import { computeVerifiedScoreStatus, compareMeasurementSources } from '@/lib/advanced-scoring/cross-validation'
+import { computeVerifiedScoreStatus } from '@/lib/advanced-scoring/cross-validation'
 import { computeSessionConfidence, confidenceTier } from '@/lib/advanced-scoring/confidence'
 import type { AdvancedMeasurementSession } from '@/lib/advanced-scoring/types'
 
@@ -110,7 +110,9 @@ function buildRows(
     const confOrder = { high: 3, medium: 2, low: 1, none: 0 }
     const lConf = lData.conf as keyof typeof confOrder
     const rConf = (rData?.conf ?? 'none') as keyof typeof confOrder
-    const worstConf = confOrder[lConf] <= confOrder[rConf] ? lConf : rConf
+    const worstConf = !p.right
+      ? lConf
+      : confOrder[lConf] <= confOrder[rConf] ? lConf : rConf
 
     const combinedWarnings = [
       ...lData.warnings,
@@ -252,7 +254,7 @@ export function ScorePanel() {
     const imgData = canvas.toDataURL('image/jpeg', 0.95)
     const pdf     = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width / 2, canvas.height / 2] })
     pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width / 2, canvas.height / 2)
-    pdf.save('antler-score.pdf')
+    pdf.save('draft-antler-score.pdf')
   }
 
   // ── Session export ────────────────────────────────────────────────────────────
@@ -453,7 +455,7 @@ export function ScorePanel() {
           className="w-full py-2 rounded text-sm font-medium transition-all"
           style={{ background: '#c8a96e', color: '#0d0a06' }}
         >
-          Export PDF Score Sheet
+          Export Draft PDF Score Sheet
         </button>
         <button
           onClick={handleExportJSON}

@@ -141,7 +141,7 @@ export function curveAccuracyWarning(
   pixelsPerInch: number,
   thresholdInches = 2.5,
 ): string | null {
-  if (points.length < 2 || pixelsPerInch <= 0) return null
+  if (points.length < 2 || !isFiniteNumber(pixelsPerInch) || pixelsPerInch <= 0) return null
   for (let i = 1; i < points.length; i++) {
     const px = distance2D(points[i - 1], points[i])
     const inches = px / pixelsPerInch

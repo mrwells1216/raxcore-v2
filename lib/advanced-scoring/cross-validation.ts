@@ -1,15 +1,9 @@
 /**
- * lib/advanced-scoring/cross-validation.ts
+ * Cross-validation for advanced measurements.
  *
- * Cross-validation engine: compares measurements from multiple sources for
- * the same field and produces a tier (high / medium / low) and best value.
- *
- * Rules:
- * - high: photo + point_cloud + optional quick_ai agree within 3%
- * - medium: two sources agree, one is outlier
- * - low: significant disagreement or only one source
- * - mesh fallback alone cannot produce high
- * - estimated calibration cannot produce verified score
+ * High confidence is reserved for independent methods that agree within 3%.
+ * Verified Score is stricter: each required field needs both photo polyline
+ * and point-cloud anchored 3D evidence.
  */
 
 import type {
@@ -23,30 +17,32 @@ import type {
 } from './types'
 import { computeMeasurementConfidence } from './confidence'
 import { calibrationQuality } from './calibration'
-
-// ─── Agreement threshold ─────────────────────────────────────────────────────
+import { isFiniteNumber } from './geometry'
 
 const AGREEMENT_THRESHOLD_PERCENT = 3
 
-function agreementPercent(a: number, b: number): number {
+function disagreementPercent(a: number, b: number): number {
+  if (!isFiniteNumber(a) || !isFiniteNumber(b)) return 100
   const avg = (a + b) / 2
-  if (avg === 0) return 0
+  if (avg <= 0) return 100
   return (Math.abs(a - b) / avg) * 100
 }
-
-// ─── Per-field cross-validation ───────────────────────────────────────────────
 
 export function compareMeasurementSources(
   field: MeasurementField,
   measurements: AdvancedMeasurement[],
 ): CrossValidationResult {
-  // Gather sources that have a real value
   const sources: SourceValue[] = measurements
-    .filter(m => m.field === field && m.lengthInches !== null && m.lengthInches > 0)
-    .map(m => ({
-      method: m.method,
-      value: m.lengthInches as number,
-      confidence: computeMeasurementConfidence(m),
+    .filter((measurement) =>
+      measurement.field === field &&
+      measurement.lengthInches !== null &&
+      isFiniteNumber(measurement.lengthInches) &&
+      measurement.lengthInches > 0,
+    )
+    .map((measurement) => ({
+      method: measurement.method,
+      value: measurement.lengthInches as number,
+      confidence: computeMeasurementConfidence(measurement),
     }))
 
   if (sources.length === 0) {
@@ -61,20 +57,16 @@ export function compareMeasurementSources(
   }
 
   if (sources.length === 1) {
-    const s = sources[0]
-    const tier: CrossValidationTier =
-      s.method === 'three_d_mesh_fallback' ? 'low' : 'medium'
     return {
       field,
       sources,
-      bestValue: s.value,
+      bestValue: sources[0].value,
       agreementPercent: 100,
-      tier,
-      warning: sources.length === 1 ? 'Only one measurement source — add a second for cross-validation.' : null,
+      tier: 'low',
+      warning: 'Only one measurement source - add an independent source for cross-validation.',
     }
   }
 
-  // Pick best value: highest-confidence non-mesh source, otherwise highest confidence
   const ranked = [...sources].sort((a, b) => {
     if (a.method === 'three_d_mesh_fallback' && b.method !== 'three_d_mesh_fallback') return 1
     if (b.method === 'three_d_mesh_fallback' && a.method !== 'three_d_mesh_fallback') return -1
@@ -82,55 +74,56 @@ export function compareMeasurementSources(
   })
   const bestValue = ranked[0].value
 
-  // Compute max pairwise agreement deviation
   let maxDelta = 0
   for (let i = 0; i < sources.length; i++) {
     for (let j = i + 1; j < sources.length; j++) {
-      const delta = agreementPercent(sources[i].value, sources[j].value)
-      if (delta > maxDelta) maxDelta = delta
+      maxDelta = Math.max(maxDelta, disagreementPercent(sources[i].value, sources[j].value))
     }
   }
 
-  const agreePct = Math.max(0, 100 - maxDelta)
-  const onlyMeshFallbacks = sources.every(s => s.method === 'three_d_mesh_fallback')
+  const agreement = Math.max(0, 100 - maxDelta)
+  const independentMethodCount = new Set(sources.map((source) => source.method)).size
+  const onlyMeshFallbacks = sources.every((source) => source.method === 'three_d_mesh_fallback')
 
-  let tier: CrossValidationTier
+  let tier: CrossValidationTier = 'low'
   let warning: string | null = null
 
-  if (onlyMeshFallbacks) {
-    tier = 'low'
-    warning = 'All sources are mesh fallback — point cloud required for high confidence.'
-  } else if (maxDelta <= AGREEMENT_THRESHOLD_PERCENT && sources.length >= 2) {
+  if (independentMethodCount < 2) {
+    warning = 'Independent measurement methods are required for high confidence.'
+  } else if (onlyMeshFallbacks) {
+    warning = 'All sources are mesh fallback - point cloud required for high confidence.'
+  } else if (maxDelta <= AGREEMENT_THRESHOLD_PERCENT) {
     tier = 'high'
-  } else if (maxDelta <= 10 && sources.length >= 2) {
-    // Majority agree
-    const inliers = sources.filter(
-      s => agreementPercent(s.value, bestValue) <= AGREEMENT_THRESHOLD_PERCENT,
-    )
+  } else if (maxDelta <= 10) {
+    const inliers = sources.filter((source) => disagreementPercent(source.value, bestValue) <= AGREEMENT_THRESHOLD_PERCENT)
     tier = inliers.length >= 2 ? 'medium' : 'low'
-    if (maxDelta > AGREEMENT_THRESHOLD_PERCENT) {
-      warning = `Sources disagree by ${maxDelta.toFixed(1)}% — review outlier measurements.`
-    }
+    warning = `Sources disagree by ${maxDelta.toFixed(1)}% - review outlier measurements.`
   } else {
-    tier = 'low'
     warning = `Significant disagreement (${maxDelta.toFixed(1)}%) between sources.`
   }
 
-  return { field, sources, bestValue, agreementPercent: agreePct, tier, warning }
+  return { field, sources, bestValue, agreementPercent: agreement, tier, warning }
 }
 
-// ─── Session verified status ──────────────────────────────────────────────────
-
 const REQUIRED_BC_FIELDS: MeasurementField[] = [
-  'main_beam_left', 'main_beam_right',
-  'g1_left', 'g1_right',
-  'g2_left', 'g2_right',
-  'g3_left', 'g3_right',
-  'g4_left', 'g4_right',
-  'h1_left', 'h1_right',
-  'h2_left', 'h2_right',
-  'h3_left', 'h3_right',
-  'h4_left', 'h4_right',
+  'main_beam_left',
+  'main_beam_right',
+  'g1_left',
+  'g1_right',
+  'g2_left',
+  'g2_right',
+  'g3_left',
+  'g3_right',
+  'g4_left',
+  'g4_right',
+  'h1_left',
+  'h1_right',
+  'h2_left',
+  'h2_right',
+  'h3_left',
+  'h3_right',
+  'h4_left',
+  'h4_right',
   'inside_spread',
 ]
 
@@ -140,56 +133,54 @@ export function computeVerifiedScoreStatus(
   const reasons: string[] = []
   const fieldStatuses: VerifiedScoreStatus['fieldStatuses'] = []
 
-  // 1. Calibration must be physical
   const cal2D = session.calibration2D
   const cal3D = session.calibration3D
-  const hasCal = cal2D !== null || cal3D !== null
-  if (!hasCal) {
+
+  if (!cal2D && !cal3D) {
     reasons.push('No calibration has been set.')
-  } else {
-    if (cal2D && cal2D.source !== 'physical_reference') {
-      reasons.push('2D calibration is estimated — physical reference required.')
-    }
-    if (cal3D && cal3D.source !== 'physical_reference') {
-      reasons.push('3D calibration is estimated — physical reference required.')
-    }
-    if (cal2D) {
-      const q = calibrationQuality(cal2D)
-      if (!q.canVerify) reasons.push(`2D calibration: ${q.reason}`)
-    }
   }
 
-  // 2. Each required field must have at least two independent method sources
-  //    and those sources must agree within 3%
+  if (!cal2D || cal2D.source !== 'physical_reference') {
+    reasons.push('Physical 2D reference calibration is required.')
+  } else {
+    const quality = calibrationQuality(cal2D)
+    if (!quality.canVerify) reasons.push(`2D calibration: ${quality.reason}`)
+  }
+
+  if (!cal3D || cal3D.source !== 'physical_reference') {
+    reasons.push('Physical 3D reference calibration is required.')
+  } else {
+    const quality = calibrationQuality(cal3D)
+    if (!quality.canVerify) reasons.push(`3D calibration: ${quality.reason}`)
+  }
+
   for (const field of REQUIRED_BC_FIELDS) {
-    const fieldMeasurements = session.measurements.filter(m => m.field === field)
-    const xv = compareMeasurementSources(field, fieldMeasurements)
+    const fieldMeasurements = session.measurements.filter((measurement) => measurement.field === field)
+    const result = compareMeasurementSources(field, fieldMeasurements)
+    const methods = new Set(result.sources.map((source) => source.method))
+    const hasPhoto = methods.has('photo_polyline')
+    const hasPointCloud = methods.has('three_d_point_cloud')
+    const noLowConfidence = result.sources.every((source) => source.confidence >= 0.5)
 
-    const hasAtLeastTwo = xv.sources.length >= 2
-    const allAgree = xv.tier === 'high'
-    const noLowConf = xv.sources.every(s => s.confidence >= 0.5)
-
-    if (!hasAtLeastTwo) {
+    if (methods.size < 2) {
       fieldStatuses.push({ field, verified: false, reason: 'Fewer than two independent measurement sources.' })
-    } else if (!allAgree) {
-      fieldStatuses.push({ field, verified: false, reason: xv.warning ?? 'Sources do not agree within 3%.' })
-    } else if (!noLowConf) {
+    } else if (!hasPhoto || !hasPointCloud) {
+      fieldStatuses.push({ field, verified: false, reason: 'Verified Score requires both photo and point-cloud sources.' })
+    } else if (result.tier !== 'high') {
+      fieldStatuses.push({ field, verified: false, reason: result.warning ?? 'Sources do not agree within 3%.' })
+    } else if (!noLowConfidence) {
       fieldStatuses.push({ field, verified: false, reason: 'At least one source has unacceptably low confidence.' })
     } else {
-      fieldStatuses.push({ field, verified: true, reason: 'Two+ sources agree within 3%.' })
+      fieldStatuses.push({ field, verified: true, reason: 'Photo and point-cloud sources agree within 3%.' })
     }
   }
 
-  // 3. Any unresolved warnings prevent verification
-  const hasUnresolvedWarnings = session.measurements.some(m => m.warnings.length > 0)
-  if (hasUnresolvedWarnings) {
+  if (session.measurements.some((measurement) => measurement.warnings.length > 0)) {
     reasons.push('Session has unresolved measurement warnings.')
   }
 
-  const allFieldsVerified = fieldStatuses.every(f => f.verified)
-  const noCalIssues = reasons.length === 0
-
-  const verified = allFieldsVerified && noCalIssues && !hasUnresolvedWarnings
+  const allFieldsVerified = fieldStatuses.every((status) => status.verified)
+  const verified = reasons.length === 0 && allFieldsVerified
 
   return { verified, reasons, fieldStatuses }
 }

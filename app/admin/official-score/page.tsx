@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -66,7 +66,7 @@ function nullableCell(val: number | null) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function OfficialScorePage() {
+function OfficialScoreClient() {
   const searchParams = useSearchParams()
   const buckId = searchParams.get('buck_id') ?? searchParams.get('buckId') ?? ''
 
@@ -423,5 +423,13 @@ export default function OfficialScorePage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function OfficialScorePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading official score...</div>}>
+      <OfficialScoreClient />
+    </Suspense>
   )
 }

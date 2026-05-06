@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, Circle, AlertCircle, Crosshair, Trash2 } from 'lucide-react'
+import { CheckCircle2, Circle, Crosshair, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -33,7 +33,6 @@ export function FieldList({ phase }: FieldListProps) {
     measurements2D, measurements3D,
     clearField2D, clearField3D,
     finalizeField2D, finalizeField3D,
-    mode, setMode,
   } = useMeasureStore()
 
   const getMeasure = (id: FieldId) =>

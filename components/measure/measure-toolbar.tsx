@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useMeasureStore, type PhotoFilter, type RenderMode } from './measure-store'
 
 const PHOTO_FILTERS: { id: PhotoFilter; label: string }[] = [
@@ -51,12 +51,14 @@ function ToggleBtn({
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
 
 export function MeasureToolbar() {
+  const [unitsPerInchInput, setUnitsPerInchInput] = useState('1')
   const {
     phase,
     mode, setMode,
     calibration, finalizeCalibration, resetCalibration, setCalibrationInches,
     photoFilter, setPhotoFilter,
     renderMode, setRenderMode,
+    calibration3D, setCalibration3D,
     setPhotoDataUrl,
     stageScale, stagePos, setStageViewport,
     activeField,
@@ -206,6 +208,36 @@ export function MeasureToolbar() {
                 {m.label}
               </ToggleBtn>
             ))}
+          </div>
+          <div className="w-px h-4 bg-white/10" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs" style={{ color: 'rgba(200,169,110,0.55)' }}>3D units/in</span>
+            <input
+              type="number"
+              value={unitsPerInchInput}
+              min={0.000001}
+              step={0.001}
+              onChange={e => setUnitsPerInchInput(e.target.value)}
+              className="w-20 px-1.5 py-0.5 rounded text-xs font-mono text-center"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#e8d8b8',
+              }}
+              title="Model units per inch from a physical reference"
+            />
+            <button
+              onClick={() => setCalibration3D(Number(unitsPerInchInput), 'physical_reference')}
+              className="px-2 py-0.5 rounded text-xs font-medium"
+              style={{ background: '#4fc36e', color: '#0d0a06' }}
+            >
+              Set 3D Scale
+            </button>
+            {calibration3D.finalized && (
+              <span className="text-xs font-mono" style={{ color: '#4fc36e' }}>
+                {calibration3D.unitsPerInch.toFixed(4)} units/in
+              </span>
+            )}
           </div>
         </>
       )}
