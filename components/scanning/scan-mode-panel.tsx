@@ -11,7 +11,6 @@ import {
   analyseFrame,
   detectCoverageZones,
   buildCoverageProgress,
-  shouldAutoCaptureFrame,
   framesToLegacySlots,
   buildGuidanceState,
 } from '@/lib/capture/scan-session'
@@ -28,6 +27,15 @@ const ZONE_ARCS: Record<string, { startDeg: number; spanDeg: number }> = {
   left_antler:      { startDeg:   0, spanDeg: 90 },
   right_antler:     { startDeg:  90, spanDeg: 90 },
   beam_tine_detail: { startDeg: 180, spanDeg: 90 },
+}
+
+const REQUIRED_SCAN_ANGLES = ['front', 'left', 'right'] as const satisfies readonly ScanAngle[]
+
+const ANGLE_TO_ZONE: Record<ScanAngle, keyof CoverageProgress['zones']> = {
+  front:  'full_rack',
+  left:   'left_antler',
+  right:  'right_antler',
+  detail: 'beam_tine_detail',
 }
 
 // ─── SVG arc helpers ───────────────────────────────────────────────────────────
@@ -118,9 +126,7 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   const videoRef    = useRef<HTMLVideoElement>(null)
   const canvasRef   = useRef<HTMLCanvasElement>(null)
   const streamRef   = useRef<MediaStream | null>(null)
-  const rafRef      = useRef<number | null>(null)
-  const stableRef   = useRef(0)
-  const lastAutoRef = useRef(0)
+  const rafRef        = useRef<number | null>(null)
   const lastUpdateRef = useRef(0)
   // Tracks whether the component is still mounted; prevents AbortError retry
   // noise on normal teardown and races between getUserMedia and unmount.
@@ -202,12 +208,13 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facingMode])
 
-  // ── Analysis loop @ 4 fps ────────────────────────────────────────────────────
+  // ── Analysis loop — optical quality only, no auto-capture ───────────────────
 
   useEffect(() => {
     if (!isStreaming) return
+
     let lastTick = 0
-    const TICK_MS = 250
+    const TICK_MS = 350
 
     const loop = (rafTime: number) => {
       rafRef.current = requestAnimationFrame(loop)
@@ -216,74 +223,47 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
 
       const video = videoRef.current
       const canvas = canvasRef.current
-      if (!video || !canvas || video.readyState < 2) return
+      if (!video || !canvas || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return
 
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')
+
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) return
+
       ctx.drawImage(video, 0, 0)
 
       const result = analyseFrame(canvas)
-      
-      // Throttle validation state updates to prevent CPU overload
       const now = Date.now()
-      if (now - lastUpdateRef.current > 120) {
+
+      if (now - lastUpdateRef.current > 160) {
         setValidation(result)
         lastUpdateRef.current = now
       }
-      
-      // Reject bad frames early
-      if (!result.hasRack || result.rejectionReason) {
-        return
-      }
-      const newZones = detectCoverageZones(result, angleHint)
-
-      setFrames(prev => {
-        const currentProgress = buildCoverageProgress(prev)
-        const now2 = Date.now()
-        if (result.rejectionReason || !result.hasDeer) {
-          stableRef.current = 0
-          return prev
-        }
-        stableRef.current++
-        if (
-          shouldAutoCaptureFrame(result, newZones, currentProgress, stableRef.current) &&
-          now2 - lastAutoRef.current > 2000 &&
-          prev.length < 8
-        ) {
-          lastAutoRef.current = now2
-          stableRef.current = 0
-          setTimeout(() => captureFrameAsync(angleHint, newZones, result), 0)
-        }
-        return prev
-      })
     }
 
     rafRef.current = requestAnimationFrame(loop)
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStreaming, angleHint])
+
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [isStreaming])
 
   useEffect(() => {
     setProgress(buildCoverageProgress(frames))
   }, [frames])
 
-  // Auto-advance angle hint when zone is covered
+  // Auto-advance angle hint only after a view is manually captured
   useEffect(() => {
-    let next = angleHint
-    if (progress.zones.full_rack && angleHint === 'front') next = 'left'
-    else if (progress.zones.left_antler && angleHint === 'left') next = 'right'
-    else if (progress.zones.right_antler && angleHint === 'right') next = 'complete'
-    if (next !== angleHint) {
-      setAngleHint(next as ScanAngle)
+    if (angleHint === 'front' && progress.zones.full_rack && !progress.zones.left_antler) {
+      setAngleHint('left')
+    } else if (angleHint === 'left' && progress.zones.left_antler && !progress.zones.right_antler) {
+      setAngleHint('right')
     }
-  }, [
-    progress.zones.full_rack,
-    progress.zones.left_antler,
-    progress.zones.right_antler,
-    angleHint
-  ])
+  }, [angleHint, progress.zones.full_rack, progress.zones.left_antler, progress.zones.right_antler])
 
   // ── Capture helpers ──────────────────────────────────────────────────────────
 
@@ -293,20 +273,29 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
     val: SubjectValidation,
   ) => {
     const video = videoRef.current
-    if (!video) return
-    const cap = document.createElement('canvas')
-    cap.width = video.videoWidth
-    cap.height = video.videoHeight
-    const ctx = cap.getContext('2d')
+
+    if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      toast.error('Camera is not ready yet')
+      return
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+
+    const ctx = canvas.getContext('2d')
     if (!ctx) return
+
     ctx.drawImage(video, 0, 0)
 
-    cap.toBlob(blob => {
+    canvas.toBlob((blob) => {
       if (!blob) return
+
       const file = new File([blob], `scan-${angle}-${Date.now()}.jpg`, { type: 'image/jpeg' })
       const previewUrl = URL.createObjectURL(blob)
+
       const frame: SmartScanFrame = {
-        id: crypto.randomUUID(),
+        id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `scan-${angle}-${Date.now()}`,
         file,
         previewUrl,
         capturedAt: new Date().toISOString(),
@@ -314,30 +303,42 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
         validation: val,
         angle,
       }
-      setFrames(prev => {
-        const existing = prev.find(f => f.angle === angle)
-        if (existing && existing.validation.confidence >= val.confidence) return prev
-        return [...prev.filter(f => f.angle !== angle), frame]
+
+      setFrames((prev) => {
+        const replaced = prev.find((existing) => existing.angle === angle)
+        if (replaced) URL.revokeObjectURL(replaced.previewUrl)
+        return [...prev.filter((existing) => existing.angle !== angle), frame]
       })
+
       setFlashVisible(true)
-      setTimeout(() => setFlashVisible(false), 140)
-      if (navigator.vibrate) navigator.vibrate(40)
-    }, 'image/jpeg', 0.88)
+      window.setTimeout(() => setFlashVisible(false), 140)
+
+      if (navigator.vibrate) navigator.vibrate(35)
+    }, 'image/jpeg', 0.9)
   }, [])
 
   const handleManualCapture = useCallback(() => {
     const val: SubjectValidation = validation ?? {
-      hasDeer: true, hasRack: true, isSharp: true, isClipped: false,
-      brightnessOk: true, confidence: 0.7, rejectionReason: null,
+      hasDeer: false,
+      hasRack: false,
+      isSharp: true,
+      isClipped: false,
+      brightnessOk: true,
+      confidence: 0.55,
+      rejectionReason: null,
     }
+
+    if (val.rejectionReason) {
+      toast.error(val.rejectionReason)
+      return
+    }
+
     const zones = detectCoverageZones(val, angleHint)
-    stableRef.current = 999
     captureFrameAsync(angleHint, zones, val)
   }, [validation, angleHint, captureFrameAsync])
 
   const handleRemoveFrame = useCallback((id: string) => {
     setFrames(prev => prev.filter(f => f.id !== id))
-    stableRef.current = 0
   }, [])
 
   const handleFlipCamera = useCallback(() => {
@@ -348,25 +349,39 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
   const handleReset = useCallback(() => {
     frames.forEach(f => URL.revokeObjectURL(f.previewUrl))
     setFrames([])
-    stableRef.current = 0
-    lastAutoRef.current = 0
     setAngleHint('front')
   }, [frames])
 
   const handleFinalize = useCallback(() => {
     if (frames.length === 0) {
-      toast.error('Capture at least one view to continue')
+      toast.error('Capture at least one front view to continue')
       return
     }
+
+    if (!progress.zones.full_rack) {
+      toast.error('Capture the front full-rack view first')
+      return
+    }
+
     const { files, angles } = framesToLegacySlots(frames)
+
     if (files.length === 0) {
       toast.error('No valid frames captured')
       return
     }
-    onFilesReady(files, angles)
-  }, [frames, onFilesReady])
 
-  const satisfied = progress.satisfied || frames.length >= 3
+    if (!progress.satisfied) {
+      toast.warning('Side views are missing. You can score, but confidence may be lower.')
+    }
+
+    onFilesReady(files, angles)
+  }, [frames, onFilesReady, progress.satisfied, progress.zones.full_rack])
+
+  const capturedRequiredCount = REQUIRED_SCAN_ANGLES.filter(
+    (angle) => progress.zones[ANGLE_TO_ZONE[angle]],
+  ).length
+
+  const satisfied = progress.satisfied
   const borderColor =
     guidance.status === 'valid'   ? 'border-primary/70' :
     guidance.status === 'invalid' ? 'border-destructive/60' :
@@ -427,10 +442,10 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
             <div className="relative" style={{ width: 180, height: 180 }}>
               <CoverageRing progress={progress} size={180} />
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-                <span className="text-2xl font-bold text-white tabular-nums">
-                  {progress.percent}%
+                <span className="font-mono text-2xl font-bold tabular-nums text-white">
+                  {capturedRequiredCount}/3
                 </span>
-                <span className="text-[11px] text-white/60 font-medium">coverage</span>
+                <span className="text-[11px] font-medium text-white/60">views captured</span>
               </div>
             </div>
             <div className="flex gap-3 mt-3">
@@ -491,16 +506,16 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
         )}
       </div>
 
+      {/* Honesty disclaimer */}
+      <div className="rounded-xl border border-border/60 bg-card/60 p-3 text-xs text-muted-foreground">
+        This camera mode does <span className="font-semibold text-foreground">not</span> auto-capture or fake rack detection. It only checks basic photo quality here; deer/rack validation happens in the scoring AI after upload.
+      </div>
+
       {/* Angle hint selector */}
       {!satisfied && (
         <div className="flex gap-1.5">
           {(['front', 'left', 'right'] as ScanAngle[]).map(angle => {
-            const zoneMap: Record<ScanAngle, keyof typeof progress.zones> = {
-              front: 'full_rack',
-              left: 'left_antler',
-              right: 'right_antler',
-            }
-            const done   = progress.zones[zoneMap[angle]]
+            const done   = progress.zones[ANGLE_TO_ZONE[angle]]
             const active = angleHint === angle
             return (
               <button
