@@ -510,4 +510,4 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
   )
 }
 
-export { LOCATION_TYPE_COLORS, LOCATION_TYPE_LABELS }
+export { LOCATION_TYPE_COLORS, LOCATION_TYPE_LABELS }  
