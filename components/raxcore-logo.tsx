@@ -5,15 +5,15 @@ interface RaxcoreLogoProps {
   className?: string
 }
 
-export function RaxcoreLogo({ size = 40, className }: RaxcoreLogoProps) {
-  // Scale factor based on viewBox 1000x500, targeting the given height
-  const aspectRatio = 1000 / 500
+export function RaxcoreLogo({ size = 36, className }: RaxcoreLogoProps) {
+  // Scale factor based on viewBox 800x400, targeting the given height
+  const aspectRatio = 800 / 400
   const height = size
   const width = height * aspectRatio
 
   return (
     <svg
-      viewBox="0 0 1000 500"
+      viewBox="0 0 800 400"
       xmlns="http://www.w3.org/2000/svg"
       width={width}
       height={height}
@@ -21,122 +21,99 @@ export function RaxcoreLogo({ size = 40, className }: RaxcoreLogoProps) {
       aria-label="RAXcore Antler Analytics"
     >
       <defs>
-        {/* Metallic gradients */}
-        <linearGradient id="copperGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#b87333" stopOpacity="1" />
-          <stop offset="50%" stopColor="#dfaf8d" stopOpacity="1" />
-          <stop offset="100%" stopColor="#8b4513" stopOpacity="1" />
+        <linearGradient id="copperGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#d4a84b" />
+          <stop offset="50%" stopColor="#b87248" />
+          <stop offset="100%" stopColor="#8b5a2b" />
         </linearGradient>
-
         <linearGradient id="frameGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#3a3a3a" stopOpacity="1" />
-          <stop offset="50%" stopColor="#222222" stopOpacity="1" />
-          <stop offset="100%" stopColor="#1a1a1a" stopOpacity="1" />
+          <stop offset="0%" stopColor="#2a2a2a" />
+          <stop offset="100%" stopColor="#1a1a1a" />
         </linearGradient>
-
-        {/* Depth & glow filters */}
-        <filter id="depth" x="-20%" y="-20%" width="140%" height="140%">
-          <feOffset result="offOut" in="SourceAlpha" dx="0" dy="4" />
-          <feGaussianBlur result="blurOut" in="offOut" stdDeviation="5" />
-          <feBlend in="SourceGraphic" in2="blurOut" mode="normal" />
-        </filter>
-
-        <filter id="dataGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="1.2" result="coloredBlur"/>
-          <feMerge>
-            <feMergeNode in="coloredBlur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
       </defs>
 
-      {/* Layer 1: Background & 3D Frame */}
-      <rect width="1000" height="500" fill="#121215" />
-      
-      <path 
-        d="M 80,60 H 400 L 420,80 H 580 L 600,60 H 920 A 20,20 0 0 1 940,80 V 180 L 920,200 V 280 L 940,300 V 400 A 20,20 0 0 1 920,420 H 600 L 580,400 H 420 L 400,420 H 80 A 20,20 0 0 1 60,400 V 300 L 80,280 V 200 L 60,180 V 80 A 20,20 0 0 1 80,60 Z" 
-        fill="url(#frameGradient)" 
-        stroke="#444" 
-        strokeWidth="2" 
-        filter="url(#depth)" 
-      />
-
-      {/* Layer 2: Corner Hardware */}
-      <g fill="#1a1a1a" stroke="#555" strokeWidth="1.5">
-        <circle cx="95" cy="95" r="12" />
-        <circle cx="905" cy="95" r="12" />
-        <circle cx="95" cy="385" r="12" />
-        <circle cx="905" cy="385" r="12" />
-        <circle cx="95" cy="95" r="5" fill="#000" />
-        <circle cx="905" cy="95" r="5" fill="#000" />
-        <circle cx="95" cy="385" r="5" fill="#000" />
-        <circle cx="905" cy="385" r="5" fill="#000" />
+      {/* Frame background */}
+      <g id="frame">
+        <rect
+          x="50"
+          y="50"
+          width="700"
+          height="300"
+          rx="12"
+          fill="url(#frameGradient)"
+          stroke="#333"
+          strokeWidth="2"
+        />
       </g>
 
-      {/* Layer 3: Branding */}
-      <g fontFamily="Arial, sans-serif" textAnchor="middle" fontWeight="bold">
-        <text x="500" y="140" fontSize="60" letterSpacing="3">
-          <tspan fill="url(#copperGradient)">RAX</tspan>
-          <tspan fill="#a0a0a0">CORE</tspan>
-        </text>
-        <text x="500" y="180" fontSize="28" fill="#888" fontWeight="normal" letterSpacing="1.5">
-          Antler Analytics
-        </text>
+      {/* Circuit traces */}
+      <g id="traces" stroke="#4a4a4a" strokeWidth="1.5" fill="none">
+        {/* Left side traces */}
+        <path d="M70,100 L120,100 L140,120 L140,180" />
+        <path d="M70,150 L100,150 L120,170 L120,280" />
+        <path d="M70,200 L90,200 L90,250 L130,250" />
+        
+        {/* Right side traces */}
+        <path d="M730,100 L680,100 L660,120 L660,180" />
+        <path d="M730,150 L700,150 L680,170 L680,280" />
+        <path d="M730,200 L710,200 L710,250 L670,250" />
+        
+        {/* Bottom traces */}
+        <path d="M200,330 L200,300 L280,300" />
+        <path d="M600,330 L600,300 L520,300" />
+        
+        {/* Connection nodes */}
+        <circle cx="140" cy="180" r="4" fill="#4a4a4a" />
+        <circle cx="120" cy="280" r="4" fill="#4a4a4a" />
+        <circle cx="130" cy="250" r="4" fill="#4a4a4a" />
+        <circle cx="660" cy="180" r="4" fill="#4a4a4a" />
+        <circle cx="680" cy="280" r="4" fill="#4a4a4a" />
+        <circle cx="670" cy="250" r="4" fill="#4a4a4a" />
       </g>
 
-      {/* Layer 4: Analytical Scale */}
-      <g stroke="#b87333" strokeWidth="1.5" transform="translate(0, 50)">
-        <line x1="400" y1="350" x2="600" y2="350" />
-        <line x1="400" y1="350" x2="400" y2="365" />
-        <line x1="420" y1="350" x2="420" y2="360" />
-        <line x1="440" y1="350" x2="440" y2="365" />
-        <line x1="460" y1="350" x2="460" y2="360" />
-        <line x1="480" y1="350" x2="480" y2="365" />
-        <line x1="500" y1="350" x2="500" y2="375" strokeWidth="2.5" />
-        <line x1="520" y1="350" x2="520" y2="365" />
-        <line x1="540" y1="350" x2="540" y2="360" />
-        <line x1="560" y1="350" x2="560" y2="365" />
-        <line x1="580" y1="350" x2="580" y2="360" />
-        <line x1="600" y1="350" x2="600" y2="365" />
+      {/* Antler wireframe (simplified) */}
+      <g id="antler-wireframe" stroke="#666" strokeWidth="0.8" fill="none" opacity="0.5">
+        {/* Left antler outline */}
+        <path d="M300,280 Q280,220 260,180 Q250,160 270,140 Q290,120 320,130" />
+        <path d="M280,200 Q260,180 250,150" />
+        <path d="M290,170 Q275,150 280,130" />
+        
+        {/* Right antler outline */}
+        <path d="M500,280 Q520,220 540,180 Q550,160 530,140 Q510,120 480,130" />
+        <path d="M520,200 Q540,180 550,150" />
+        <path d="M510,170 Q525,150 520,130" />
+        
+        {/* Center beam */}
+        <path d="M360,280 L360,250 Q380,230 400,230 Q420,230 440,250 L440,280" />
       </g>
 
-      {/* Layer 5: Circuitry Traces */}
-      <g stroke="#c0c0c0" strokeWidth="1.2" fill="none" opacity="0.6" filter="url(#dataGlow)">
-        <g id="left-circ">
-          <path d="M 120,240 H 280 L 310,270" />
-          <path d="M 180,240 L 150,210 V 170 H 120" />
-          <path d="M 160,240 L 190,270 V 310 H 220" />
-        </g>
-        <g id="right-circ">
-          <path d="M 880,240 H 720 L 690,270" />
-          <path d="M 820,240 L 850,210 V 170 H 880" />
-          <path d="M 840,240 L 810,270 V 310 H 780" />
-        </g>
-      </g>
+      {/* Main text */}
+      <text
+        x="400"
+        y="200"
+        textAnchor="middle"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontSize="72"
+        fontWeight="700"
+        letterSpacing="8"
+      >
+        <tspan fill="url(#copperGradient)">RAX</tspan>
+        <tspan fill="#999">CORE</tspan>
+      </text>
 
-      {/* Layer 6: Antler Wireframe Mesh */}
-      <g filter="url(#dataGlow)" transform="translate(500, 340)">
-        <g stroke="#ffffff" strokeWidth="0.6" fill="none" opacity="0.7">
-          <g id="single-antler-final">
-            <path d="M -10,10 Q -60,-10 -90,-80 Q -100,-120 -110,-180 Q -115,-220 -120,-240"/>
-            <path d="M -20,15 Q -70,-5 -95,-80 Q -105,-120 -115,-180 Q -120,-220 -125,-240"/>
-            <path d="M -85,-70 Q -60,-80 -50,-100 Q -40,-130 -30,-150"/>
-            <path d="M -90,-100 Q -80,-110 -70,-130 Q -60,-150 -50,-170"/>
-            <path d="M -70,-50 Q -50,-40 -40,-60"/>
-            <path d="M -15,10 Q -40,-50 -70,-50 M -30,15 Q -60,-70 -85,-70"/>
-          </g>
-          {/* Mirrored right antler */}
-          <g transform="scale(-1, 1)">
-            <path d="M -10,10 Q -60,-10 -90,-80 Q -100,-120 -110,-180 Q -115,-220 -120,-240"/>
-            <path d="M -20,15 Q -70,-5 -95,-80 Q -105,-120 -115,-180 Q -120,-220 -125,-240"/>
-            <path d="M -85,-70 Q -60,-80 -50,-100 Q -40,-130 -30,-150"/>
-            <path d="M -90,-100 Q -80,-110 -70,-130 Q -60,-150 -50,-170"/>
-            <path d="M -70,-50 Q -50,-40 -40,-60"/>
-            <path d="M -15,10 Q -40,-50 -70,-50 M -30,15 Q -60,-70 -85,-70"/>
-          </g>
-          <path d="M -10,10 Q 0,25 10,10" strokeWidth="1.5"/>
-        </g>
-      </g>
+      {/* Tagline */}
+      <text
+        x="400"
+        y="245"
+        textAnchor="middle"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontSize="14"
+        fontWeight="500"
+        letterSpacing="4"
+        fill="#666"
+      >
+        ANTLER ANALYTICS
+      </text>
     </svg>
   )
 }

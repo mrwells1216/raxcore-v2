@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { Camera, Upload, Target, TrendingUp, Shield, Zap } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
-import { RaxcoreLogo } from '@/components/raxcore-logo'
 
 const features = [
   {
@@ -113,8 +112,26 @@ export default function HomePage() {
                 AI-Powered Antler Scoring
               </div>
 
-              {/* Logo */}
-              <RaxcoreLogo size={100} />
+              {/* Heading */}
+              <div className="space-y-2">
+                <h1
+                  className="text-4xl md:text-5xl font-bold tracking-wider text-balance"
+                  style={{
+                    background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 60%, var(--bronze-dark) 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    letterSpacing: '0.10em',
+                  }}
+                >
+                  RAXCORE
+                </h1>
+                <p
+                  className="text-xs font-mono tracking-[0.35em] uppercase"
+                  style={{ color: 'var(--muted-foreground)' }}
+                >
+                  Antler Analytics
+                </p>
+              </div>
 
               <p className="text-sm leading-relaxed max-w-md" style={{ color: 'oklch(0.78 0.010 55)' }}>
                 Get estimated Boone &amp; Crockett style scores from your photos using anatomical
