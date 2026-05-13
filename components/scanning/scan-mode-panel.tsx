@@ -203,6 +203,7 @@ export function ScanModePanel({ onFilesReady, onFallbackToUpload }: ScanModePane
     return () => {
       isActiveRef.current = false
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+      if (videoRef.current) videoRef.current.srcObject = null
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -120,6 +120,15 @@ export async function POST(request: Request) {
   const referenceSizeUnitRaw = formData.get('reference_size_unit') as string | null
   const referencePlacementRaw = formData.get('reference_placement') as string | null
   const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
+  const referenceObjectRaw = formData.get('reference_object') as string | null
+  let referenceObject: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null = null
+  if (referenceObjectRaw) {
+    try {
+      referenceObject = JSON.parse(referenceObjectRaw)
+    } catch {
+      // ignore parse errors — ring reference is optional
+    }
+  }
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
   const userId = formData.get('user_id') as string | null
@@ -154,8 +163,8 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!state || !rackType) {
-      return NextResponse.json({ error: 'State and rack type are required' }, { status: 400 })
+    if (!rackType) {
+      return NextResponse.json({ error: 'Rack type is required' }, { status: 400 })
     }
 
     const harvestYear = harvestYearRaw ? Number(harvestYearRaw) : null
@@ -281,7 +290,7 @@ export async function POST(request: Request) {
 
   // Create buck record in Supabase (pass all fields from wizard)
   const buck = await createBuck({
-    state: state,
+    state: state || 'unknown',
     rackType: rackType,
     userId: userId || undefined,
     harvestMethod: harvestMethod || undefined,
@@ -484,6 +493,7 @@ export async function POST(request: Request) {
       harvestYear: Number.isFinite(harvestYear) ? harvestYear ?? undefined : undefined,
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
       precisionReferenceProfile,
+      referenceObject: referenceObject ?? undefined,
       traceId: requestId,
     })
 

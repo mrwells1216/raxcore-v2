@@ -13,10 +13,11 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { US_STATES, RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, MAIN_FRAME_OPTIONS, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
+import { RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, MAIN_FRAME_OPTIONS, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
 import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
+import { buildRingReferenceInput, ringSizeToInnerDiameterInches, normalizeRingSizeUS } from '@/lib/scoring/ring-reference'
 import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { cn } from '@/lib/utils'
 import { useState, useRef, useImperativeHandle, forwardRef } from 'react'
@@ -26,7 +27,9 @@ export interface ScoringFormHandle {
 }
 
 const formSchema = z.object({
-  state: z.string().min(1, 'State is required'),
+  state: z.string().optional().nullable(),
+  reference_object_type: z.enum(['none', 'wedding_ring']).optional().default('none'),
+  reference_object_ring_size: z.coerce.number().min(3).max(16).optional().nullable(),
   rack_type: z.enum(['typical', 'non-typical'], { required_error: 'Rack type is required' }),
   harvest_method: z.enum(['bow', 'rifle', 'muzzleloader', 'crossbow', 'other']).optional(),
   source_type: z.enum(['live_deer', 'mounted_photo', 'european_mount', 'trail_cam', 'harvest_photo', 'other']).optional(),
@@ -69,7 +72,9 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   const form = useForm<ScoringFormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      state: '',
+      state: null,
+      reference_object_type: 'none',
+      reference_object_ring_size: null,
       rack_type: 'typical',
       harvest_method: undefined,
       source_type: undefined,
@@ -94,6 +99,9 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   
   const watchRackType = form.watch('rack_type')
   const watchIrregularPoints = form.watch('irregular_points_present')
+  const watchReferenceObjectType = form.watch('reference_object_type')
+  const watchRingSize = form.watch('reference_object_ring_size')
+  const ringDiameter = watchRingSize != null ? ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchRingSize) ?? -1) : null
   
   const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
   const watchReferenceType = form.watch('reference_type')
@@ -139,35 +147,38 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
     }
   }
 
+  const handleInternalSubmit = (data: ScoringFormData) => {
+    const ringType = data.reference_object_type ?? 'none'
+    const ringPresent = ringType === 'wedding_ring'
+    const ringInput = buildRingReferenceInput({
+      present: ringPresent,
+      ringSizeUS: data.reference_object_ring_size ?? null,
+    })
+    const enrichedData: ScoringFormData = {
+      ...data,
+      reference_object: {
+        type: ringType,
+        ring: ringPresent ? {
+          present: ringInput.present,
+          ringSizeUS: ringInput.ringSizeUS,
+          innerDiameterInches: ringInput.innerDiameterInches,
+          confidence: ringInput.confidence === 'manual_confirmed' ? 'estimated' : ringInput.confidence,
+        } : null,
+      },
+    }
+    onSubmit(enrichedData)
+  }
+
   return (
     <Form {...form}>
-      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-3">
-        {/* Section: Required Info */}
-        <div className="space-y-3">
+      <form id="scoring-details-form" onSubmit={form.handleSubmit(handleInternalSubmit)} className="space-y-5 pt-4">
+        {/* Section: Rack Information */}
+        <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <MapPin className="h-3.5 w-3.5 text-primary" />
-            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Required</h3>
+            <MapPin className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Rack Information</h3>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <FormField
-              control={form.control}
-              name="state"
-              render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">State *</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="State" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {US_STATES.map((stateOption) => <SelectItem key={stateOption.value} value={stateOption.value}>{stateOption.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
+          <div>
             <FormField
               control={form.control}
               name="main_frame_points"
@@ -371,6 +382,72 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
         </div>
 
         <Separator className="my-3" />
+
+        {/* Section: Reference Object */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Ruler className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold text-foreground">Reference Object</h3>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">Is a wedding band or ring visible in the photo?</label>
+              <div className="flex gap-2 mt-2">
+                {([['none', 'No ring visible'], ['wedding_ring', 'Ring visible']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => form.setValue('reference_object_type', val, { shouldDirty: true })}
+                    className={cn(
+                      'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px]',
+                      watchReferenceObjectType === val
+                        ? 'bg-primary/15 text-primary border-primary/30'
+                        : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              A ring can help estimate scale when no ruler or tape is visible. Best results come from a ring lying flat and clearly visible near the antler.
+            </p>
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Ring reference is an estimated calibration aid only. A ruler or tape measure is still more reliable.
+            </p>
+
+            {watchReferenceObjectType === 'wedding_ring' && (
+              <div className="space-y-2 pt-1">
+                <label className="text-sm font-medium">US Ring Size</label>
+                <Input
+                  type="number"
+                  step={0.5}
+                  min={3}
+                  max={16}
+                  placeholder="e.g. 8, 9.5, 10"
+                  className="min-h-[48px]"
+                  value={watchRingSize ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? null : Number(e.target.value)
+                    form.setValue('reference_object_ring_size', val, { shouldDirty: true })
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Whole and half sizes supported (3–16)</p>
+                {watchRingSize != null && watchRingSize !== 0 && (normalizeRingSizeUS(watchRingSize) === null) && (
+                  <p className="text-xs text-destructive">Enter a US ring size between 3 and 16 (e.g. 8 or 9.5)</p>
+                )}
+                {ringDiameter !== null && (
+                  <p className="text-xs text-muted-foreground font-medium">≈ {ringDiameter} in inner diameter</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Separator />
 
         {/* Section: Irregular/Abnormal Points (Phase 54) */}
         <Collapsible defaultOpen={watchRackType === 'non-typical'}>

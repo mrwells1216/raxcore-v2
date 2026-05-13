@@ -57,7 +57,7 @@ export interface ImageAnalysisInput {
 
 export interface ScoringInput {
   images: ImageAnalysisInput[]
-  state: string
+  state?: string | null
   rackType: 'typical' | 'non-typical'
   earsFullyVisible?: boolean
   sourceType?: SourceType | string
@@ -68,6 +68,7 @@ export interface ScoringInput {
   // If not provided, uses the active calibration profile
   calibrationProfile?: CalibrationProfile | null
   precisionReferenceProfile?: PrecisionReferenceProfile | null
+  referenceObject?: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -293,13 +294,14 @@ function calculateSimilarity(
   const matchingFeatures: string[] = []
 
   // State match (exact or regional)
-  if (example.state === input.state) {
+  const inputState = input.state ?? 'unknown'
+  if (example.state === inputState) {
     score += SIMILARITY_WEIGHTS.state
-    matchingFeatures.push(`State: ${input.state}`)
+    matchingFeatures.push(`State: ${inputState}`)
   } else if (
-    (HIGH_OUTPUT_STATES.includes(input.state as typeof HIGH_OUTPUT_STATES[number]) &&
+    (HIGH_OUTPUT_STATES.includes(inputState as typeof HIGH_OUTPUT_STATES[number]) &&
       HIGH_OUTPUT_STATES.includes(example.state as typeof HIGH_OUTPUT_STATES[number])) ||
-    (LOW_OUTPUT_STATES.includes(input.state as typeof LOW_OUTPUT_STATES[number]) &&
+    (LOW_OUTPUT_STATES.includes(inputState as typeof LOW_OUTPUT_STATES[number]) &&
       LOW_OUTPUT_STATES.includes(example.state as typeof LOW_OUTPUT_STATES[number]))
   ) {
     score += SIMILARITY_WEIGHTS.state * 0.5
@@ -605,7 +607,7 @@ function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibr
   // yield different seeded base values even when all other inputs are identical.
   const angleFp = `${hasFront?'F':''}${hasLeft?'L':''}${hasRight?'R':''}${hasBack?'B':''}`
   const seed = [
-    input.state,
+    input.state ?? 'unknown',
     input.rackType,
     input.sourceType || 'na',
     input.captureDevice || 'na',
@@ -618,8 +620,8 @@ function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibr
   const framePts  = input.mainFramePoints || (isTypical ? 10 : 11)
 
   // ── State modifier (weak — should not dominate) ──────────────────────────
-  const giantStateBoost = HIGH_OUTPUT_STATES.includes(input.state as typeof HIGH_OUTPUT_STATES[number]) ? 1.0 : 0
-  const lowStatePenalty = LOW_OUTPUT_STATES.includes(input.state as typeof LOW_OUTPUT_STATES[number]) ? -1.2 : 0
+  const giantStateBoost = HIGH_OUTPUT_STATES.includes((input.state ?? 'unknown') as typeof HIGH_OUTPUT_STATES[number]) ? 1.0 : 0
+  const lowStatePenalty = LOW_OUTPUT_STATES.includes((input.state ?? 'unknown') as typeof LOW_OUTPUT_STATES[number]) ? -1.2 : 0
 
   // ── Source-type baseline shift ────────────────────────────────────────────
   // Mounted/euro = reliable geometry. Harvest photo = good. Trail cam = noisy.
@@ -741,18 +743,19 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const startTime = Date.now()
   const angles = input.images.map((img) => img.angleType)
   const angleDiversity = calculateAngleDiversity(angles)
-  const stateCalibration = getStateCalibration(input.state)
+  const stateCalibration = getStateCalibration(input.state ?? 'unknown')
 
   // Try vision scoring first (with Phase 24 runtime hardening)
   const visionResult = await scoreWithVision({
     images: input.images,
-    state: input.state,
+    state: input.state ?? 'unknown',
     rackType: input.rackType,
     earsFullyVisible: input.earsFullyVisible,
     sourceType: input.sourceType,
     captureDevice: input.captureDevice,
     mainFramePoints: input.mainFramePoints,
     precisionReference: input.precisionReferenceProfile,
+    referenceObject: input.referenceObject ?? undefined,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 
@@ -988,7 +991,7 @@ async function buildVisionScoringOutput(
   // Phase 42: Use geometry-refined measurements as input (includes any critical-issue refinements)
   const measurementCorrectionResult = await computeMeasurementLevelCorrection(
     {
-      state: input.state,
+      state: input.state ?? 'unknown',
       rackType: input.rackType,
       mainFramePoints: input.mainFramePoints,
       sourceType: input.sourceType,
@@ -1042,7 +1045,7 @@ async function buildVisionScoringOutput(
     imageCount: input.images.length,
     angleDiversity,
     rackType: input.rackType,
-    state: input.state,
+    state: input.state ?? 'unknown',
     earsFullyVisible: input.earsFullyVisible,
     captureDevice: input.captureDevice,
     referenceVisibility: derivedReferenceVisibility,
@@ -1063,7 +1066,7 @@ async function buildVisionScoringOutput(
   // This provides supplemental correction on top of measurement-level + segment corrections
   const learningResult = await computeLearningCorrection(
     {
-      state: input.state,
+      state: input.state ?? 'unknown',
       rackType: input.rackType,
       mainFramePoints: input.mainFramePoints,
       sourceType: input.sourceType,
@@ -1124,7 +1127,7 @@ async function buildVisionScoringOutput(
     landmarkConsistencyResult: consistencyResult,
     measurementCorrectionResult,
     visionConfidence: baseVisionConfidence,
-    state: input.state,
+    state: input.state ?? 'unknown',
     rackType: input.rackType,
     mainFramePoints: input.mainFramePoints,
     sourceType: input.sourceType,
@@ -1142,7 +1145,7 @@ async function buildVisionScoringOutput(
     visionReportedEarLength: visionOutput.landmarks.ear_base_to_tip_estimated,
     angles: input.images.map(img => img.angleType),
     imageCount: input.images.length,
-    state: input.state,
+    state: input.state ?? 'unknown',
     rackType: input.rackType,
     sourceType: input.sourceType,
     earsFullyVisible: input.earsFullyVisible,
@@ -1314,6 +1317,23 @@ async function buildVisionScoringOutput(
     explanations.push(...referenceConsensusResult.explanation)
   }
 
+  // Ring reference confidence note
+  if (input.referenceObject?.ring?.present) {
+    const ring = input.referenceObject.ring
+    if (ring.innerDiameterInches && ring.confidence === 'estimated') {
+      explanations.push(
+        `Ring reference provided: US size ${ring.ringSizeUS ?? 'unknown'}, ` +
+        `approx. ${ring.innerDiameterInches} in inner diameter. ` +
+        `Used only as an estimated reference if clearly visible. ` +
+        `Ruler or tape calibration is recommended for verified scoring.`
+      )
+    } else if (!ring.innerDiameterInches) {
+      explanations.push(
+        'Ring reference indicated but ring size not specified — not used for scale estimation.'
+      )
+    }
+  }
+
   // Build scaling references
   const scalingReferencesUsed: string[] = [...visionOutput.anatomical_references_used]
   if (input.mainFramePoints) {
@@ -1333,7 +1353,7 @@ async function buildVisionScoringOutput(
       `Consensus: ${referenceConsensusResult.dominantReferences.map(r => r.replace(/_/g, ' ')).join(', ')}`
     )
   }
-  scalingReferencesUsed.push(`State calibration (${input.state})`)
+  scalingReferencesUsed.push(`State calibration (${input.state ?? 'unknown'})`)
 
   // Convert to simple learning summary for backward compatibility
   const simpleSummary = toSimpleLearningSummary(learningResult.summary)
@@ -1590,7 +1610,7 @@ function buildHeuristicScoringOutput(
   if (input.mainFramePoints) scalingReferencesUsed.push(`Main frame hint (${input.mainFramePoints}-point frame)`)
   if (input.captureDevice) scalingReferencesUsed.push(`Capture context (${String(input.captureDevice).replaceAll('_', ' ')})`)
   scalingReferencesUsed.push(`View coverage (${viewCount} angle${viewCount !== 1 ? 's' : ''}: ${angles.join(', ')})`)
-  scalingReferencesUsed.push(`State guardrail (${input.state})`)
+  scalingReferencesUsed.push(`State guardrail (${input.state ?? 'unknown'})`)
 
   return {
     predictedGross: gross,
