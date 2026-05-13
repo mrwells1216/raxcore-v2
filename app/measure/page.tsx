@@ -1,4 +1,5 @@
 import { Metadata } from 'next'
+import { AppHeader } from '@/components/app-header'
 import { MeasureClient } from './measure-client'
 
 export const metadata: Metadata = {
@@ -7,5 +8,10 @@ export const metadata: Metadata = {
 }
 
 export default function MeasurePage() {
-  return <MeasureClient />
+  return (
+    <div className="flex flex-col bg-background" style={{ minHeight: '100dvh' }}>
+      <AppHeader />
+      <MeasureClient />
+    </div>
+  )
 }
