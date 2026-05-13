@@ -75,7 +75,7 @@ export function AdminSidebar() {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
         <Link href="/admin" className="flex items-center">
-          <RaxcoreLogo size={32} />
+          <RaxcoreLogo size={44} />
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -98,7 +98,7 @@ export function AdminSidebar() {
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
             <Link href="/admin" className="flex items-center">
-              <RaxcoreLogo size={34} />
+              <RaxcoreLogo size={44} />
             </Link>
             <Button 
               variant="ghost" 

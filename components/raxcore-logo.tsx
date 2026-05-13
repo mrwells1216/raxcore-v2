@@ -5,7 +5,7 @@ interface RaxcoreLogoProps {
   className?: string
 }
 
-export function RaxcoreLogo({ size = 36, className }: RaxcoreLogoProps) {
+export function RaxcoreLogo({ size = 48, className }: RaxcoreLogoProps) {
   // Scale factor based on viewBox 500x200, targeting the given height
   const aspectRatio = 500 / 200
   const height = size
