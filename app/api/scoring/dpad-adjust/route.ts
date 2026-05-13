@@ -9,8 +9,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
-import { 
-  extractAdjustablePoints, 
+import {
+  extractAdjustablePoints,
   recalculateMeasurement,
   estimateScoreDelta,
   generateTrainingRecords,
@@ -20,6 +20,7 @@ import {
   type AdjustablePoint,
 } from '@/lib/scoring/dpad-adjustment'
 import type { DetailedLandmarks, Measurements } from '@/lib/types'
+import { recordCorrectionEvent } from '@/lib/training/correction-events'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET - Fetch adjustable points for a prediction
@@ -377,6 +378,17 @@ async function handleConfirm(
         console.error('[dpad-adjust] Training record insert error:', error)
       }
     })
+
+  // Also write to correction_events for unified flywheel tracking (non-blocking)
+  recordCorrectionEvent({
+    buckId,
+    predictionId,
+    userId: userId ?? null,
+    correctionSource: 'dpad',
+    fieldKey: adjustment.measurementKey,
+    aiValue: recalcResult.originalValue ?? null,
+    userValue: recalcResult.newValue ?? null,
+  }).catch(err => console.warn('[dpad-adjust] correction_events insert failed (non-blocking)', err))
 
   return NextResponse.json({
     success: true,

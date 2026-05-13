@@ -16,6 +16,7 @@ import type {
   RuntimeMetadataInfo
 } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES, ANATOMICAL_REFERENCES, CONFIDENCE_THRESHOLDS } from '@/lib/constants'
+import { loadFieldBiases, applyBiasCorrections } from './prompt-bias-correction'
 import { createClient } from '@/lib/supabase/server'
 import { 
   scoreWithVision, 
@@ -909,9 +910,13 @@ async function buildVisionScoringOutput(
   const normalizationResult = normalizeMeasurements(rawMeasurements)
   const normalizedMeasurements = normalizationResult.normalized
 
+  // STAGE 2.5: Apply learned per-field bias corrections from correction_events
+  const fieldBiases = await loadFieldBiases().catch(() => ({} as Record<string, number>))
+  const { corrected: biasCorrectedMeasurements } = applyBiasCorrections(normalizedMeasurements, fieldBiases)
+
   // STAGE 3: Landmark consistency - validate anatomical ratios
   const consistencyResult = checkLandmarkConsistency(
-    normalizedMeasurements,
+    biasCorrectedMeasurements,
     rawLandmarks,
     visionOutput.landmarks.ear_base_to_tip_estimated
   )

@@ -54,13 +54,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const buckName = formData.get('buck_name') as string | null;
+    const yearTakenRaw = formData.get('year_taken') as string | null;
+    const state = formData.get('state') as string | null;
+    const county = formData.get('county') as string | null;
+    const hunterName = formData.get('hunter_name') as string | null;
+    const yearTaken = yearTakenRaw ? parseInt(yearTakenRaw, 10) : null;
+
     // Insert official score sheet
     const { data: sheet, error: sheetError } = await supabase
       .from('official_score_sheets')
       .insert({
         user_id: user.id,
         scoring_system: scoringSystem,
-        score_data: scoreData
+        score_data: scoreData,
+        ...(buckName ? { buck_name: buckName } : {}),
+        ...(yearTaken && isFinite(yearTaken) ? { year_taken: yearTaken } : {}),
+        ...(state ? { state } : {}),
+        ...(county ? { county } : {}),
+        ...(hunterName ? { hunter_name: hunterName } : {}),
       })
       .select()
       .single();
