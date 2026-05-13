@@ -43,16 +43,14 @@ export function RaxcoreLogo({ size = 48, className }: RaxcoreLogoProps) {
         </tspan>
       </text>
 
-      {/* Subtitle: Antler Analytics - white like CORE */}
+      {/* Subtitle: Antler Analytics - solid white */}
       <text
         x="8"
         y="110"
         fontFamily="'Segoe UI', Arial, sans-serif"
         fontWeight="400"
         fontSize="32"
-        fill="none"
-        stroke="#ffffff"
-        strokeWidth="1"
+        fill="#ffffff"
       >
         Antler Analytics
       </text>
