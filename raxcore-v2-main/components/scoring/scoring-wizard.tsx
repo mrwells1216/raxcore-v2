@@ -224,7 +224,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
 
     try {
       const apiFormData = new FormData()
-      apiFormData.append('state', data.state)
+      apiFormData.append('state', data.state ?? '')
       apiFormData.append('rack_type', data.rack_type)
       if (data.harvest_method) apiFormData.append('harvest_method', data.harvest_method)
       if (data.source_type) apiFormData.append('source_type', data.source_type)
@@ -313,6 +313,11 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       }
       if (imageDiagnosticsSummary) {
         apiFormData.append('image_diagnostics_summary', JSON.stringify(imageDiagnosticsSummary))
+      }
+
+      // Ring reference (optional)
+      if (data.reference_object) {
+        apiFormData.append('reference_object', JSON.stringify(data.reference_object))
       }
 
       for (let index = 0; index < images.length; index++) {

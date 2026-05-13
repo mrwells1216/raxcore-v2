@@ -347,7 +347,7 @@ export interface Profile {
 
 // Form types
 export interface ScoringFormData {
-  state: string
+  state?: string | null
   rack_type: RackType
   harvest_method?: HarvestMethod
   source_type?: SourceType
@@ -371,6 +371,19 @@ export interface ScoringFormData {
   reference_size_value?: number
   reference_size_unit?: 'in' | 'cm' | 'mm'
   reference_placement?: 'same_depth_plane' | 'near_antler_plane' | 'in_front_or_behind' | 'unknown'
+  // Ring reference — optional scale aid
+  reference_object?: {
+    type: 'none' | 'wedding_ring'
+    ring: {
+      present: boolean
+      ringSizeUS: number | null
+      innerDiameterInches: number | null
+      confidence: 'none' | 'estimated'
+    } | null
+  } | null
+  // Zod schema fields for ring reference (internal form state)
+  reference_object_type?: 'none' | 'wedding_ring'
+  reference_object_ring_size?: number | null
 }
 
 export interface GroundTruthFormData {
