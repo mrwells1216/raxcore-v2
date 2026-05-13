@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
+import { CircuitBackground } from '@/components/circuit-background'
 import './globals.css'
 
 const _geist = Geist({ subsets: ['latin'] })
@@ -56,7 +57,10 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          {children}
+          <CircuitBackground />
+          <div className="relative z-10">
+            {children}
+          </div>
           <Toaster />
         </ThemeProvider>
         <Analytics />
