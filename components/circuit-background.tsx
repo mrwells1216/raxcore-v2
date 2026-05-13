@@ -2,14 +2,6 @@
 
 import { useEffect, useRef } from 'react'
 
-interface CircuitLine {
-  id: number
-  path: string
-  delay: number
-  duration: number
-  opacity: number
-}
-
 export function CircuitBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -28,219 +20,218 @@ export function CircuitBackground() {
     resize()
     window.addEventListener('resize', resize)
 
-    // Circuit node positions (grid-based with some randomness)
-    const nodes: { x: number; y: number }[] = []
-    const gridSize = 80
-    const cols = Math.ceil(canvas.width / gridSize) + 1
-    const rows = Math.ceil(canvas.height / gridSize) + 1
+    // Circuit trace configuration - smaller, tighter grid
+    const gridSize = 24
+    const nodeRadius = 1.5
 
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < rows; j++) {
-        nodes.push({
-          x: i * gridSize + (Math.random() - 0.5) * 20,
-          y: j * gridSize + (Math.random() - 0.5) * 20,
-        })
+    // Generate grid nodes
+    const getNodes = () => {
+      const nodes: { x: number; y: number }[] = []
+      const cols = Math.ceil(canvas.width / gridSize) + 2
+      const rows = Math.ceil(canvas.height / gridSize) + 2
+
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+          nodes.push({
+            x: i * gridSize,
+            y: j * gridSize,
+          })
+        }
       }
+      return nodes
     }
 
-    // Create circuit paths between nearby nodes
-    interface CircuitPath {
-      points: { x: number; y: number }[]
+    // Circuit trace paths - strictly horizontal and vertical
+    interface Trace {
+      segments: { x1: number; y1: number; x2: number; y2: number }[]
       progress: number
       speed: number
-      delay: number
+      nextFireTime: number
       active: boolean
-      lastFired: number
-      color: string
     }
 
-    const paths: CircuitPath[] = []
-    const bronzeColors = [
-      'rgba(184, 114, 72, 0.4)',
-      'rgba(200, 169, 110, 0.35)',
-      'rgba(140, 90, 50, 0.3)',
-      'rgba(90, 184, 80, 0.25)', // Occasional green
-    ]
-
-    // Generate paths
-    for (let i = 0; i < 25; i++) {
-      const startNode = nodes[Math.floor(Math.random() * nodes.length)]
-      const pathPoints = [{ ...startNode }]
+    const createTrace = (): Trace => {
+      const segments: { x1: number; y1: number; x2: number; y2: number }[] = []
       
-      // Create a path with 2-5 segments
-      const segments = 2 + Math.floor(Math.random() * 4)
-      let current = startNode
+      // Start at a random grid position
+      let x = Math.floor(Math.random() * (canvas.width / gridSize)) * gridSize
+      let y = Math.floor(Math.random() * (canvas.height / gridSize)) * gridSize
+      
+      // Create 3-8 segments, alternating horizontal/vertical
+      const numSegments = 3 + Math.floor(Math.random() * 6)
+      let isHorizontal = Math.random() > 0.5
 
-      for (let s = 0; s < segments; s++) {
-        // Find nearby nodes
-        const nearby = nodes.filter(n => {
-          const dist = Math.hypot(n.x - current.x, n.y - current.y)
-          return dist > 40 && dist < 160
-        })
+      for (let i = 0; i < numSegments; i++) {
+        const length = (2 + Math.floor(Math.random() * 6)) * gridSize
+        
+        let x2 = x
+        let y2 = y
 
-        if (nearby.length > 0) {
-          const next = nearby[Math.floor(Math.random() * nearby.length)]
-          
-          // Add intermediate point for right-angle turns (circuit style)
-          if (Math.random() > 0.3) {
-            const midPoint = Math.random() > 0.5
-              ? { x: next.x, y: current.y }
-              : { x: current.x, y: next.y }
-            pathPoints.push(midPoint)
-          }
-          
-          pathPoints.push({ ...next })
-          current = next
+        if (isHorizontal) {
+          x2 = x + (Math.random() > 0.5 ? length : -length)
+          // Keep in bounds
+          x2 = Math.max(0, Math.min(canvas.width, x2))
+        } else {
+          y2 = y + (Math.random() > 0.5 ? length : -length)
+          // Keep in bounds
+          y2 = Math.max(0, Math.min(canvas.height, y2))
         }
+
+        if (x !== x2 || y !== y2) {
+          segments.push({ x1: x, y1: y, x2, y2 })
+          x = x2
+          y = y2
+        }
+
+        isHorizontal = !isHorizontal
       }
 
-      if (pathPoints.length > 2) {
-        paths.push({
-          points: pathPoints,
-          progress: 0,
-          speed: 0.002 + Math.random() * 0.003, // Slow speeds
-          delay: Math.random() * 8000, // Random initial delay up to 8s
-          active: false,
-          lastFired: -10000,
-          color: bronzeColors[Math.floor(Math.random() * bronzeColors.length)],
-        })
+      return {
+        segments,
+        progress: 0,
+        speed: 0.003 + Math.random() * 0.004, // Slow and varied
+        nextFireTime: Math.random() * 6000,
+        active: false,
       }
     }
 
-    let startTime = performance.now()
+    // Create initial traces
+    const traces: Trace[] = []
+    for (let i = 0; i < 15; i++) {
+      traces.push(createTrace())
+    }
+
+    let lastTime = performance.now()
 
     const draw = (timestamp: number) => {
-      const elapsed = timestamp - startTime
+      const deltaTime = timestamp - lastTime
+      lastTime = timestamp
 
-      // Clear with slight trail effect
-      ctx.fillStyle = 'rgba(13, 10, 6, 0.15)'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      // Clear canvas completely (no trail effect)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      // Draw static circuit grid (very faint)
-      ctx.strokeStyle = 'rgba(184, 114, 72, 0.03)'
-      ctx.lineWidth = 1
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i]
-        // Draw small node dot
+      // Draw static circuit grid pattern (very subtle)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)'
+      const nodes = getNodes()
+      nodes.forEach(node => {
         ctx.beginPath()
-        ctx.arc(node.x, node.y, 1, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(184, 114, 72, 0.05)'
+        ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2)
         ctx.fill()
+      })
+
+      // Draw some static trace lines (very faint grid connectors)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)'
+      ctx.lineWidth = 0.5
+      for (let i = 0; i < canvas.width; i += gridSize * 4) {
+        ctx.beginPath()
+        ctx.moveTo(i, 0)
+        ctx.lineTo(i, canvas.height)
+        ctx.stroke()
+      }
+      for (let j = 0; j < canvas.height; j += gridSize * 4) {
+        ctx.beginPath()
+        ctx.moveTo(0, j)
+        ctx.lineTo(canvas.width, j)
+        ctx.stroke()
       }
 
-      // Update and draw active paths
-      paths.forEach((path) => {
+      // Update and draw active traces
+      traces.forEach((trace, idx) => {
         // Check if should start firing
-        if (!path.active && elapsed - path.lastFired > path.delay) {
-          path.active = true
-          path.progress = 0
-          // Randomize next delay (3-12 seconds)
-          path.delay = 3000 + Math.random() * 9000
+        trace.nextFireTime -= deltaTime
+        if (!trace.active && trace.nextFireTime <= 0) {
+          trace.active = true
+          trace.progress = 0
         }
 
-        if (path.active) {
-          path.progress += path.speed
+        if (trace.active) {
+          trace.progress += trace.speed
 
-          if (path.progress >= 1) {
-            path.active = false
-            path.lastFired = elapsed
-            path.progress = 0
+          if (trace.progress >= 1) {
+            trace.active = false
+            // Reset with new random delay (4-12 seconds)
+            trace.nextFireTime = 4000 + Math.random() * 8000
+            // Occasionally regenerate the trace path
+            if (Math.random() > 0.7) {
+              const newTrace = createTrace()
+              traces[idx] = { ...newTrace, nextFireTime: trace.nextFireTime }
+            }
             return
           }
 
-          // Draw the animated path
-          const totalLength = calculatePathLength(path.points)
-          const currentLength = totalLength * path.progress
+          // Calculate total path length
+          let totalLength = 0
+          trace.segments.forEach(seg => {
+            totalLength += Math.abs(seg.x2 - seg.x1) + Math.abs(seg.y2 - seg.y1)
+          })
 
-          ctx.beginPath()
-          ctx.strokeStyle = path.color
-          ctx.lineWidth = 1.5
-          ctx.lineCap = 'round'
-          ctx.lineJoin = 'round'
+          const currentLength = totalLength * trace.progress
+
+          // Draw the trace up to current progress
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+          ctx.lineWidth = 1
+          ctx.lineCap = 'square'
+          ctx.lineJoin = 'miter'
 
           let drawnLength = 0
-          ctx.moveTo(path.points[0].x, path.points[0].y)
+          let headX = trace.segments[0]?.x1 || 0
+          let headY = trace.segments[0]?.y1 || 0
 
-          for (let i = 1; i < path.points.length; i++) {
-            const prev = path.points[i - 1]
-            const curr = path.points[i]
-            const segmentLength = Math.hypot(curr.x - prev.x, curr.y - prev.y)
+          ctx.beginPath()
+          if (trace.segments.length > 0) {
+            ctx.moveTo(trace.segments[0].x1, trace.segments[0].y1)
+          }
 
-            if (drawnLength + segmentLength <= currentLength) {
-              ctx.lineTo(curr.x, curr.y)
-              drawnLength += segmentLength
+          for (const seg of trace.segments) {
+            const segLength = Math.abs(seg.x2 - seg.x1) + Math.abs(seg.y2 - seg.y1)
+
+            if (drawnLength + segLength <= currentLength) {
+              ctx.lineTo(seg.x2, seg.y2)
+              drawnLength += segLength
+              headX = seg.x2
+              headY = seg.y2
             } else {
               // Partial segment
               const remaining = currentLength - drawnLength
-              const ratio = remaining / segmentLength
-              const x = prev.x + (curr.x - prev.x) * ratio
-              const y = prev.y + (curr.y - prev.y) * ratio
-              ctx.lineTo(x, y)
-
-              // Draw glowing head
-              ctx.stroke()
+              const ratio = remaining / segLength
               
-              // Glow effect at head
-              const gradient = ctx.createRadialGradient(x, y, 0, x, y, 8)
-              gradient.addColorStop(0, path.color.replace('0.', '0.8').replace(')', ')'))
-              gradient.addColorStop(1, 'transparent')
-              ctx.fillStyle = gradient
-              ctx.beginPath()
-              ctx.arc(x, y, 8, 0, Math.PI * 2)
-              ctx.fill()
+              if (seg.x1 !== seg.x2) {
+                // Horizontal segment
+                headX = seg.x1 + (seg.x2 - seg.x1) * ratio
+                headY = seg.y1
+              } else {
+                // Vertical segment
+                headX = seg.x1
+                headY = seg.y1 + (seg.y2 - seg.y1) * ratio
+              }
               
+              ctx.lineTo(headX, headY)
               break
             }
           }
-
           ctx.stroke()
 
-          // Draw fading trail
-          const fadeStart = Math.max(0, path.progress - 0.3)
-          if (fadeStart > 0) {
-            ctx.strokeStyle = path.color.replace(/[\d.]+\)$/, '0.1)')
-            ctx.lineWidth = 1
+          // Draw small glowing head at current position
+          const gradient = ctx.createRadialGradient(headX, headY, 0, headX, headY, 4)
+          gradient.addColorStop(0, 'rgba(255, 255, 255, 0.5)')
+          gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)')
+          gradient.addColorStop(1, 'transparent')
+          ctx.fillStyle = gradient
+          ctx.beginPath()
+          ctx.arc(headX, headY, 4, 0, Math.PI * 2)
+          ctx.fill()
+
+          // Draw node dots at corners
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.25)'
+          trace.segments.forEach(seg => {
             ctx.beginPath()
-            
-            const fadeLength = totalLength * fadeStart
-            let fadeDrawn = 0
-            ctx.moveTo(path.points[0].x, path.points[0].y)
-
-            for (let i = 1; i < path.points.length; i++) {
-              const prev = path.points[i - 1]
-              const curr = path.points[i]
-              const segmentLength = Math.hypot(curr.x - prev.x, curr.y - prev.y)
-
-              if (fadeDrawn + segmentLength <= fadeLength) {
-                ctx.lineTo(curr.x, curr.y)
-                fadeDrawn += segmentLength
-              } else {
-                const remaining = fadeLength - fadeDrawn
-                const ratio = remaining / segmentLength
-                ctx.lineTo(
-                  prev.x + (curr.x - prev.x) * ratio,
-                  prev.y + (curr.y - prev.y) * ratio
-                )
-                break
-              }
-            }
-            ctx.stroke()
-          }
+            ctx.arc(seg.x1, seg.y1, 1.5, 0, Math.PI * 2)
+            ctx.fill()
+          })
         }
       })
 
       requestAnimationFrame(draw)
-    }
-
-    const calculatePathLength = (points: { x: number; y: number }[]) => {
-      let length = 0
-      for (let i = 1; i < points.length; i++) {
-        length += Math.hypot(
-          points[i].x - points[i - 1].x,
-          points[i].y - points[i - 1].y
-        )
-      }
-      return length
     }
 
     const animationId = requestAnimationFrame(draw)
@@ -257,7 +248,7 @@ export function CircuitBackground() {
       className="fixed inset-0 pointer-events-none"
       style={{ 
         zIndex: 0,
-        opacity: 0.6,
+        opacity: 0.8,
       }}
       aria-hidden="true"
     />
