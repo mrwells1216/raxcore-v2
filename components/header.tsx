@@ -248,19 +248,21 @@ export function Header({ bellSlot, usageSlot }: HeaderProps) {
 
         {/* Right side: home / usage / bell / user */}
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
-          {/* Explicit Home button — always visible so users can return from any page */}
-          <Link
-            href="/"
-            aria-label="Go to home"
-            className="flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 hover:scale-105"
-            style={{
-              color: pathname === '/' ? 'var(--bronze-light)' : 'var(--bronze-mid)',
-              background: pathname === '/' ? 'rgba(184,114,72,0.12)' : 'transparent',
-              border: pathname === '/' ? '1px solid var(--bronze-dark)' : '1px solid transparent',
-            }}
-          >
-            <Home className="h-5 w-5" />
-          </Link>
+          {/* Home button — hidden on homepage, visible on other pages */}
+          {pathname !== '/' && (
+            <Link
+              href="/"
+              aria-label="Go to home"
+              className="flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 hover:scale-105"
+              style={{
+                color: 'var(--bronze-mid)',
+                background: 'transparent',
+                border: '1px solid transparent',
+              }}
+            >
+              <Home className="h-5 w-5" />
+            </Link>
+          )}
           <div className="hidden sm:block">{usageSlot}</div>
           {bellSlot}
           <UserMenu initialUser={user} />
