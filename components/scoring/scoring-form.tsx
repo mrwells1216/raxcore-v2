@@ -141,29 +141,28 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
 
   return (
     <Form {...form}>
-      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 pt-4">
+      <form id="scoring-details-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-3">
         {/* Section: Required Info */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-semibold text-foreground">Required Information</h3>
+            <MapPin className="h-3.5 w-3.5 text-primary" />
+            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Required</h3>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-2">
             <FormField
               control={form.control}
               name="state"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>State *</FormLabel>
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">State *</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
-                      <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="Where was this buck?" /></SelectTrigger>
+                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="State" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       {US_STATES.map((stateOption) => <SelectItem key={stateOption.value} value={stateOption.value}>{stateOption.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <FormDescription>Helps calibrate regional deer size</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -171,30 +170,18 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
 
             <FormField
               control={form.control}
-              name="rack_type"
+              name="main_frame_points"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Rack Type *</FormLabel>
-                  <FormControl>
-                    <div className="flex gap-1.5 p-1 bg-secondary/40 rounded-xl border border-border/40">
-                      {RACK_TYPES.map((type) => (
-                        <button
-                          key={type.value}
-                          type="button"
-                          onClick={() => field.onChange(type.value)}
-                          className={cn(
-                            'flex-1 py-2.5 rounded-lg text-sm font-medium transition-all touch-manipulation',
-                            field.value === type.value
-                              ? 'bg-card text-foreground shadow-sm border border-border/50'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                  </FormControl>
-                  <FormDescription>Affects scoring calculations</FormDescription>
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">Frame Points</FormLabel>
+                  <Select onValueChange={(value) => field.onChange(Number(value))} value={field.value ? String(field.value) : ""}>
+                    <FormControl>
+                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="8, 10, 12..." /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {MAIN_FRAME_OPTIONS.map((value) => <SelectItem key={value} value={String(value)}>{value}-point</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
@@ -203,51 +190,60 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
 
           <FormField
             control={form.control}
-            name="main_frame_points"
+            name="rack_type"
             render={({ field }) => (
-              <FormItem>
-                <FormLabel>Main Frame Points</FormLabel>
-                <Select onValueChange={(value) => field.onChange(Number(value))} value={field.value ? String(field.value) : ""}>
-                  <FormControl>
-                    <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="8-point, 10-point, 12-point..." /></SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {MAIN_FRAME_OPTIONS.map((value) => <SelectItem key={value} value={String(value)}>{value}-point main frame</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <FormDescription>Helps AI identify the correct tine structure</FormDescription>
+              <FormItem className="space-y-1">
+                <FormLabel className="text-xs">Rack Type *</FormLabel>
+                <FormControl>
+                  <div className="flex gap-1 p-0.5 bg-secondary/40 rounded-lg border border-border/40">
+                    {RACK_TYPES.map((type) => (
+                      <button
+                        key={type.value}
+                        type="button"
+                        onClick={() => field.onChange(type.value)}
+                        className={cn(
+                          'flex-1 py-2 rounded-md text-xs font-medium transition-all touch-manipulation',
+                          field.value === type.value
+                            ? 'bg-card text-foreground shadow-sm border border-border/50'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        {type.label}
+                      </button>
+                    ))}
+                  </div>
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
         </div>
 
-        <Separator />
+        <Separator className="my-3" />
 
         {/* Section: Image Context */}
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Camera className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">Image Context</h3>
-            <span className="text-xs text-muted-foreground">(improves accuracy)</span>
+            <Camera className="h-3.5 w-3.5 text-muted-foreground" />
+            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Image Context</h3>
           </div>
 
-          {/* Photo source — chip group */}
+          {/* Photo source — compact 2-col chip grid */}
           <FormField
             control={form.control}
             name="source_type"
             render={({ field }) => (
-              <FormItem>
-                <FormLabel>Photo Source</FormLabel>
+              <FormItem className="space-y-1">
+                <FormLabel className="text-xs">Photo Source</FormLabel>
                 <FormControl>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-2 gap-1.5">
                     {SOURCE_TYPES.map((source) => (
                       <button
                         key={source.value}
                         type="button"
                         onClick={() => field.onChange(field.value === source.value ? undefined : source.value)}
                         className={cn(
-                          'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px]',
+                          'px-2 py-1.5 rounded-lg text-xs font-medium border transition-all touch-manipulation',
                           field.value === source.value
                             ? 'bg-primary/15 text-primary border-primary/30'
                             : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
@@ -263,67 +259,65 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             )}
           />
 
-          {/* Capture device — kept as select */}
-          <FormField
-            control={form.control}
-            name="capture_device"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Capture Device</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                  <FormControl>
-                    <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="What took these photos?" /></SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {/* Capture device + Ears visible in 2-col */}
+          <div className="grid grid-cols-2 gap-2">
+            <FormField
+              control={form.control}
+              name="capture_device"
+              render={({ field }) => (
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">Device</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                    <FormControl>
+                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Camera" /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-          <FormField
-            control={form.control}
-            name="ears_fully_visible"
-            render={({ field }) => (
-              <FormItem className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-4">
-                <div className="flex items-start gap-3">
-                  <Eye className="h-5 w-5 text-primary mt-0.5" />
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base font-medium">Ears Fully Visible</FormLabel>
-                    <FormDescription>
-                      This is the primary scaling reference. Turn off if ears are hidden or cropped.
-                    </FormDescription>
-                  </div>
-                </div>
-                <FormControl>
-                  <Switch checked={field.value} onCheckedChange={field.onChange} className="min-h-[24px] min-w-[44px]" />
-                </FormControl>
-              </FormItem>
-            )}
-          />
+            <FormField
+              control={form.control}
+              name="ears_fully_visible"
+              render={({ field }) => (
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">Ears Visible?</FormLabel>
+                  <FormControl>
+                    <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-secondary/30">
+                      <Eye className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span className="text-xs text-muted-foreground flex-1">Scale ref</span>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} className="scale-90" />
+                    </div>
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          </div>
         </div>
 
-        <Separator />
+        <Separator className="my-3" />
 
         {/* Section: Optional Details */}
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">Optional Details</h3>
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Optional</h3>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-2">
             <FormField
               control={form.control}
               name="harvest_method"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Harvest Method</FormLabel>
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">Method</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value ?? ""}>
                     <FormControl>
-                      <SelectTrigger className="min-h-[48px]"><SelectValue placeholder="How was it taken?" /></SelectTrigger>
+                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Harvest" /></SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       {HARVEST_METHODS.map((method) => <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>)}
@@ -338,17 +332,17 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               control={form.control}
               name="harvest_year"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Year</FormLabel>
+                <FormItem className="space-y-1">
+                  <FormLabel className="text-xs">Year</FormLabel>
                   <FormControl>
                     <Input 
                       type="number" 
                       min={1900} 
                       max={new Date().getFullYear()} 
-                      placeholder="e.g. 2024" 
+                      placeholder="2024" 
                       value={field.value ?? ''} 
                       onChange={(e) => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))} 
-                      className="min-h-[48px]" 
+                      className="h-10 text-sm" 
                     />
                   </FormControl>
                   <FormMessage />
@@ -361,12 +355,12 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             control={form.control}
             name="notes"
             render={({ field }) => (
-              <FormItem>
-                <FormLabel>Notes</FormLabel>
+              <FormItem className="space-y-1">
+                <FormLabel className="text-xs">Notes</FormLabel>
                 <FormControl>
                   <Textarea 
-                    placeholder="Anything special about this buck: unusual features, image quality issues, missing angles..." 
-                    className="min-h-[80px] resize-none" 
+                    placeholder="Unusual features, quality issues..." 
+                    className="min-h-[60px] resize-none text-sm" 
                     {...field} 
                   />
                 </FormControl>
@@ -376,36 +370,31 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
           />
         </div>
 
-        <Separator />
+        <Separator className="my-3" />
 
         {/* Section: Irregular/Abnormal Points (Phase 54) */}
         <Collapsible defaultOpen={watchRackType === 'non-typical'}>
-          <div className="space-y-4">
+          <div className="space-y-2">
             <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-              <AlertCircle className="h-4 w-4 text-amber-500" />
-              <h3 className="text-sm font-semibold text-foreground">Irregular / Abnormal Points</h3>
-              <span className="text-xs text-muted-foreground">(optional - helps improve scoring)</span>
-              <svg className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Irregular Points</h3>
+              <svg className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </CollapsibleTrigger>
             
-            <CollapsibleContent className="space-y-4">
-              <p className="text-xs text-muted-foreground">
-                Help us capture non-typical features. This data improves future scoring accuracy for irregular racks.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <CollapsibleContent className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
                 <FormField
                   control={form.control}
                   name="irregular_points_present"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Irregular Points Present?</FormLabel>
+                    <FormItem className="space-y-1">
+                      <FormLabel className="text-xs">Irregular?</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value ?? ""}>
                         <FormControl>
-                          <SelectTrigger className="min-h-[48px]">
-                            <SelectValue placeholder="Yes / No / Unsure" />
+                          <SelectTrigger className="h-10 text-sm">
+                            <SelectValue placeholder="Y/N/?" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -414,7 +403,6 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormDescription>Points not on the main frame</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -424,12 +412,12 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                   control={form.control}
                   name="non_typical_traits_present"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Non-Typical Traits?</FormLabel>
+                    <FormItem className="space-y-1">
+                      <FormLabel className="text-xs">Non-Typical?</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value ?? ""}>
                         <FormControl>
-                          <SelectTrigger className="min-h-[48px]">
-                            <SelectValue placeholder="Yes / No / Unsure" />
+                          <SelectTrigger className="h-10 text-sm">
+                            <SelectValue placeholder="Y/N/?" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -438,7 +426,6 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                           ))}
                         </SelectContent>
                       </Select>
-                      <FormDescription>Unusual rack characteristics</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -446,25 +433,24 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               </div>
 
               {(watchIrregularPoints === 'yes' || watchIrregularPoints === 'unsure') && (
-                <>
+                <div className="space-y-2">
                   <FormField
                     control={form.control}
                     name="estimated_irregular_points_count"
                     render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Estimated Abnormal Point Count</FormLabel>
+                      <FormItem className="space-y-1">
+                        <FormLabel className="text-xs">Est. Count</FormLabel>
                         <FormControl>
                           <Input
                             type="number"
                             min={0}
                             max={50}
-                            placeholder="e.g. 3"
+                            placeholder="3"
                             value={field.value ?? ''}
                             onChange={(e) => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-                            className="min-h-[48px]"
+                            className="h-10 text-sm"
                           />
                         </FormControl>
-                        <FormDescription>Rough estimate is fine</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -474,13 +460,13 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                     control={form.control}
                     name="abnormal_point_tags"
                     render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Abnormality Types (select all that apply)</FormLabel>
-                        <div className="grid grid-cols-2 gap-2">
+                      <FormItem className="space-y-1">
+                        <FormLabel className="text-xs">Type (multi)</FormLabel>
+                        <div className="grid grid-cols-2 gap-1">
                           {ABNORMAL_POINT_TAGS.map((tag) => (
                             <label
                               key={tag.value}
-                              className="flex items-start gap-2 p-2 rounded-md border border-border hover:bg-secondary/50 cursor-pointer transition-colors"
+                              className="flex items-center gap-1.5 px-2 py-1.5 rounded border border-border hover:bg-secondary/50 cursor-pointer transition-colors text-xs"
                             >
                               <Checkbox
                                 checked={field.value?.includes(tag.value as AbnormalPointTag)}
@@ -492,12 +478,9 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                                     field.onChange(current.filter((v) => v !== tag.value))
                                   }
                                 }}
-                                className="mt-0.5"
+                                className="h-3.5 w-3.5"
                               />
-                              <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium">{tag.label}</span>
-                                <p className="text-xs text-muted-foreground line-clamp-2">{tag.description}</p>
-                              </div>
+                              <span className="font-medium truncate">{tag.label}</span>
                             </label>
                           ))}
                         </div>
@@ -510,133 +493,126 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                     control={form.control}
                     name="abnormal_point_notes"
                     render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Abnormal Point Notes</FormLabel>
+                      <FormItem className="space-y-1">
+                        <FormLabel className="text-xs">Notes</FormLabel>
                         <FormControl>
                           <Textarea
-                            placeholder="Describe any abnormal features: e.g., 'Drop tine on left G2, about 4 inches...'"
-                            className="min-h-[60px] resize-none"
+                            placeholder="Drop tine on left G2..."
+                            className="min-h-[50px] resize-none text-sm"
                             maxLength={500}
                             {...field}
                           />
                         </FormControl>
-                        <FormDescription>{(field.value?.length || 0)}/500 characters</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                </>
+                </div>
               )}
             </CollapsibleContent>
           </div>
         </Collapsible>
 
         {/* Precision Mode */}
-        <div className="rounded-xl border border-border/60 bg-card p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <h3 className="text-sm font-semibold text-foreground">Precision Mode</h3>
-              <p className="text-xs text-muted-foreground">
-                Include a known-size reference so the score can rescale the rack when that object is clearly visible
-              </p>
+        <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Ruler className="h-3.5 w-3.5 text-muted-foreground" />
+              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Precision</h3>
             </div>
             <Switch
               checked={!!watchPrecisionModeEnabled}
               onCheckedChange={(checked) => form.setValue('precision_mode_enabled', checked, { shouldDirty: true })}
+              className="scale-90"
             />
           </div>
 
           {watchPrecisionModeEnabled && (
-            <div className="space-y-4 pt-2 border-t border-border/40">
-              {/* Reference type selector */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Reference Type</label>
-                <Select
-                  value={watchReferenceType ?? 'none'}
-                  onValueChange={(value) => {
-                    form.setValue('reference_type', value as any, { shouldDirty: true })
-                    if (value === 'aruco_marker' && !form.getValues('reference_size_value')) {
-                      form.setValue('reference_size_value', 2, { shouldDirty: true })
-                      form.setValue('reference_size_unit', 'in', { shouldDirty: true })
-                    }
-                  }}
-                >
-                  <SelectTrigger className="min-h-[48px]">
-                    <SelectValue placeholder="Select reference type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None selected</SelectItem>
-                    <SelectItem value="ruler">Ruler / tape measure</SelectItem>
-                    <SelectItem value="credit_card">Credit card</SelectItem>
-                    <SelectItem value="coin">Coin</SelectItem>
-                    <SelectItem value="aruco_marker">Printed marker</SelectItem>
-                    <SelectItem value="other_known_object">Other known-size object</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2 pt-1 border-t border-border/40">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Type</label>
+                  <Select
+                    value={watchReferenceType ?? 'none'}
+                    onValueChange={(value) => {
+                      form.setValue('reference_type', value as any, { shouldDirty: true })
+                      if (value === 'aruco_marker' && !form.getValues('reference_size_value')) {
+                        form.setValue('reference_size_value', 2, { shouldDirty: true })
+                        form.setValue('reference_size_unit', 'in', { shouldDirty: true })
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-10 text-sm">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="ruler">Ruler</SelectItem>
+                      <SelectItem value="credit_card">Card</SelectItem>
+                      <SelectItem value="coin">Coin</SelectItem>
+                      <SelectItem value="aruco_marker">Marker</SelectItem>
+                      <SelectItem value="other_known_object">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              {shouldShowReferenceSize && (
-                <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">{referenceSizeLabel}</label>
-                    <div className="relative">
-                      <Ruler className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                {shouldShowReferenceSize && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">{referenceSizeLabel}</label>
+                    <div className="flex gap-1">
                       <Input
                         type="number"
                         min="0.1"
                         step="0.01"
                         inputMode="decimal"
-                        className="min-h-[48px] pl-9"
+                        className="h-10 text-sm flex-1"
                         value={watchReferenceSizeValue ?? ''}
                         onChange={(e) => {
                           const value = e.target.value ? Number(e.target.value) : undefined
                           form.setValue('reference_size_value', value, { shouldDirty: true })
                         }}
                       />
+                      <Select
+                        value={watchReferenceSizeUnit ?? 'in'}
+                        onValueChange={(value) => form.setValue('reference_size_unit', value as any, { shouldDirty: true })}
+                      >
+                        <SelectTrigger className="h-10 w-14 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="in">in</SelectItem>
+                          <SelectItem value="cm">cm</SelectItem>
+                          <SelectItem value="mm">mm</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Unit</label>
-                    <Select
-                      value={watchReferenceSizeUnit ?? 'in'}
-                      onValueChange={(value) => form.setValue('reference_size_unit', value as any, { shouldDirty: true })}
-                    >
-                      <SelectTrigger className="min-h-[48px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="in">in</SelectItem>
-                        <SelectItem value="cm">cm</SelectItem>
-                        <SelectItem value="mm">mm</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {watchReferenceType === 'aruco_marker' && (
-                <Button asChild variant="outline" size="sm" className="w-full">
+                <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
                   <a href="/precision-marker" target="_blank" rel="noreferrer">
-                    <Printer className="h-4 w-4" />
+                    <Printer className="h-3.5 w-3.5" />
                     Print marker
                   </a>
                 </Button>
               )}
 
               {referenceModeSummary.referencePresent && (
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Reference Placement</label>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Placement</label>
                   <Select
                     value={watchReferencePlacement ?? 'unknown'}
                     onValueChange={(value) => form.setValue('reference_placement', value as any, { shouldDirty: true })}
                   >
-                    <SelectTrigger className="min-h-[48px]">
+                    <SelectTrigger className="h-10 text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="same_depth_plane">Same depth plane as rack</SelectItem>
-                      <SelectItem value="near_antler_plane">Near the rack plane</SelectItem>
-                      <SelectItem value="in_front_or_behind">In front of / behind rack</SelectItem>
+                      <SelectItem value="same_depth_plane">Same plane</SelectItem>
+                      <SelectItem value="near_antler_plane">Near rack</SelectItem>
+                      <SelectItem value="in_front_or_behind">Front/back</SelectItem>
                       <SelectItem value="unknown">Unknown</SelectItem>
                     </SelectContent>
                   </Select>
@@ -644,85 +620,61 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               )}
 
               {/* Reference notes */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Notes (optional)</label>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Notes</label>
                 <Textarea
-                  placeholder="Example: standard credit card beside left beam, or printed marker edge = 2.0 inches"
-                  className="min-h-[60px] resize-none"
+                  placeholder="Card beside left beam..."
+                  className="min-h-[40px] resize-none text-sm"
                   value={watchReferenceNotes ?? ''}
                   onChange={(e) => form.setValue('reference_notes', e.target.value, { shouldDirty: true })}
                 />
               </div>
 
               {/* Status indicator */}
-              <div className={cn(
-                'rounded-xl border px-3 py-2.5 text-xs',
-                referenceModeSummary.referencePresent
-                  ? 'border-primary/25 bg-primary/5 text-foreground'
-                  : 'border-border/40 bg-secondary/30 text-muted-foreground'
-              )}>
-                {referenceModeSummary.referencePresent ? (
-                  <div className="flex items-start gap-2">
-                    <div className="h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                    </div>
-                    <div>
-                      <span className="font-medium">Reference: {referenceModeSummary.referenceType}</span>
-                      {referenceModeSummary.supportsScaleCalibration && (
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Included in scale-aware scoring when the object and size are clear
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <span>Select a reference type above</span>
-                )}
-              </div>
+              {referenceModeSummary.referencePresent && (
+                <div className="flex items-center gap-1.5 text-xs text-primary">
+                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  <span className="font-medium">{referenceModeSummary.referenceType}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Image Diagnostics Summary */}
         {imageDiagnosticsSummary && (
-          <div className="rounded-lg border px-4 py-3 space-y-2">
-            <div className="text-sm font-medium">Image quality analysis</div>
-            <div className="text-xs">
-              Overall: <span className="font-semibold">{imageDiagnosticsSummary.overall}</span>
+          <div className="rounded-lg border px-3 py-2 space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Quality</span>
+              <span className="font-medium">{imageDiagnosticsSummary.overall}</span>
             </div>
-            
             {imageDiagnosticsSummary.poorCount > 0 && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {imageDiagnosticsSummary.poorCount} image{imageDiagnosticsSummary.poorCount === 1 ? '' : 's'} may reduce accuracy (blurry, dark, or bright).
-              </div>
+              <p className="text-[11px] text-red-600">{imageDiagnosticsSummary.poorCount} image(s) may reduce accuracy</p>
             )}
-
             {imageDiagnosticsSummary.okCount > 0 && imageDiagnosticsSummary.poorCount === 0 && (
-              <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
-                {imageDiagnosticsSummary.okCount} image{imageDiagnosticsSummary.okCount === 1 ? '' : 's'} has reduced detail.
-              </div>
+              <p className="text-[11px] text-amber-600">{imageDiagnosticsSummary.okCount} image(s) with reduced detail</p>
             )}
           </div>
         )}
 
         {(!hideBackButton || !hideSubmitButton) && (
-          <div className="flex gap-3 pt-4 border-t border-border">
+          <div className="flex gap-2 pt-3 border-t border-border">
             {!hideBackButton && (
-              <Button type="button" variant="outline" onClick={onBack} className="min-h-[48px] gap-2" disabled={isSubmitting}>
-                <ArrowLeft className="h-4 w-4" />Back
+              <Button type="button" variant="outline" onClick={onBack} className="h-10 gap-1.5 text-sm" disabled={isSubmitting}>
+                <ArrowLeft className="h-3.5 w-3.5" />Back
               </Button>
             )}
             {!hideSubmitButton && (
-              <Button type="submit" className="flex-1 min-h-[48px] gap-2" disabled={isSubmitting}>
+              <Button type="submit" className="flex-1 h-10 gap-1.5 text-sm" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     Analyzing...
                   </>
                 ) : (
                   <>
                     Analyze Buck
-                    <ArrowRight className="h-4 w-4" />
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </>
                 )}
               </Button>

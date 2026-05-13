@@ -48,7 +48,7 @@ export default function HomePage() {
     <div className="min-h-svh flex flex-col" style={{ background: 'var(--background)' }}>
       <AppHeader />
 
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1">
 
         {/* ── Hero ─────────────────────────────────────────────────────── */}
         <section className="relative overflow-hidden min-h-[560px] flex items-center">

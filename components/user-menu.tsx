@@ -59,12 +59,22 @@ export function UserMenu({ initialUser }: UserMenuProps) {
   if (!user) {
     return (
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" asChild className="hidden sm:flex">
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          asChild 
+          className="hidden sm:flex text-xs font-bold tracking-wider uppercase"
+          style={{ color: 'var(--muted-foreground)' }}
+        >
           <Link href="/auth/login">
             Sign in
           </Link>
         </Button>
-        <Button size="sm" asChild>
+        <Button 
+          size="sm" 
+          asChild
+          className="btn-bronze text-xs font-bold tracking-wider uppercase px-4"
+        >
           <Link href="/auth/sign-up" className="flex items-center gap-2">
             <LogIn className="h-4 w-4 sm:hidden" />
             <span className="hidden sm:inline">Get Started</span>
@@ -81,9 +91,22 @@ export function UserMenu({ initialUser }: UserMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
-          <Avatar className="h-9 w-9">
-            <AvatarFallback className="bg-primary text-primary-foreground text-sm font-medium">
+        <Button 
+          variant="ghost" 
+          className="relative h-10 w-10 rounded-full p-0 transition-all duration-200 hover:scale-105"
+          style={{ 
+            background: 'linear-gradient(145deg, var(--bronze-mid), var(--bronze-dark))',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,200,100,0.2)',
+          }}
+        >
+          <Avatar className="h-10 w-10">
+            <AvatarFallback 
+              className="text-sm font-bold tracking-wider"
+              style={{ 
+                background: 'transparent',
+                color: '#0d0a06',
+              }}
+            >
               {initials}
             </AvatarFallback>
           </Avatar>
