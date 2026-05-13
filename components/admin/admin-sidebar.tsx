@@ -35,6 +35,7 @@ import {
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { RaxcoreLogo } from '@/components/raxcore-logo'
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -74,7 +75,7 @@ export function AdminSidebar() {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
         <Link href="/admin" className="flex items-center">
-          <img src="/raxcore-logo.jpg" alt="RAXcore Antler Analytics" style={{ height: 32, width: 'auto', borderRadius: 4 }} />
+          <RaxcoreLogo size={32} />
         </Link>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
           <Menu className="h-5 w-5" />
@@ -97,7 +98,7 @@ export function AdminSidebar() {
           {/* Header */}
           <div className="flex items-center justify-between h-14 px-4 border-b border-sidebar-border">
             <Link href="/admin" className="flex items-center">
-              <img src="/raxcore-logo.jpg" alt="RAXcore Antler Analytics" style={{ height: 34, width: 'auto', borderRadius: 4 }} />
+              <RaxcoreLogo size={34} />
             </Link>
             <Button 
               variant="ghost" 

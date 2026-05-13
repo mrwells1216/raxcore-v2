@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { UserMenu } from '@/components/user-menu'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
+import { RaxcoreLogo } from '@/components/raxcore-logo'
 
 // ─── Navigation entries (auth-aware) ─────────────────────────────────────────
 
@@ -38,23 +39,6 @@ const adminNavigation = [
 interface HeaderProps {
   bellSlot?: React.ReactNode
   usageSlot?: React.ReactNode
-}
-
-// ─── Brand plate ─────────────────────────────────────────────────────────────
-
-function RaxcoreLogo({ size = 36 }: { size?: number }) {
-  return (
-    <img
-      src="/raxcore-logo.jpg"
-      alt="RAXcore Antler Analytics"
-      style={{
-        display: 'block',
-        height: size,
-        width: 'auto',
-        borderRadius: 4,
-      }}
-    />
-  )
 }
 
 // ─── Side panel contents ─────────────────────────────────────────────────────
