@@ -6,14 +6,14 @@ interface RaxcoreLogoProps {
 }
 
 export function RaxcoreLogo({ size = 48, className }: RaxcoreLogoProps) {
-  // Scale factor based on viewBox 500x200, targeting the given height
-  const aspectRatio = 500 / 200
+  // Tighter viewBox with minimal padding around the content
+  const aspectRatio = 340 / 130
   const height = size
   const width = height * aspectRatio
 
   return (
     <svg
-      viewBox="0 0 500 200"
+      viewBox="0 0 340 130"
       xmlns="http://www.w3.org/2000/svg"
       width={width}
       height={height}
@@ -22,8 +22,8 @@ export function RaxcoreLogo({ size = 48, className }: RaxcoreLogoProps) {
     >
       {/* Main Title: RAX CORE */}
       <text
-        x="50"
-        y="100"
+        x="5"
+        y="65"
         fontFamily="'Segoe UI', Arial, sans-serif"
         fontWeight="800"
         fontSize="70"
@@ -36,8 +36,8 @@ export function RaxcoreLogo({ size = 48, className }: RaxcoreLogoProps) {
 
       {/* Subtitle: Antler Analytics */}
       <text
-        x="55"
-        y="150"
+        x="8"
+        y="110"
         fontFamily="'Segoe UI', Arial, sans-serif"
         fontWeight="400"
         fontSize="32"
