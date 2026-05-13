@@ -15,7 +15,7 @@ import type {
 
 export interface CreateBuckParams {
   // Required fields (NOT NULL in schema)
-  state: string
+  state?: string | null
   rackType: 'typical' | 'non-typical'
   // Optional fields
   userId?: string
@@ -81,12 +81,8 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
   const supabase = await createClient()
   
   // Validate required fields before insert
-  const missingFields: string[] = []
-  if (!params.state) missingFields.push('state')
-  if (!params.rackType) missingFields.push('rack_type')
-  
-  if (missingFields.length > 0) {
-    throw new Error(`Missing required fields for buck creation: ${missingFields.join(', ')}`)
+  if (!params.rackType) {
+    throw new Error(`Missing required fields for buck creation: rack_type`)
   }
   
   // Normalize source_type to match database constraint
@@ -95,7 +91,7 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
   // Build payload matching exact database schema
   const payload = {
     user_id: params.userId || null,
-    state: params.state,
+    state: params.state ?? 'unknown',
     rack_type: params.rackType,
     harvest_method: params.harvestMethod || null,
     source_type: normalizedSourceType,

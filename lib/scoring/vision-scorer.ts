@@ -79,13 +79,14 @@ export interface VisionImageInput {
 
 export interface VisionScoringInput {
   images: VisionImageInput[]
-  state: string
+  state?: string | null
   rackType: 'typical' | 'non-typical'
   earsFullyVisible?: boolean
   sourceType?: string
   captureDevice?: string
   mainFramePoints?: number
   precisionReference?: PrecisionReferenceProfile | null
+  referenceObject?: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -304,12 +305,27 @@ PRECISION REFERENCE MODE
 `
     : ''
 
+  const ring = input.referenceObject?.ring
+  const ringReferenceBlock =
+    ring?.present && ring.innerDiameterInches
+      ? `
+RING REFERENCE (user-reported, estimated only)
+- The user reports a wedding band or ring is visible in the image.
+- US ring size: ${ring.ringSizeUS ?? 'not specified'}
+- Approximate inner diameter: ${ring.innerDiameterInches} inches
+- Use this ONLY as an estimated scale reference if the ring is clearly visible, lying flat, and near the antler.
+- Do NOT rely on this reference if the ring is angled, occluded, distorted, or not clearly visible.
+- Treat ring-based scale as lower confidence than a ruler or tape measure.
+- This does NOT satisfy precision reference mode.
+`
+      : ''
+
   return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
 
 CONTEXT:
-- State: ${input.state}
+- State: ${input.state ?? 'Not provided'}
 - User-indicated rack type: ${input.rackType}
 - User says ears fully visible: ${input.earsFullyVisible ? 'Yes' : 'Unknown/No'}
 - Source type: ${input.sourceType || 'Unknown'}
@@ -320,6 +336,7 @@ IMAGES PROVIDED:
 ${angleDescriptions}
 
 ${precisionReferenceBlock}
+${ringReferenceBlock}
 
 ═══════════════════════════════════════════════════════════════
 MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS
