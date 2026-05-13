@@ -66,7 +66,7 @@ export function MeasureClient() {
 
   return (
     <div
-      className="flex flex-col"
+      className="flex flex-col no-zoom"
       style={{
         height: 'calc(100dvh - 56px)',  // subtract header height
         background: '#0d0a06',
@@ -75,7 +75,7 @@ export function MeasureClient() {
     >
       {/* Phase tabs + back button */}
       <div
-        className="flex items-center justify-between flex-shrink-0"
+        className="flex items-center justify-between flex-shrink-0 overflow-x-auto"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
       >
         <div className="flex">
@@ -85,7 +85,7 @@ export function MeasureClient() {
         </div>
         <Link
           href="/score"
-          className="flex items-center gap-1 px-3 py-2.5 text-xs font-bold tracking-widest uppercase transition-all mr-2"
+          className="flex items-center gap-1 px-3 py-2 text-xs font-bold tracking-widest uppercase transition-all mr-2 flex-shrink-0"
           style={{
             color: 'rgba(255,255,255,0.38)',
             textDecoration: 'none',
@@ -107,9 +107,9 @@ export function MeasureClient() {
         {/* Left sidebar: field list */}
         {showFieldList && (
           <aside
-            className="flex-shrink-0 overflow-y-auto p-3 hidden md:block"
+            className="flex-shrink-0 overflow-y-auto p-2 hidden md:block"
             style={{
-              width: 168,
+              width: 196,
               borderRight: '1px solid rgba(255,255,255,0.07)',
               background: '#0a0907',
             }}
@@ -149,26 +149,26 @@ export function MeasureClient() {
         )}
       </div>
 
-      {/* Mobile bottom field list strip (photo / 3D) */}
+      {/* Mobile bottom field list grid (photo / 3D) - all buttons visible, no horizontal scroll */}
       {showFieldList && (
         <div
-          className="flex-shrink-0 md:hidden overflow-x-auto"
+          className="flex-shrink-0 md:hidden"
           style={{
             borderTop: '1px solid rgba(255,255,255,0.07)',
             background: '#0a0907',
             paddingBottom: 'env(safe-area-inset-bottom)',
           }}
         >
-          <MobileFieldStrip phase={phase} />
+          <MobileFieldGrid phase={phase} />
         </div>
       )}
     </div>
   )
 }
 
-// ─── Mobile horizontal field strip ───────────────────────────────────────────
+// ─── Mobile field grid (wraps, no horizontal scroll) ─────────────────────────
 
-function MobileFieldStrip({ phase }: { phase: MeasurePhase }) {
+function MobileFieldGrid({ phase }: { phase: MeasurePhase }) {
   const {
     measurements2D, measurements3D,
     activeField, setActiveField,
@@ -180,41 +180,70 @@ function MobileFieldStrip({ phase }: { phase: MeasurePhase }) {
       ? measurements2D[id as keyof typeof measurements2D]
       : measurements3D[id as keyof typeof measurements3D]
 
-  return (
-    <div className="flex gap-1 px-2 py-2 min-w-max">
-      {FIELD_DEFS.map((fd) => {
-        const m = getMeasure(fd.id)
-        const active = activeField === fd.id
-        const hasVal = m?.points?.length > 0
+  // Group fields into rows so left/right are visually paired
+  const GRID_ROWS: { label: string; ids: string[] }[] = [
+    { label: 'Beam', ids: ['beam-left', 'beam-right'] },
+    { label: 'G1',   ids: ['g1-left', 'g1-right'] },
+    { label: 'G2',   ids: ['g2-left', 'g2-right'] },
+    { label: 'G3',   ids: ['g3-left', 'g3-right'] },
+    { label: 'G4',   ids: ['g4-left', 'g4-right'] },
+    { label: 'H1',   ids: ['h1-left', 'h1-right'] },
+    { label: 'H2',   ids: ['h2-left', 'h2-right'] },
+    { label: 'H3',   ids: ['h3-left', 'h3-right'] },
+    { label: 'H4',   ids: ['h4-left', 'h4-right'] },
+    { label: 'Spr',  ids: ['spread'] },
+  ]
 
-        return (
-          <button
-            key={fd.id}
-            onClick={() => {
-              if (active) {
-                if (phase === 'photo') finalizeField2D(fd.id as FieldId)
-                else finalizeField3D(fd.id as FieldId)
-              } else {
-                setActiveField(fd.id as FieldId)
-              }
-            }}
-            className="px-2.5 py-1.5 rounded text-xs font-mono whitespace-nowrap flex-shrink-0 transition-all"
-            style={{
-              background: active
-                ? `${fd.color}22`
-                : hasVal
-                ? 'rgba(255,255,255,0.06)'
-                : 'rgba(255,255,255,0.03)',
-              border: `1px solid ${active ? fd.color : hasVal ? `${fd.color}44` : 'rgba(255,255,255,0.08)'}`,
-              color: active ? fd.color : hasVal ? '#e8d8b8' : 'rgba(255,255,255,0.35)',
-            }}
-          >
-            {fd.shortLabel}
-            {hasVal && !active && (
-              <span className="ml-1 opacity-60">{(m?.inchLength ?? 0).toFixed(1)}&quot;</span>
-            )}
-          </button>
-        )
+  const renderBtn = (id: string) => {
+    const fd = FIELD_DEFS.find(f => f.id === id)
+    if (!fd) return null
+    const m = getMeasure(id)
+    const active = activeField === id
+    const hasVal = m?.points?.length > 0
+
+    return (
+      <button
+        key={id}
+        onClick={() => {
+          if (active) {
+            if (phase === 'photo') finalizeField2D(id as FieldId)
+            else finalizeField3D(id as FieldId)
+          } else {
+            setActiveField(id as FieldId)
+          }
+        }}
+        className="rounded text-[10px] font-mono transition-all flex flex-col items-center justify-center leading-tight py-1 w-full"
+        style={{
+          background: active
+            ? `${fd.color}22`
+            : hasVal
+            ? 'rgba(255,255,255,0.06)'
+            : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${active ? fd.color : hasVal ? `${fd.color}44` : 'rgba(255,255,255,0.08)'}`,
+          color: active ? fd.color : hasVal ? '#e8d8b8' : 'rgba(255,255,255,0.4)',
+          minHeight: 32,
+        }}
+      >
+        <span className="font-bold">{fd.shortLabel}</span>
+        {hasVal && (
+          <span className="opacity-70 text-[9px]">{(m?.inchLength ?? 0).toFixed(1)}&quot;</span>
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-4 gap-1 px-2 py-2">
+      {GRID_ROWS.flatMap(row => {
+        // Paired rows render both buttons; spread spans 2 columns
+        if (row.ids.length === 2) {
+          return row.ids.map(renderBtn)
+        }
+        return [
+          <div key={row.label} className="col-span-2">
+            {renderBtn(row.ids[0])}
+          </div>,
+        ]
       })}
     </div>
   )

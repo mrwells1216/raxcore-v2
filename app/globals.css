@@ -176,6 +176,21 @@
   .rax-deer-overlay {
     opacity: 0.92;
   }
+
+  /* Disable any kind of browser-level zoom interaction.
+     Used on the measure workspace where pinch/double-tap zoom
+     conflicts with the canvas tools. */
+  .no-zoom {
+    touch-action: pan-x pan-y;
+    -ms-touch-action: pan-x pan-y;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: contain;
+  }
+  .no-zoom * {
+    touch-action: manipulation;
+  }
 }
 
 /* Map Component Styles */
