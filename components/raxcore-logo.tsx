@@ -6,14 +6,14 @@ interface RaxcoreLogoProps {
 }
 
 export function RaxcoreLogo({ size = 36, className }: RaxcoreLogoProps) {
-  // Scale factor based on viewBox 800x400, targeting the given height
-  const aspectRatio = 800 / 400
+  // Scale factor based on viewBox 1000x500, targeting the given height
+  const aspectRatio = 1000 / 500
   const height = size
   const width = height * aspectRatio
 
   return (
     <svg
-      viewBox="0 0 800 400"
+      viewBox="0 0 1000 500"
       xmlns="http://www.w3.org/2000/svg"
       width={width}
       height={height}
@@ -21,99 +21,75 @@ export function RaxcoreLogo({ size = 36, className }: RaxcoreLogoProps) {
       aria-label="RAXcore Antler Analytics"
     >
       <defs>
-        <linearGradient id="copperGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#d4a84b" />
-          <stop offset="50%" stopColor="#b87248" />
-          <stop offset="100%" stopColor="#8b5a2b" />
+        {/* Copper Metallic Gradient */}
+        <linearGradient id="copper" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#b87333" />
+          <stop offset="50%" stopColor="#dfaf8d" />
+          <stop offset="100%" stopColor="#8b4513" />
         </linearGradient>
-        <linearGradient id="frameGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#2a2a2a" />
-          <stop offset="100%" stopColor="#1a1a1a" />
-        </linearGradient>
+        
+        {/* Simple Shadow for Compatibility */}
+        <filter id="shadow">
+          <feDropShadow dx="0" dy="4" stdDeviation="3" floodOpacity="0.5"/>
+        </filter>
       </defs>
 
-      {/* Frame background */}
-      <g id="frame">
-        <rect
-          x="50"
-          y="50"
-          width="700"
-          height="300"
-          rx="12"
-          fill="url(#frameGradient)"
-          stroke="#333"
-          strokeWidth="2"
-        />
+      {/* 1. THE PLATE */}
+      <path 
+        d="M 80,60 H 400 L 420,80 H 580 L 600,60 H 920 A 20,20 0 0 1 940,80 V 180 L 920,200 V 280 L 940,300 V 400 A 20,20 0 0 1 920,420 H 600 L 580,400 H 420 L 400,420 H 80 A 20,20 0 0 1 60,400 V 300 L 80,280 V 200 L 60,180 V 80 A 20,20 0 0 1 80,60 Z" 
+        fill="#1e1e1e" 
+        stroke="#444" 
+        strokeWidth="2" 
+        filter="url(#shadow)" 
+      />
+
+      {/* 2. BRANDING */}
+      <g fontFamily="system-ui, -apple-system, sans-serif" textAnchor="middle" fontWeight="bold">
+        {/* RAXCORE */}
+        <text x="500" y="140" fontSize="60" letterSpacing="3">
+          <tspan fill="url(#copper)">RAX</tspan>
+          <tspan fill="#a0a0a0">CORE</tspan>
+        </text>
+        {/* Antler Analytics */}
+        <text x="500" y="185" fontSize="28" fontWeight="normal" letterSpacing="1.5">
+          <tspan fill="url(#copper)">A</tspan>
+          <tspan fill="#a0a0a0">ntler </tspan>
+          <tspan fill="#a0a0a0">Analytics</tspan>
+        </text>
       </g>
 
-      {/* Circuit traces */}
-      <g id="traces" stroke="#4a4a4a" strokeWidth="1.5" fill="none">
-        {/* Left side traces */}
-        <path d="M70,100 L120,100 L140,120 L140,180" />
-        <path d="M70,150 L100,150 L120,170 L120,280" />
-        <path d="M70,200 L90,200 L90,250 L130,250" />
-        
-        {/* Right side traces */}
-        <path d="M730,100 L680,100 L660,120 L660,180" />
-        <path d="M730,150 L700,150 L680,170 L680,280" />
-        <path d="M730,200 L710,200 L710,250 L670,250" />
-        
-        {/* Bottom traces */}
-        <path d="M200,330 L200,300 L280,300" />
-        <path d="M600,330 L600,300 L520,300" />
-        
-        {/* Connection nodes */}
-        <circle cx="140" cy="180" r="4" fill="#4a4a4a" />
-        <circle cx="120" cy="280" r="4" fill="#4a4a4a" />
-        <circle cx="130" cy="250" r="4" fill="#4a4a4a" />
-        <circle cx="660" cy="180" r="4" fill="#4a4a4a" />
-        <circle cx="680" cy="280" r="4" fill="#4a4a4a" />
-        <circle cx="670" cy="250" r="4" fill="#4a4a4a" />
+      {/* 3. CIRCUITRY */}
+      <g stroke="#666" strokeWidth="1.2" fill="none" opacity="0.5">
+        <path d="M 120,240 H 280 L 310,270" />
+        <path d="M 180,240 L 150,210 V 170 H 120" />
+        <path d="M 880,240 H 720 L 690,270" />
+        <path d="M 820,240 L 850,210 V 170 H 880" />
       </g>
 
-      {/* Antler wireframe (simplified) */}
-      <g id="antler-wireframe" stroke="#666" strokeWidth="0.8" fill="none" opacity="0.5">
-        {/* Left antler outline */}
-        <path d="M300,280 Q280,220 260,180 Q250,160 270,140 Q290,120 320,130" />
-        <path d="M280,200 Q260,180 250,150" />
-        <path d="M290,170 Q275,150 280,130" />
-        
-        {/* Right antler outline */}
-        <path d="M500,280 Q520,220 540,180 Q550,160 530,140 Q510,120 480,130" />
-        <path d="M520,200 Q540,180 550,150" />
-        <path d="M510,170 Q525,150 520,130" />
-        
-        {/* Center beam */}
-        <path d="M360,280 L360,250 Q380,230 400,230 Q420,230 440,250 L440,280" />
+      {/* 4. ANTLERS */}
+      <g transform="translate(500, 340)" stroke="#ffffff" strokeWidth="0.8" fill="none" opacity="0.6">
+        <g id="antler-shape">
+          <path d="M -10,10 Q -60,-10 -90,-80 Q -100,-120 -110,-180"/>
+          <path d="M -20,15 Q -70,-5 -95,-80 Q -105,-120 -115,-180"/>
+          <path d="M -85,-70 Q -60,-80 -50,-100 Q -40,-130 -30,-150"/>
+          <path d="M -15,10 Q -40,-50 -70,-50"/>
+        </g>
+        {/* Mirrored right antler */}
+        <g transform="scale(-1, 1)">
+          <path d="M -10,10 Q -60,-10 -90,-80 Q -100,-120 -110,-180"/>
+          <path d="M -20,15 Q -70,-5 -95,-80 Q -105,-120 -115,-180"/>
+          <path d="M -85,-70 Q -60,-80 -50,-100 Q -40,-130 -30,-150"/>
+          <path d="M -15,10 Q -40,-50 -70,-50"/>
+        </g>
+        <path d="M -10,10 Q 0,25 10,10" />
       </g>
 
-      {/* Main text */}
-      <text
-        x="400"
-        y="200"
-        textAnchor="middle"
-        fontFamily="system-ui, -apple-system, sans-serif"
-        fontSize="72"
-        fontWeight="700"
-        letterSpacing="8"
-      >
-        <tspan fill="url(#copperGradient)">RAX</tspan>
-        <tspan fill="#999">CORE</tspan>
-      </text>
-
-      {/* Tagline */}
-      <text
-        x="400"
-        y="245"
-        textAnchor="middle"
-        fontFamily="system-ui, -apple-system, sans-serif"
-        fontSize="14"
-        fontWeight="500"
-        letterSpacing="4"
-        fill="#666"
-      >
-        ANTLER ANALYTICS
-      </text>
+      {/* 5. SCALE */}
+      <path 
+        d="M 400,400 H 600 M 400,400 V 410 M 450,400 V 410 M 500,400 V 420 M 550,400 V 410 M 600,400 V 410" 
+        stroke="#b87333" 
+        strokeWidth="1.5" 
+      />
     </svg>
   )
 }
