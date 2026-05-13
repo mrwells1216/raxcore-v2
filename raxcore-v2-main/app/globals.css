@@ -1,0 +1,204 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* RAXcore Premium Outdoor Theme - Light Mode */
+  --background: oklch(0.98 0.008 45);
+  --foreground: oklch(0.15 0.02 40);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.02 40);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.02 40);
+  --primary: oklch(0.42 0.08 35);
+  --primary-foreground: oklch(0.98 0.005 45);
+  --secondary: oklch(0.94 0.012 45);
+  --secondary-foreground: oklch(0.25 0.03 40);
+  --muted: oklch(0.94 0.012 45);
+  --muted-foreground: oklch(0.45 0.02 40);
+  --accent: oklch(0.55 0.09 45);
+  --accent-foreground: oklch(0.98 0.005 45);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.88 0.015 45);
+  --input: oklch(0.88 0.015 45);
+  --ring: oklch(0.42 0.08 35);
+  --chart-1: oklch(0.42 0.08 35);
+  --chart-2: oklch(0.55 0.09 45);
+  --chart-3: oklch(0.45 0.06 200);
+  --chart-4: oklch(0.65 0.1 60);
+  --chart-5: oklch(0.5 0.12 30);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.96 0.008 45);
+  --sidebar-foreground: oklch(0.15 0.02 40);
+  --sidebar-primary: oklch(0.42 0.08 35);
+  --sidebar-primary-foreground: oklch(0.98 0.005 45);
+  --sidebar-accent: oklch(0.92 0.012 45);
+  --sidebar-accent-foreground: oklch(0.25 0.03 40);
+  --sidebar-border: oklch(0.88 0.015 45);
+  --sidebar-ring: oklch(0.42 0.08 35);
+  
+  /* Custom tokens */
+  --success: oklch(0.50 0.10 35);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.65 0.15 75);
+  --warning-foreground: oklch(0.2 0.02 40);
+}
+
+.dark {
+  /* RAXCORE — gunmetal panel + copper/rose-gold accent (matched to brand plate) */
+  --background: #1a1816;
+  --foreground: #e4dcd0;
+  --card: #222018;
+  --card-foreground: #e4dcd0;
+  --popover: #222018;
+  --popover-foreground: #e4dcd0;
+
+  /* Copper — matched to the exact tone on the brand plate logo */
+  --primary: #a86840;
+  --primary-foreground: #0e0c0a;
+  --secondary: #272320;
+  --secondary-foreground: #c0a888;
+  --muted: #272320;
+  --muted-foreground: #7a6a58;
+  --accent: #b87248;
+  --accent-foreground: #0e0c0a;
+  --destructive: #8b2c2c;
+  --destructive-foreground: #e4dcd0;
+  --border: #3a2e22;
+  --input: #2a2420;
+  --ring: #a86840;
+
+  /* Charts */
+  --chart-1: #a86840;
+  --chart-2: #b87248;
+  --chart-3: #4a7c44;
+  --chart-4: #c08030;
+  --chart-5: #6e3e18;
+
+  /* Sidebar — slightly darker than main bg, matching the plate background */
+  --sidebar: #131110;
+  --sidebar-foreground: #e4dcd0;
+  --sidebar-primary: #a86840;
+  --sidebar-primary-foreground: #0e0c0a;
+  --sidebar-accent: #272320;
+  --sidebar-accent-foreground: #c0a888;
+  --sidebar-border: #3a2e22;
+  --sidebar-ring: #a86840;
+
+  /* Semantic */
+  --success: #4a7c44;
+  --success-foreground: #e4dcd0;
+  --warning: #c08030;
+  --warning-foreground: #0e0c0a;
+
+  /* RAXCORE copper scale — matched exactly to the logo plate */
+  --bronze-light: #b87248;
+  --bronze-mid:   #a86840;
+  --bronze-dark:  #5c3418;
+
+  /* Scan / tactical green */
+  --scan-green: #5ab850;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-bronze-light: var(--bronze-light);
+  --color-bronze-mid: var(--bronze-mid);
+  --color-bronze-dark: var(--bronze-dark);
+  --color-scan-green: var(--scan-green);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Ensure full-page scroll works on iOS Safari */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  
+  /* RaX Deer Overlay Styling */
+  .rax-deer-overlay {
+    opacity: 0.92;
+  }
+}
+
+/* Map Component Styles */
+@layer components {
+  /* Ensure map dialogs appear above map */
+  .map-dialog-overlay {
+    z-index: 10000 !important;
+  }
+  .map-dialog-content {
+    z-index: 10001 !important;
+  }
+  
+  /* Custom marker styles for react-simple-maps */
+  .rsm-marker {
+    cursor: pointer;
+  }
+  .rsm-marker:hover {
+    transform: scale(1.1);
+    transition: transform 0.15s ease-in-out;
+  }
+  
+  /* State geography hover effects */
+  .rsm-geography {
+    transition: fill 0.2s ease-in-out, stroke 0.2s ease-in-out;
+  }
+}
