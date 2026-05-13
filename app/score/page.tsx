@@ -87,8 +87,14 @@ function ScorePageContent() {
 export default function ScorePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-svh flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      <div className="min-h-svh flex flex-col items-center justify-center bg-background gap-4">
+        <div className="spinner-bronze" />
+        <p 
+          className="text-xs font-mono tracking-widest uppercase"
+          style={{ color: 'var(--bronze-mid)' }}
+        >
+          Loading...
+        </p>
       </div>
     }>
       <ScorePageContent />

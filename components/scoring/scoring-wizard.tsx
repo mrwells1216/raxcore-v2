@@ -325,18 +325,44 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   if (isAnalyzing) {
     return (
       <div className="max-w-2xl mx-auto px-4 pt-6">
-        <div className="rounded-2xl border border-border/60 bg-card p-10 flex flex-col items-center justify-center text-center gap-5">
+        <div 
+          className="relative rounded-xl p-12 flex flex-col items-center justify-center text-center gap-6 overflow-hidden"
+          style={{
+            border: '1px solid var(--bronze-dark)',
+            background: 'linear-gradient(180deg, rgba(28,24,20,0.98) 0%, rgba(22,20,18,1) 100%)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+          }}
+        >
+          {/* Scan line effect */}
+          <div className="scan-effect absolute inset-0 overflow-hidden pointer-events-none" />
+          
+          {/* Spinner */}
           <div className="relative">
-            <div className="h-16 w-16 rounded-full border-2 border-primary/20 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div 
+              className="h-20 w-20 rounded-full flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(145deg, var(--bronze-mid), var(--bronze-dark))',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,200,100,0.2)',
+              }}
+            >
+              <Loader2 className="h-9 w-9 animate-spin" style={{ color: '#0d0a06' }} />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <h3 className="text-base font-semibold">Analyzing Your Buck</h3>
+          
+          <div className="space-y-2 relative z-10">
+            <h3 
+              className="text-lg font-bold tracking-wider"
+              style={{ color: 'var(--bronze-light)' }}
+            >
+              Analyzing Your Buck
+            </h3>
             <p className="text-sm text-muted-foreground">
               Detecting landmarks and calculating measurements...
             </p>
           </div>
+          
+          {/* Corner marks */}
+          <div className="corner-marks absolute inset-0 pointer-events-none" />
         </div>
       </div>
     )
@@ -372,7 +398,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         </div>
       </Section>
 
-      {/* ── 2. Photo upload / scan ───────────────────────────────────────── */}
+      {/* ── 2. Photo upload / scan ──────���────────────────────────────────── */}
       <Section label={inputMode === 'smart-scan' ? 'Guided Camera Capture' : 'Add Photos'}>
         {inputMode === 'guided-upload' && (
           <GuidedUploadPanel onChange={handleGridChange} initialImages={gridImages} />

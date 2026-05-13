@@ -131,27 +131,41 @@ export default function MapPage() {
         {/* Stats Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Map</h1>
+            <h1 
+              className="text-2xl font-bold tracking-wider"
+              style={{ color: 'var(--bronze-light)' }}
+            >
+              Territory Map
+            </h1>
             <p className="text-muted-foreground text-sm">
               Track properties, sightings, and buck locations
             </p>
           </div>
           
-          <div className="flex flex-wrap gap-4">
-            <div className="flex items-center gap-2 text-sm">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{statsData?.totalProperties || 0}</span>
-              <span className="text-muted-foreground">Properties</span>
+          <div className="flex flex-wrap gap-3">
+            <div 
+              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg"
+              style={{ background: 'rgba(184,114,72,0.1)', border: '1px solid var(--bronze-dark)' }}
+            >
+              <Building2 className="h-4 w-4" style={{ color: 'var(--bronze-mid)' }} />
+              <span className="font-bold" style={{ color: 'var(--bronze-light)' }}>{statsData?.totalProperties || 0}</span>
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">Properties</span>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{statsData?.totalPins || 0}</span>
-              <span className="text-muted-foreground">Pins</span>
+            <div 
+              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg"
+              style={{ background: 'rgba(184,114,72,0.1)', border: '1px solid var(--bronze-dark)' }}
+            >
+              <MapPin className="h-4 w-4" style={{ color: 'var(--bronze-mid)' }} />
+              <span className="font-bold" style={{ color: 'var(--bronze-light)' }}>{statsData?.totalPins || 0}</span>
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">Pins</span>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Target className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{statsData?.mappedBucks || 0}</span>
-              <span className="text-muted-foreground">Mapped Bucks</span>
+            <div 
+              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg"
+              style={{ background: 'rgba(90,184,80,0.1)', border: '1px solid rgba(90,184,80,0.3)' }}
+            >
+              <Target className="h-4 w-4" style={{ color: 'var(--scan-green)' }} />
+              <span className="font-bold" style={{ color: 'var(--scan-green)' }}>{statsData?.mappedBucks || 0}</span>
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">Mapped</span>
             </div>
           </div>
         </div>

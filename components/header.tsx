@@ -93,7 +93,7 @@ function SidePanelContents({
       </div>
 
       {/* Navigation list */}
-      <nav className="flex flex-col gap-1 p-3 flex-1 overflow-y-auto" aria-label="Main navigation">
+      <nav className="flex flex-col gap-1.5 p-3 flex-1 overflow-y-auto" aria-label="Main navigation">
         {navigation.map((item) => {
           const active = isActive(item.href)
           return (
@@ -101,13 +101,14 @@ function SidePanelContents({
               key={item.name}
               href={item.href}
               onClick={onClose}
-              className="flex items-center gap-3 px-3 py-3 rounded text-sm font-bold tracking-wider uppercase min-h-[48px] transition-colors"
+              className="group relative flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-bold tracking-wider uppercase min-h-[48px] transition-all duration-200"
               style={
                 active
                   ? {
-                      background: 'rgba(160,120,40,0.18)',
+                      background: 'linear-gradient(135deg, rgba(184,114,72,0.18) 0%, rgba(92,52,24,0.12) 100%)',
                       color: 'var(--bronze-light)',
                       border: '1px solid var(--bronze-dark)',
+                      boxShadow: 'inset 0 1px 0 rgba(184,114,72,0.15), 0 2px 8px rgba(0,0,0,0.3)',
                     }
                   : {
                       color: 'var(--muted-foreground)',
@@ -115,11 +116,20 @@ function SidePanelContents({
                     }
               }
             >
+              {/* Active indicator bar */}
+              {active && (
+                <span
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r"
+                  style={{ background: 'var(--bronze-light)' }}
+                />
+              )}
               <item.icon
-                className="h-5 w-5 shrink-0"
+                className="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
                 style={{ color: active ? 'var(--bronze-light)' : 'var(--bronze-mid)' }}
               />
-              {item.name}
+              <span className="transition-colors duration-200 group-hover:text-[var(--bronze-light)]">
+                {item.name}
+              </span>
             </Link>
           )
         })}

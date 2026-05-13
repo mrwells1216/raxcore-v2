@@ -193,6 +193,112 @@
   }
 }
 
+/* ─── RAXCORE Premium Visual Effects ─────────────────────────────────────── */
+@layer components {
+  /* Bronze button gradient (reusable) */
+  .btn-bronze {
+    background: linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 55%, var(--bronze-dark) 100%);
+    color: #0d0a06;
+    box-shadow: 0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 4px 16px rgba(0,0,0,0.55);
+    transition: all 0.2s ease;
+  }
+  .btn-bronze:hover {
+    filter: brightness(1.08);
+  }
+  .btn-bronze:active {
+    transform: scale(0.98);
+  }
+
+  /* Card with subtle bronze glow on hover */
+  .card-hover-glow {
+    transition: all 0.25s ease;
+    border: 1px solid var(--border);
+  }
+  .card-hover-glow:hover {
+    border-color: var(--bronze-dark);
+    box-shadow: 0 0 20px rgba(184,114,72,0.12), 0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  /* Tactical corner marks (for panels) */
+  .corner-marks::before,
+  .corner-marks::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-color: var(--bronze-dark);
+    border-style: solid;
+    pointer-events: none;
+    opacity: 0.6;
+  }
+  .corner-marks::before {
+    top: 8px;
+    left: 8px;
+    border-width: 1px 0 0 1px;
+  }
+  .corner-marks::after {
+    bottom: 8px;
+    right: 8px;
+    border-width: 0 1px 1px 0;
+  }
+
+  /* Subtle scan line animation */
+  @keyframes scan-line {
+    0% { transform: translateY(-100%); opacity: 0; }
+    10% { opacity: 0.5; }
+    90% { opacity: 0.5; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+  .scan-effect::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--scan-green), transparent);
+    animation: scan-line 2.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* Score display with embossed look */
+  .score-emboss {
+    text-shadow: 0 1px 0 rgba(255,230,150,0.15), 0 -1px 0 rgba(0,0,0,0.5);
+  }
+
+  /* Subtle pulse for active/live indicators */
+  @keyframes bronze-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .bronze-pulse {
+    animation: bronze-pulse 2s ease-in-out infinite;
+  }
+
+  /* Premium loading spinner */
+  @keyframes spin-bronze {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .spinner-bronze {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--bronze-dark);
+    border-top-color: var(--bronze-light);
+    border-radius: 50%;
+    animation: spin-bronze 0.8s linear infinite;
+  }
+
+  /* Grain texture overlay (for depth) */
+  .grain-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity: 0.03;
+    pointer-events: none;
+  }
+}
+
 /* Map Component Styles */
 @layer components {
   /* Ensure map dialogs appear above map */
