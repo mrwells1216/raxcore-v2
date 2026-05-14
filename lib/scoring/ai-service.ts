@@ -17,6 +17,7 @@ import type {
 } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES, ANATOMICAL_REFERENCES, CONFIDENCE_THRESHOLDS } from '@/lib/constants'
 import { loadFieldBiases, applyBiasCorrections } from './prompt-bias-correction'
+import { HAT_DIMENSIONS } from './hat-reference'
 import { createClient } from '@/lib/supabase/server'
 import { 
   scoreWithVision, 
@@ -69,7 +70,7 @@ export interface ScoringInput {
   // If not provided, uses the active calibration profile
   calibrationProfile?: CalibrationProfile | null
   precisionReferenceProfile?: PrecisionReferenceProfile | null
-  referenceObject?: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null
+  referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -1335,6 +1336,30 @@ async function buildVisionScoringOutput(
     } else if (!ring.innerDiameterInches) {
       explanations.push(
         'Ring reference indicated but ring size not specified — not used for scale estimation.'
+      )
+    }
+  }
+
+  // Hat reference confidence note (independent of ring — both can be present)
+  if (input.referenceObject?.hat?.present) {
+    const hat = input.referenceObject.hat
+    if (hat.hatType && hat.brimWidthInches) {
+      explanations.push(
+        `Hat reference provided: ${HAT_DIMENSIONS[hat.hatType].label}, ` +
+        `approx. ${hat.brimWidthInches}" brim width. ` +
+        `Used only as an estimated reference if clearly visible. ` +
+        `Brim width varies by manufacturer (~±0.25"). ` +
+        `Ruler or tape calibration is recommended for verified scoring.`
+      )
+    } else if (hat.hatType && hat.crownHeightInches) {
+      explanations.push(
+        `Hat reference provided: ${HAT_DIMENSIONS[hat.hatType].label}, ` +
+        `crown only (no brim — lower reliability). ` +
+        `Approx. ${hat.crownHeightInches}" crown height.`
+      )
+    } else if (!hat.hatType) {
+      explanations.push(
+        'Hat reference indicated but hat type not specified — not used for scale estimation.'
       )
     }
   }

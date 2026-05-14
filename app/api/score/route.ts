@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   const referencePlacementRaw = formData.get('reference_placement') as string | null
   const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
   const referenceObjectRaw = formData.get('reference_object') as string | null
-  let referenceObject: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null = null
+  let referenceObject: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null = null
   if (referenceObjectRaw) {
     try {
       referenceObject = JSON.parse(referenceObjectRaw)

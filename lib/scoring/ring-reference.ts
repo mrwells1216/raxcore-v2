@@ -1,4 +1,4 @@
-import type { RingReferenceInput } from './ring-reference-types'
+import type { RingReferenceInput } from './reference-object-types'
 
 // US ring size → approximate inner diameter (mm), standard jeweler table
 // Source: US standard ring sizing

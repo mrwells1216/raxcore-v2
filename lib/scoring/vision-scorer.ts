@@ -29,6 +29,7 @@ import {
 } from './fallback-handler'
 import { logEventFireForget } from '@/lib/monitoring/service'
 import type { PrecisionReferenceProfile } from './reference-mode'
+import { HAT_DIMENSIONS } from './hat-reference'
 
 // OpenAI is the only provider for scoring vision calls.
 // Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
@@ -86,7 +87,7 @@ export interface VisionScoringInput {
   captureDevice?: string
   mainFramePoints?: number
   precisionReference?: PrecisionReferenceProfile | null
-  referenceObject?: import('@/lib/scoring/ring-reference-types').ScoringReferenceObjectInput | null
+  referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -320,6 +321,23 @@ RING REFERENCE (user-reported, estimated only)
 `
       : ''
 
+  const hat = input.referenceObject?.hat
+  const hatReferenceBlock =
+    hat?.present && hat.hatType
+      ? `
+HAT REFERENCE (user-reported, estimated only)
+- The user reports a ${HAT_DIMENSIONS[hat.hatType].label} is visible in the image.
+${hat.brimWidthInches
+        ? `- Approximate brim width: ${hat.brimWidthInches} inches (use as scale reference).`
+        : `- This hat has no visible brim. Use crown height only as a weak reference (~${hat.crownHeightInches}" tall).`}
+- Use this ONLY as an estimated scale reference if the hat is clearly visible.
+- Hat brim widths vary by manufacturer — treat as ±0.25" tolerance.
+- Do NOT rely on this reference if the hat is angled, occluded, distorted, or far from the antlers.
+- Treat hat-based scale as lower confidence than a ruler or tape measure.
+- This does NOT satisfy precision reference mode.
+`
+      : ''
+
   return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
@@ -337,6 +355,7 @@ ${angleDescriptions}
 
 ${precisionReferenceBlock}
 ${ringReferenceBlock}
+${hatReferenceBlock}
 
 ═══════════════════════════════════════════════════════════════
 MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS

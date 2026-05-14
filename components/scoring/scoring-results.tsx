@@ -25,6 +25,7 @@ import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { BCScoreSheet } from './bc-score-sheet'
 import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
+import { TrophyEligibilityCta } from '@/components/trophy-room/trophy-eligibility-cta'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { FieldProvenanceMap } from '@/lib/rules-engine'
@@ -990,6 +991,9 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         />
       )}
 
+
+      {/* Trophy Room eligibility CTA */}
+      {result.buck?.id && <TrophyEligibilityCta buckId={result.buck.id} />}
 
       {/* Human Review / Edit Mode for AI Score Sheets */}
       {result.scoreSheet && normalized.predictionId && result.buck?.id && (

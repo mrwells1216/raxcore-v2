@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Menu, X, Target, History, Map, Library, Shield, Ruler, Home,
+  Menu, X, Target, History, Map, Library, Shield, Ruler, Home, Trophy,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet'
@@ -24,12 +24,13 @@ const publicNavigation = [
 ]
 
 const authenticatedNavigation = [
-  { name: 'Home',    href: '/',        icon: Home },
-  { name: 'Score',   href: '/score',   icon: Target },
-  { name: 'Measure', href: '/measure', icon: Ruler },
-  { name: 'Library', href: '/library', icon: Library },
-  { name: 'Map',     href: '/map',     icon: Map },
-  { name: 'History', href: '/history', icon: History },
+  { name: 'Home',         href: '/',             icon: Home },
+  { name: 'Score',        href: '/score',        icon: Target },
+  { name: 'Measure',      href: '/measure',      icon: Ruler },
+  { name: 'Library',      href: '/library',      icon: Library },
+  { name: 'Trophy Room',  href: '/trophy-room',  icon: Trophy },
+  { name: 'Map',          href: '/map',          icon: Map },
+  { name: 'History',      href: '/history',      icon: History },
 ]
 
 const adminNavigation = [
