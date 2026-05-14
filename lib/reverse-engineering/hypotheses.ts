@@ -42,8 +42,8 @@ export function applyHypothesis(base: Measurements, params: HypothesisParams): M
   if (params.swapSides) {
     const swapped: Measurements = { ...m }
     for (const [l, r] of LEFT_RIGHT_FIELDS) {
-      swapped[l] = m[r]
-      swapped[r] = m[l]
+      swapped[l] = m[r] ?? null
+      swapped[r] = m[l] ?? null
     }
     m = swapped
   }
@@ -94,7 +94,7 @@ export function applyHypothesis(base: Measurements, params: HypothesisParams): M
     const over: Measurements = { ...m }
     for (const [key, val] of Object.entries(params.overrides)) {
       if (val !== undefined) {
-        (over as Record<string, unknown>)[key] = val
+        (over as unknown as Record<string, unknown>)[key] = val
       }
     }
     m = over

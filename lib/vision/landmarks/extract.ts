@@ -432,6 +432,13 @@ function fuseLandmarks(
     estimated_eye_to_eye: eyeToEye ?? visionLandmarks?.eye_to_eye ?? null,
     estimated_ear_tip_to_tip: earTipToTip ?? visionLandmarks?.ear_tip_to_tip ?? null,
     estimated_skull_width: null, // derived later if needed
+    estimated_pedicle_spacing: null,
+    estimated_eye_to_pedicle: null,
+    estimated_eye_box_width: null,
+    estimated_eye_box_height: null,
+    estimated_ear_base_spacing: null,
+    estimated_nose_bridge_length: null,
+    estimated_muzzle_width: null,
     fusion_conflicts: conflicts,
   }
 }

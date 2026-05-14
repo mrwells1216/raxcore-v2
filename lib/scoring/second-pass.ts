@@ -482,7 +482,7 @@ function applyMeasurementWeights(
         if (range) {
           const typical = (range.typical_min + range.typical_max) / 2
           const adjusted = value * weight + typical * (1 - weight)
-          ;(result as Record<string, number | null>)[key] = Number(adjusted.toFixed(1))
+          ;(result as unknown as Record<string, number | null>)[key] = Number(adjusted.toFixed(1))
         }
       }
     }
@@ -529,9 +529,9 @@ function applyTighterConstraints(
         const newLarger = larger - adjustment
         const newSmaller = smaller + adjustment
         
-        ;(result as Record<string, number | null>)[leftKey] = 
+        ;(result as unknown as Record<string, number | null>)[leftKey] = 
           Number((left === larger ? newLarger : newSmaller).toFixed(1))
-        ;(result as Record<string, number | null>)[rightKey] = 
+        ;(result as unknown as Record<string, number | null>)[rightKey] = 
           Number((right === larger ? newLarger : newSmaller).toFixed(1))
       }
     }
@@ -557,7 +557,7 @@ function applyScalingAdjustment(
         if (range) {
           const typical = (range.typical_min + range.typical_max) / 2
           const pulled = value * adjustments.scalingStrength + typical * pullStrength
-          ;(result as Record<string, number | null>)[field] = Number(pulled.toFixed(1))
+          ;(result as unknown as Record<string, number | null>)[field] = Number(pulled.toFixed(1))
         }
       }
     }
@@ -841,7 +841,7 @@ function blendResults(
     const val2 = secondPass.measurements[field as keyof Measurements]
     if (typeof val1 === 'number' && typeof val2 === 'number') {
       const blended = val1 * w1 + val2 * w2
-      ;(blendedMeasurements as Record<string, number | null>)[field] = Number(blended.toFixed(1))
+      ;(blendedMeasurements as unknown as Record<string, number | null>)[field] = Number(blended.toFixed(1))
     }
   }
   

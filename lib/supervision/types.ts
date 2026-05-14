@@ -58,7 +58,7 @@ export type LearningActionType =
   | 'fine_tuning_label_candidate'
   | 'ui_guidance_candidate'
 
-export type LearningActionStatus = 'pending' | 'approved' | 'rejected' | 'implemented' | 'archived'
+export type LearningActionStatus = 'pending' | 'approved' | 'rejected' | 'implemented' | 'archived' | 'applied'
 
 export type MitigationStatus = 'unaddressed' | 'in_progress' | 'mitigated' | 'wont_fix'
 

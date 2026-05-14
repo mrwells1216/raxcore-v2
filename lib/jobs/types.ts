@@ -18,6 +18,10 @@ export type JobType =
   // Multi-view fusion (Phase 49)
   | 'multiview_fusion'
   | 'multiview_batch'
+  | 'multi_view_scoring'
+  | 'multi_view_scoring_heavy'
+  | 'multi_view_benchmark_run'
+  | 'multi_view_stats_refresh'
   // Reverse engineering precision pass (Phase 50)
   | 'reverse_precision_pass'
   // Structural hypothesis solving (Phase 51)

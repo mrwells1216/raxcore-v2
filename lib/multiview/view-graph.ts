@@ -67,7 +67,7 @@ function computeViewScore(view: ViewInput): number {
  * Compute per-family contribution scores for a view
  */
 function computeFamilyContributions(view: ViewInput): Record<MeasurementFamily, number> {
-  const contributions: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0 }
+  const contributions: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0, deduction: 0 }
   const families: MeasurementFamily[] = ['spread', 'beam', 'tine', 'mass']
 
   for (const family of families) {
@@ -461,6 +461,7 @@ export function getFamilySupport(graph: ViewGraph): Record<MeasurementFamily, {
     beam: { primaryViewId: null, secondaryViewIds: [], totalSupport: 0 },
     tine: { primaryViewId: null, secondaryViewIds: [], totalSupport: 0 },
     mass: { primaryViewId: null, secondaryViewIds: [], totalSupport: 0 },
+    deduction: { primaryViewId: null, secondaryViewIds: [], totalSupport: 0 },
   }
 
   const acceptedNodes = graph.nodes.filter(n => n.isAccepted && !n.isOutlier)

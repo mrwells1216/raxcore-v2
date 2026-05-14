@@ -747,7 +747,7 @@ export async function buildArtifactSummary(
     structural_topology_changed: structuralRun?.topology_changed,
     structural_change_reason: structuralRun?.change_reason,
     hard_case_pattern_ids: (patterns || []).map(p => p.pattern_id),
-    hard_case_severity: patterns?.length ? Math.max(...patterns.map(p => (p.hard_case_patterns as { severity: number })?.severity || 0)) : undefined,
+    hard_case_severity: patterns?.length ? Math.max(...patterns.map(p => (p.hard_case_patterns as unknown as { severity: number })?.severity || 0)) : undefined,
     predicted_gross: prediction?.predicted_gross,
   }
 }

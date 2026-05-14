@@ -202,7 +202,7 @@ function MetricCard({
   title: string
   value: string
   subtitle: string
-  icon: React.ElementType
+  icon: React.ComponentType<{ className?: string }>
   trend: 'good' | 'warning' | 'bad' | 'neutral'
 }) {
   const trendColors = {

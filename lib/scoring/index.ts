@@ -13,7 +13,8 @@ export * from './learning-correction'
 export * from './weighted-learning-correction'
 // Phase 42: Geometry consistency and reference ranking
 export * from './geometry-consistency'
-export * from './reference-ranking'
+export type { ReferenceSource, ReferenceQuality, ReferenceRanking, ReferenceRankingInput, BuildReferenceConsensusInput } from './reference-ranking'
+export { rankReferenceSources, buildReferenceConsensus, getReferenceSourceLabel, getReferenceConfidenceTier, referenceRankingToMetadata, getReferenceRankingSummary } from './reference-ranking'
 // Phase 47: Segment-aware confidence intervals and photo guidance
 export * from './segment-confidence-interval'
 export * from './next-photo-guidance'

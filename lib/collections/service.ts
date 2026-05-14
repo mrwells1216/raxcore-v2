@@ -88,7 +88,7 @@ export async function getUserCollections(userId: string): Promise<CollectionWith
         .limit(1)
         .single()
 
-      const coverThumbnail = coverBuck?.bucks?.buck_images?.[0]?.public_url || null
+      const coverThumbnail = (coverBuck?.bucks as { buck_images?: { public_url?: string | null }[] }[] | null | undefined)?.[0]?.buck_images?.[0]?.public_url || null
 
       return {
         ...collection,

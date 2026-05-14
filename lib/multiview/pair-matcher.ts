@@ -49,6 +49,9 @@ const FAMILY_ANGLE_PREFERENCE: Record<MeasurementFamily, Record<AngleClass, numb
   mass: {
     left: 0.9, right: 0.9, front_left: 0.7, front_right: 0.7, front: 0.5, back: 0.6, unknown: 0.2,
   },
+  deduction: {
+    left: 0.5, right: 0.5, front_left: 0.5, front_right: 0.5, front: 0.5, back: 0.3, unknown: 0.2,
+  },
 }
 
 // ============================================================================
@@ -108,8 +111,8 @@ function computeLandmarkOverlap(
 
   // Extract detected landmarks from each view
   for (const key of LANDMARK_KEYS) {
-    const valueA = (landmarksA as Record<string, unknown>)[key.name]
-    const valueB = (landmarksB as Record<string, unknown>)[key.name]
+    const valueA = (landmarksA as unknown as Record<string, unknown>)[key.name]
+    const valueB = (landmarksB as unknown as Record<string, unknown>)[key.name]
     
     if (valueA !== null && valueA !== undefined) {
       detectedA.add(key.name)
@@ -126,7 +129,7 @@ function computeLandmarkOverlap(
   const overlap = union.size > 0 ? intersection.length / union.size : 0
 
   // Per-family overlap
-  const perFamily: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0 }
+  const perFamily: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0, deduction: 0 }
   
   for (const family of MEASUREMENT_FAMILIES) {
     const familyKeys = LANDMARK_KEYS.filter(k => k.family === family)
@@ -290,7 +293,7 @@ function computeFamilyAgreement(
   measurementsA: Partial<Measurements>,
   measurementsB: Partial<Measurements>
 ): Record<MeasurementFamily, number> {
-  const agreement: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0 }
+  const agreement: Record<MeasurementFamily, number> = { spread: 0, beam: 0, tine: 0, mass: 0, deduction: 0 }
 
   // Spread agreement
   if (measurementsA.inside_spread !== null && measurementsA.inside_spread !== undefined &&

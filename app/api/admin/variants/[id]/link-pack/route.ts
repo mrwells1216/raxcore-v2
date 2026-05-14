@@ -3,8 +3,9 @@ import { linkTrainingPackToVariant } from '@/lib/sandbox/variant-registry'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const body = await req.json()
     const { trainingPackId } = body
@@ -16,7 +17,7 @@ export async function POST(
       )
     }
 
-    await linkTrainingPackToVariant(params.id, trainingPackId)
+    await linkTrainingPackToVariant(id, trainingPackId)
 
     return NextResponse.json({
       success: true,

@@ -12,7 +12,7 @@
 
 import type { AngleType, Measurements } from '@/lib/types'
 import type { ImageAngleScore, MultiImageAngleAnalysis } from './image-angle-scoring'
-import type { MeasurementFamily } from './cross-view-conflict'
+import type { MeasurementFamily } from './segment-confidence-interval'
 import type { TrainingErrorSummary } from './training-mode'
 
 // ============================================================================
@@ -225,8 +225,8 @@ function computeCoverageScore(
   const MIN_COVERAGE = 0.4
 
   // Check if each family has adequate coverage
-  const bestScores = {
-    spread: analysis.bestImageForSpread !== null 
+  const bestScores: Record<MeasurementFamily, number> = {
+    spread: analysis.bestImageForSpread !== null
       ? analysis.images.find(i => i.imageIndex === analysis.bestImageForSpread)?.qualityAdjustedScores.spread || 0
       : 0,
     beam: analysis.bestImageForBeam !== null
@@ -238,6 +238,7 @@ function computeCoverageScore(
     mass: analysis.bestImageForMass !== null
       ? analysis.images.find(i => i.imageIndex === analysis.bestImageForMass)?.qualityAdjustedScores.mass || 0
       : 0,
+    deduction: 0,
   }
 
   for (const family of families) {

@@ -1155,6 +1155,8 @@ function getFamilyValue(measurements: Partial<Measurements>, family: Measurement
     }
     case 'deduction':
       return measurements.deductions || 0
+    default:
+      return 0
   }
 }
 
@@ -1527,7 +1529,6 @@ function buildViewGraphSummary(graph: ViewGraph, edges: ViewEdge[]): string {
 // ============================================================================
 
 export {
-  processMultiView,
   buildViewGraph,
   scorePairwiseRelationships,
   findConnectedComponents,

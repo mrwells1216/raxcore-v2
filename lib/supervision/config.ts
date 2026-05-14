@@ -57,6 +57,12 @@ export const SUPERVISION_TYPE_INFO: Record<SupervisionType, {
     priority: 'high',
     auto_confirm: false,
   },
+  multi_view_inconsistency: {
+    label: 'Multi-View Inconsistency',
+    description: 'Significant disagreement detected across multiple views',
+    priority: 'medium',
+    auto_confirm: false,
+  },
   benchmark_failure_cluster: {
     label: 'Benchmark Failure',
     description: 'Repeated failures detected in benchmark evaluation',
@@ -565,7 +571,7 @@ export function inferFailureCauses(
       
     case 'structural_solver_corrected_topology':
       causes.push({ label: 'tine_topology_confusion', confidence: 0.7 })
-      if (metadata.topology_changes?.includes?.('beam')) {
+      if (Array.isArray(metadata.topology_changes) && metadata.topology_changes.includes('beam')) {
         causes.push({ label: 'beam_tip_misread', confidence: 0.65 })
       }
       break

@@ -12,7 +12,7 @@ interface CalibrationAuditTrailProps {
   isLoading: boolean
 }
 
-const CHANGE_TYPE_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+const CHANGE_TYPE_CONFIG: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
   calibration_created: { label: 'Created', icon: Plus, color: 'text-green-600 bg-green-500/10' },
   calibration_updated: { label: 'Updated', icon: Edit, color: 'text-blue-600 bg-blue-500/10' },
   calibration_activated: { label: 'Activated', icon: Play, color: 'text-purple-600 bg-purple-500/10' },

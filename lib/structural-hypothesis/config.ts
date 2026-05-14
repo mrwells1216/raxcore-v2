@@ -102,7 +102,6 @@ export const PREFERRED_ANGLES_BY_FAMILY: Record<MeasurementFamily, string[]> = {
   beam: ['left', 'right', 'front_left', 'front_right'],
   tine: ['left', 'right', 'front_left', 'front_right'],
   mass: ['left', 'right'],
-  asymmetry: ['front', 'back'],
   deduction: ['front', 'left', 'right'],
 }
 

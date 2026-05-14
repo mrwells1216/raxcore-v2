@@ -257,7 +257,7 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
           <Geographies geography={US_TOPO_URL}>
             {({ geographies }) =>
               geographies.map((geo) => {
-                const stateName: string = geo.properties.name
+                const stateName: string = String(geo.properties.name ?? '')
                 const isFocused = focusedState === stateName
                 return (
                   <Geography

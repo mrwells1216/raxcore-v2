@@ -51,17 +51,17 @@ export async function getActiveCalibrationProfileOrDefault(): Promise<Calibratio
         })
         hasWarnedMissingTable = true
       }
-      return DEFAULT_PROFILE as CalibrationProfile
+      return DEFAULT_PROFILE as unknown as CalibrationProfile
     }
-    
+
     // No active profile found - return default
     if (!data) {
-      return DEFAULT_PROFILE as CalibrationProfile
+      return DEFAULT_PROFILE as unknown as CalibrationProfile
     }
-    
+
     return data
   } catch {
     // On any unexpected error, return default
-    return DEFAULT_PROFILE as CalibrationProfile
+    return DEFAULT_PROFILE as unknown as CalibrationProfile
   }
 }

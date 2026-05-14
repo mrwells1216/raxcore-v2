@@ -17,6 +17,7 @@ import type {
   FailureCluster,
   ScoringVariant,
   EvaluationRunStatus,
+  CalibrationProfile,
 } from '@/lib/types'
 import { getScoringVariant } from './variant-registry'
 
@@ -258,7 +259,7 @@ async function getDatasetExamples(
     return (data || []).map(d => ({
       id: d.id,
       trainingExampleId: d.training_example_id,
-      buckId: (d.training_examples as { buck_id: string })?.buck_id || '',
+      buckId: (d.training_examples as unknown as { buck_id: string })?.buck_id || '',
       groundTruthGross: d.ground_truth_gross || 0,
       groundTruthNet: d.ground_truth_net,
       state: d.state,
@@ -289,7 +290,7 @@ async function getDatasetExamples(
     return (data || []).map(d => ({
       id: d.id,
       trainingExampleId: d.training_example_id,
-      buckId: (d.training_examples as { buck_id: string })?.buck_id || '',
+      buckId: (d.training_examples as unknown as { buck_id: string })?.buck_id || '',
       groundTruthGross: d.ground_truth_gross || 0,
       groundTruthNet: d.ground_truth_net,
       state: d.state,
@@ -321,7 +322,7 @@ interface ScoreExampleResult {
 async function scoreExample(
   variant: ScoringVariant,
   example: EvaluationExample,
-  calibrationProfile: unknown | null
+  calibrationProfile: CalibrationProfile | null
 ): Promise<ScoreExampleResult> {
   const supabase = await createClient()
   const startTime = Date.now()
@@ -656,7 +657,7 @@ function computeFamilyMetrics(results: EvaluationResult[]): FamilyEvaluationMetr
 }
 
 function computeSegmentMetrics(results: EvaluationResult[]): SegmentEvaluationMetrics {
-  const groupBy = <T extends Record<string, unknown>>(
+  const groupBy = <T>(
     items: T[],
     keyFn: (item: T) => string | null
   ): Record<string, T[]> => {

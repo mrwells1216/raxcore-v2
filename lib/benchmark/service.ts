@@ -24,8 +24,8 @@ import type {
   ModelBenchmarkMetrics,
   ModelComparisonSummary,
   PromotionMetricsSnapshot,
-  DEFAULT_GUARDRAIL_CONFIG,
 } from '@/lib/types'
+import { DEFAULT_GUARDRAIL_CONFIG } from '@/lib/types'
 
 // ============================================================================
 // BENCHMARK PACK CRUD

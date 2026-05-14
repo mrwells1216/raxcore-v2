@@ -62,7 +62,7 @@ const SECTIONS: SectionConfig[] = [
     accent: 'border-border/40 bg-secondary/20',
     dotColor: 'bg-muted-foreground',
     defaultSlot: 'centered_top_angle',
-    angleType: 'detail',
+    angleType: 'other' as AngleType, // detail shots map to 'other' angle type
   },
 ]
 

@@ -314,16 +314,16 @@ export function DatasetHealthTable() {
                   <TableCell>
                     <div className="flex items-center gap-1">
                       {ex.needs_review && (
-                        <AlertTriangle className="h-4 w-4 text-amber-500" title="Needs review" />
+                        <AlertTriangle className="h-4 w-4 text-amber-500" aria-label="Needs review" />
                       )}
                       {ex.is_duplicate && (
-                        <Copy className="h-4 w-4 text-amber-500" title="Duplicate" />
+                        <Copy className="h-4 w-4 text-amber-500" aria-label="Duplicate" />
                       )}
                       {ex.is_outlier && (
-                        <AlertTriangle className="h-4 w-4 text-orange-500" title="Outlier" />
+                        <AlertTriangle className="h-4 w-4 text-orange-500" aria-label="Outlier" />
                       )}
                       {ex.verified_for_training && (
-                        <CheckCircle2 className="h-4 w-4 text-primary" title="Verified" />
+                        <CheckCircle2 className="h-4 w-4 text-primary" aria-label="Verified" />
                       )}
                     </div>
                   </TableCell>

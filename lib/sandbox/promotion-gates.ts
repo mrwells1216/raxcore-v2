@@ -57,8 +57,8 @@ export const PROTECTED_SEGMENTS = {
     regressionThreshold: 0.75,
     minSampleCount: 3,
     filter: (r: ExampleComparisonData) =>
-      r.characteristics?.asymmetry_score !== undefined && 
-      r.characteristics.asymmetry_score > 0.3,
+      r.characteristics?.asymmetry_score != null &&
+      (r.characteristics.asymmetry_score as number) > 0.3,
   },
   single_image: {
     name: 'Single Image',

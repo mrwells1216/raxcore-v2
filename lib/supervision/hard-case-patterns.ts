@@ -301,12 +301,12 @@ export async function addPatternExample(params: {
   
   // Update prediction metadata
   if (params.predictionId) {
-    await supabase.rpc('array_append_unique', {
+    supabase.rpc('array_append_unique', {
       table_name: 'predictions',
       row_id: params.predictionId,
       column_name: 'hard_case_pattern_ids',
       new_value: params.patternId,
-    }).catch(() => {
+    }).then(() => {
       // Ignore if RPC doesn't exist
     })
   }

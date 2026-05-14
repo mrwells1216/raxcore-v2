@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     if (prediction && official_score !== null && official_score !== undefined) {
       // Get buck images
       const images = await getBuckImages(buck_id)
-      const imageUrls = images.map(img => img.image_url)
+      const imageUrls = images.map(img => img.image_url).filter((u): u is string => u != null)
 
       // Build a compact metadata snapshot so we can reconstruct the prediction
       // context later for correction-profile analysis, without requiring new schema columns.
@@ -102,8 +102,8 @@ export async function POST(request: Request) {
         fallback_used: prediction.fallback_used ?? false,
         images_used: prediction.images_used ?? null,
         error_gross:
-          (prediction.predicted_gross ?? prediction.estimated_score) != null && official_score != null
-            ? Number(((prediction.predicted_gross ?? prediction.estimated_score) - official_score).toFixed(2))
+          prediction.predicted_gross != null && official_score != null
+            ? Number((prediction.predicted_gross - official_score).toFixed(2))
             : null,
         error_net:
           prediction.predicted_net != null && official_score != null

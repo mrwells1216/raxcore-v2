@@ -247,10 +247,12 @@ export default async function MVSetDetailPage({ params }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <MVFamilyBreakdown 
-                familySupport={familySupport} 
-                views={views}
-                solution={solution}
+              <MVFamilyBreakdown
+                families={(familySupport ?? []).map((fs: { family?: string; count?: number; measurements?: string[] }) => ({
+                  family: fs.family ?? '',
+                  count: fs.count ?? 0,
+                  measurements: fs.measurements ?? [],
+                }))}
               />
             </CardContent>
           </Card>
@@ -265,7 +267,7 @@ export default async function MVSetDetailPage({ params }: PageProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <MVEdgesTable edges={edges} views={views} />
+              <MVEdgesTable edges={edges} />
             </CardContent>
           </Card>
         </TabsContent>

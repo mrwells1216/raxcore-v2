@@ -152,8 +152,8 @@ export async function buildManifestItem(
   
   const hardCasePatterns = (patternExamples || []).map(pe => ({
     pattern_id: pe.pattern_id,
-    pattern_name: (pe.hard_case_patterns as { name: string })?.name || 'unknown',
-    severity: (pe.hard_case_patterns as { severity: number })?.severity || 0.5,
+    pattern_name: (pe.hard_case_patterns as unknown as { name: string })?.name || 'unknown',
+    severity: (pe.hard_case_patterns as unknown as { severity: number })?.severity || 0.5,
   }))
   
   // Build quality tier from image scores

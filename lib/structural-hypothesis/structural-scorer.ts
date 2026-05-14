@@ -350,8 +350,8 @@ function swapLeftRightMeasurements(
         newValue: rv as number | null,
         changePercent: 100, // Full swap
       })
-      result[left] = rv as typeof result[typeof left]
-      result[right] = lv as typeof result[typeof right]
+      ;(result as unknown as Record<string, number | null>)[left as string] = rv ?? null
+      ;(result as unknown as Record<string, number | null>)[right as string] = lv ?? null
     }
   }
 

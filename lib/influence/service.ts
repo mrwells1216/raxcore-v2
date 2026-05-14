@@ -25,8 +25,8 @@ import type {
   ScenarioContext,
   HealthTier,
   ScoreSource,
-  DEFAULT_INFLUENCE_CONFIG,
 } from '@/lib/types'
+import { DEFAULT_INFLUENCE_CONFIG } from '@/lib/types'
 import { HIGH_OUTPUT_STATES, LOW_OUTPUT_STATES } from '@/lib/constants'
 
 // ============================================================================
@@ -131,7 +131,7 @@ export function computeInfluenceWeight(
     health_score_factor: computeHealthScoreFactor(input.health_score, input.health_tier),
     verification_strength_factor: computeVerificationStrengthFactor(input.verified_for_training, input.score_source),
     image_quality_factor: computeImageQualityFactor(input.images_used, input.angle_diversity_score, input.intake_quality),
-    metadata_completeness_factor: computeMetadataCompletenessFactor(input.state, input.rack_type, input.quality_flags),
+    metadata_completeness_factor: computeMetadataCompletenessFactor(input.state, input.rack_type, input.quality_flags as Record<string, unknown> | null),
     error_stability_factor: 0.7, // Default, will be updated with historical data
     base_influence: 0,
     similarity_bonus: 0, // Set when computing similarity to a specific buck
@@ -728,7 +728,7 @@ export async function analyzeDrift(config: InfluenceConfig): Promise<DriftAnalys
       .limit(10)
     
     return {
-      hasActiveDrift: strengthMultiplier < 1.0 || (unresolvedAlerts && unresolvedAlerts.length > 0),
+      hasActiveDrift: strengthMultiplier < 1.0 || (!!unresolvedAlerts && unresolvedAlerts.length > 0),
       driftAlerts: (unresolvedAlerts as DriftDetectionLog[]) || [],
       currentBias: {
         direction: biasRatio > 1.5 ? 'positive' : biasRatio < 0.67 ? 'negative' : 'balanced',

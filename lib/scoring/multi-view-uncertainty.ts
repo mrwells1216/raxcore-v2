@@ -351,8 +351,3 @@ export function compareUncertaintyReduction(
   }
 }
 
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
-export { computeMultiViewUncertainty, compareUncertaintyReduction }

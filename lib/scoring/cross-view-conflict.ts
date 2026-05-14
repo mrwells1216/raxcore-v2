@@ -11,6 +11,7 @@ import type { AngleType, Measurements, LandmarksDetected } from '@/lib/types'
 import type { ImageMeasurement } from './fusion'
 import type { GeometryConsistencyResult } from './geometry-consistency'
 import type { MeasurementFamily } from './segment-confidence-interval'
+export type { MeasurementFamily }
 
 // ============================================================================
 // TYPES
@@ -994,7 +995,7 @@ function applyFusedValueToMeasurements(
         totalWeight += weight
       }
       const fusedFieldValue = totalWeight > 0 ? weightedSum / totalWeight : fieldValues[0].value
-      ;(measurements as Record<string, number | null>)[field] = Number(fusedFieldValue.toFixed(1))
+      ;(measurements as unknown as Record<string, number | null>)[field] = Number(fusedFieldValue.toFixed(1))
     }
   }
 }

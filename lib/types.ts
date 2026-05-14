@@ -52,6 +52,11 @@ export interface Buck {
   abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
+  // Extended DB fields (present in schema, optional on interface for compat)
+  session_id?: string | null
+  nickname?: string | null
+  location?: string | null
+  property_id?: string | null
 }
 
 export interface BuckImage {
@@ -68,6 +73,7 @@ export interface BuckImage {
   quality_score: number | null
   landmarks_detected: LandmarksDetected | null
   created_at: string
+  image_url?: string | null
 }
 
 export interface LandmarksDetected {
@@ -250,6 +256,10 @@ export interface Measurements {
   h4_right: number | null
   abnormal_points: number | null
   deductions: number | null
+  // Optional summary fields stored alongside measurements in some contexts
+  gross_score?: number | null
+  net_score?: number | null
+  confidence?: number | null
 }
 
 export interface Prediction {
@@ -273,6 +283,24 @@ export interface Prediction {
   scoring_method?: 'vision' | 'heuristic' | 'vision_with_fallback' | null
   vision_model_used?: string | null
   vision_confidence?: number | null
+  // Extended DB fields used across admin/training routes
+  intake_quality?: IntakeQualitySummary | Record<string, unknown> | null
+  confidence_label?: string | null
+  fallback_used?: boolean | null
+  metadata?: Record<string, unknown> | null
+  score_range_low?: number | null
+  score_range_high?: number | null
+  raw_ai_response?: Record<string, unknown> | null
+  calibration_applied?: boolean | null
+  // CamelCase aliases used in UI components
+  rawPredictedGross?: number | null
+  calibrationApplied?: boolean | null
+  calibrationMeta?: Record<string, unknown> | null
+  referenceModeSummary?: Record<string, unknown> | null
+  imageDiagnosticsSummary?: Record<string, unknown> | null
+  confidenceBand?: Record<string, unknown> | null
+  confidenceReasons?: unknown[] | null
+  rawConfidence?: number | null
 }
 
 export interface StateCalibration {
@@ -1923,6 +1951,10 @@ export interface BenchmarkRunWithDetails extends BenchmarkRun {
   candidate_model_name: string | null
   active_calibration_name: string | null
   candidate_calibration_name: string | null
+  // Aggregate metrics from the DB view
+  mae_gross?: number | null
+  mae_net?: number | null
+  r2_gross?: number | null
 }
 
 export interface BenchmarkRunInput {
@@ -2137,7 +2169,7 @@ export type ScoreSourceStrength = 'official' | 'verified' | 'self_reported' | 'e
 export type OutlierType = 'score_outlier' | 'error_outlier' | 'measurement_outlier' | 'metadata_outlier' | 'correction_instability'
 export type OutlierSeverity = 'mild' | 'moderate' | 'severe'
 export type DuplicateClusterType = 'exact' | 'near' | 'suspected'
-export type HealthReviewDecision = 'approve_training' | 'validation_only' | 'exclude' | 'mark_duplicate' | 'needs_more_info' | 'defer'
+export type HealthReviewDecision = 'approve_training' | 'validation_only' | 'exclude' | 'mark_duplicate' | 'needs_more_info' | 'defer' | 'needs_review' | 'reject'
 
 // Health factors breakdown for explainability
 export interface HealthFactors {

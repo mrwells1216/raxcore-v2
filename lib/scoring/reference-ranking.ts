@@ -600,6 +600,13 @@ export function buildReferenceConsensus(
  */
 export function getReferenceSourceLabel(source: ReferenceSource): string {
   const labels: Record<ReferenceSource, string> = {
+    eye_box: 'Eye Box',
+    pedicle_spacing: 'Pedicle Spacing',
+    eye_to_pedicle: 'Eye to Pedicle',
+    skull_width: 'Skull Width',
+    nose_bridge: 'Nose Bridge',
+    muzzle_width: 'Muzzle Width',
+    ear_base_spacing: 'Ear Base Spacing',
     strong_ear: 'Strong Ear Reference',
     partial_ear: 'Partial Ear Reference',
     strong_eye: 'Strong Eye Reference',

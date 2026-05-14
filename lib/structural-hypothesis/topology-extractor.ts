@@ -325,7 +325,7 @@ function extractSpreadAnchor(
 ): SpreadAnchorInterpretation {
   // Find best frontal view for spread anchor
   const frontalViews = perImageLandmarks.filter(
-    img => img.angleType === 'front' || img.angleType === 'front_left' || img.angleType === 'front_right'
+    img => img.angleType === 'front' || (img.angleType as string) === 'front_left' || (img.angleType as string) === 'front_right'
   )
 
   const bestFrontal = frontalViews.sort((a, b) => b.referenceQuality - a.referenceQuality)[0]
@@ -499,10 +499,10 @@ function extractAsymmetryInterpretation(
 
   // Check if left/right visibility differs significantly across views
   const leftVisibleViews = perImageLandmarks.filter(
-    img => img.angleType === 'left' || img.angleType === 'front_left'
+    img => img.angleType === 'left' || (img.angleType as string) === 'front_left'
   )
   const rightVisibleViews = perImageLandmarks.filter(
-    img => img.angleType === 'right' || img.angleType === 'front_right'
+    img => img.angleType === 'right' || (img.angleType as string) === 'front_right'
   )
 
   const visibilityImbalance = Math.abs(leftVisibleViews.length - rightVisibleViews.length)

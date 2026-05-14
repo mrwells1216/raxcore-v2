@@ -489,19 +489,19 @@ export async function maybeCreateMonitoringAlerts(
 
       if (summary.errorRate >= thresholdErrorRate) {
         await createAdminTask({
-          type: 'calibration_reminder',
+          type: 'calibration_needed',
           priority: 'high',
           title: `High ${svc} error rate: ${summary.errorRate}%`,
-          description: `${summary.failures} of ${summary.total} ${svc} events failed in the last ${windowHours}h. Immediate investigation recommended.`,
-          metadata: { service: svc, windowHours, errorRate: summary.errorRate, failures: summary.failures, total: summary.total },
+          body: `${summary.failures} of ${summary.total} ${svc} events failed in the last ${windowHours}h. Immediate investigation recommended.`,
+          relatedType: 'service',
         }).catch(() => {})
       } else if (summary.fallbackRate >= thresholdFallbackRate && svc === 'vision') {
         await createAdminTask({
-          type: 'calibration_reminder',
-          priority: 'medium',
+          type: 'calibration_needed',
+          priority: 'normal',
           title: `High vision fallback rate: ${summary.fallbackRate}%`,
-          description: `${summary.fallbacks} of ${summary.total} vision calls used fallback scoring in the last ${windowHours}h.`,
-          metadata: { service: svc, windowHours, fallbackRate: summary.fallbackRate, fallbacks: summary.fallbacks, total: summary.total },
+          body: `${summary.fallbacks} of ${summary.total} vision calls used fallback scoring in the last ${windowHours}h.`,
+          relatedType: 'service',
         }).catch(() => {})
       }
     }

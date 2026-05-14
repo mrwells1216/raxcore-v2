@@ -463,12 +463,3 @@ export function generateTrainingRecords(
   })
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Exports
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type {
-  AdjustmentSession,
-  MeasurementRecalcResult,
-  AdjustmentTrainingRecord,
-}

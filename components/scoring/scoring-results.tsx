@@ -84,6 +84,22 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
     graphSource: string
     reason: string
   } | null
+  // Raw AI response at top level (some API versions return it here)
+  rawAiResponse?: {
+    measurements?: Record<string, unknown>
+    grossScore?: number | null
+    netScore?: number | null
+    [key: string]: unknown
+  } | null
+  // Precision pass data
+  latestPrecisionPassRun?: unknown
+  // Extended scoring metadata fields
+  captureQualitySummary?: unknown
+  referenceModeSummary?: unknown
+  imageDiagnosticsSummary?: unknown
+  confidenceBand?: unknown
+  confidenceReasons?: unknown
+  rawConfidence?: number | null
 }
 
 interface ScoringResultsProps {
@@ -111,6 +127,8 @@ interface NormalizedResult {
   scalingReferencesUsed: string[]
   learningSummary: RawScoringResult['learningSummary']
   trainingCorrectionResult: RawScoringResult['trainingCorrectionResult']
+  calibrationApplied?: boolean | null
+  calibrationMeta?: Record<string, unknown> | null
 }
 
 function normalizeResult(result: RawScoringResult): NormalizedResult {
@@ -181,7 +199,7 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
     propertyId: result.buck?.property_id ?? null,
     confidenceExplanation,
     scalingReferencesUsed,
-    learningSummary: result.learningSummary ?? null,
+    learningSummary: result.learningSummary ?? undefined,
     trainingCorrectionResult: result.trainingCorrectionResult ?? null,
   }
 }
@@ -454,10 +472,10 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
   }
 
   // Extract image URLs - handle both string[] (API response) and BuckImage[] (type def)
-  const imageUrls: string[] = Array.isArray(result.images) 
-    ? result.images.map((img: string | { public_url?: string | null; image_url?: string }) => 
-        typeof img === 'string' ? img : (img.public_url ?? img.image_url ?? '')
-      ).filter(Boolean)
+  const imageUrls: string[] = Array.isArray(result.images)
+    ? (result.images as (string | { public_url?: string | null; image_url?: string | null })[])
+        .map(img => typeof img === 'string' ? img : (img.public_url ?? img.image_url ?? ''))
+        .filter(Boolean)
     : []
 
   return (
@@ -549,21 +567,22 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               normalized?.calibrationApplied ??
               false
 
-            const calibrationMeta =
+            const calibrationMeta = (
               result?.prediction?.calibrationMeta ??
-              result?.prediction?.raw_ai_response?.calibrationMeta ??
-              result?.rawAiResponse?.calibrationMeta ??
+              result?.prediction?.raw_ai_response?.['calibrationMeta'] ??
+              (result?.rawAiResponse as Record<string, unknown> | null)?.['calibrationMeta'] ??
               normalized?.calibrationMeta ??
               null
+            ) as Record<string, unknown> | null
 
             return calibrationApplied ? (
               <div className="rounded-md border px-3 py-2 text-xs mb-3 bg-neutral-50">
                 Calibrated using reviewed data
-                {calibrationMeta?.profile_type && (
+                {!!calibrationMeta?.profile_type && (
                   <div className="mt-1 text-[11px] text-muted-foreground">
-                    profile: {calibrationMeta.profile_type}
+                    profile: {calibrationMeta.profile_type as string}
                     {calibrationMeta?.sample_count ? (
-                      <> · {calibrationMeta.sample_count} samples</>
+                      <> · {calibrationMeta.sample_count as number} samples</>
                     ) : null}
                   </div>
                 )}
@@ -641,23 +660,26 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
           {/* Confidence Assessment Panel */}
           {(() => {
-            const resolvedConfidenceBand =
+            const resolvedConfidenceBand = (
               result?.prediction?.confidenceBand ??
-              result?.prediction?.raw_ai_response?.confidenceBand ??
-              result?.rawAiResponse?.confidenceBand ??
+              result?.prediction?.raw_ai_response?.['confidenceBand'] ??
+              (result?.rawAiResponse as Record<string, unknown> | null)?.['confidenceBand'] ??
               null
+            ) as string | null
 
-            const resolvedConfidenceReasons =
+            const resolvedConfidenceReasons = (
               result?.prediction?.confidenceReasons ??
-              result?.prediction?.raw_ai_response?.confidenceReasons ??
-              result?.rawAiResponse?.confidenceReasons ??
+              result?.prediction?.raw_ai_response?.['confidenceReasons'] ??
+              (result?.rawAiResponse as Record<string, unknown> | null)?.['confidenceReasons'] ??
               []
+            ) as { direction?: string; label?: string; details?: string }[]
 
-            const resolvedRawConfidence =
+            const resolvedRawConfidence = (
               result?.prediction?.rawConfidence ??
-              result?.prediction?.raw_ai_response?.rawConfidence ??
-              result?.rawAiResponse?.rawConfidence ??
+              result?.prediction?.raw_ai_response?.['rawConfidence'] ??
+              (result?.rawAiResponse as Record<string, unknown> | null)?.['rawConfidence'] ??
               null
+            ) as number | null
 
             if (!resolvedConfidenceBand && resolvedConfidenceReasons?.length === 0) return null
 
@@ -823,23 +845,23 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             <div className="space-y-1 text-xs">
               <div>
                 AI:{' '}
-                {result?.prediction?.rawPredictedGross ??
-                  result?.prediction?.raw_ai_response?.grossScore ??
+                {(result?.prediction?.rawPredictedGross ??
+                  result?.prediction?.raw_ai_response?.['grossScore'] ??
                   result?.rawAiResponse?.grossScore ??
-                  result?.prediction?.raw_ai_response?.rawPredictedGross ??
+                  result?.prediction?.raw_ai_response?.['rawPredictedGross'] ??
                   result?.rawAiResponse?.rawPredictedGross ??
-                  '-'}
+                  '-') as number | string | null}
               </div>
               <div>
                 Precision:{' '}
                 {precisionPassOverride?.grossScore ??
-                  result?.latestPrecisionPassRun?.best_summary?.predicted_gross ??
+                  (result?.latestPrecisionPassRun as { best_summary?: { predicted_gross?: number } } | null)?.best_summary?.predicted_gross ??
                   '-'}
               </div>
               <div>
                 Calibrated:{' '}
                 {normalized?.grossScore ??
-                  result?.prediction?.predictedGross ??
+                  result?.prediction?.predicted_gross ??
                   '-'}
               </div>
               {reviewedScoreSheet?.reviewedGross != null && (
@@ -1005,8 +1027,8 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               ? precisionPassOverride.scoreSheet
               : result.scoreSheet
           }
-          aiGrossScore={precisionPassOverride?.grossScore ?? normalized.grossScore}
-          aiNetScore={precisionPassOverride?.netScore ?? normalized.netScore}
+          aiGrossScore={precisionPassOverride?.grossScore ?? normalized.grossScore ?? 0}
+          aiNetScore={precisionPassOverride?.netScore ?? normalized.netScore ?? 0}
           aiConfidence={normalized.confidencePercent}
           isFallback={normalized.isFallback}
           aiFieldProvenance={
