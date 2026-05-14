@@ -5,6 +5,9 @@ import { getReviewCompleteness } from '@/lib/review/review-completeness'
 import { isOfficialReview } from '@/lib/review/is-official-review'
 import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
 import { getServiceSupabase } from '@/lib/supabase/admin'
+import { onIntervalMiss, onHighConfidenceMiss } from '@/lib/supervision/hooks'
+import { isIntervalMiss } from '@/lib/supervision/interval-miss-detector'
+import { recordMeasurementDiff } from '@/lib/training/correction-events'
 
 export async function POST(req: Request) {
   const db = await createClient()
@@ -301,6 +304,67 @@ export async function POST(req: Request) {
       },
       { status: 200 }
     )
+  }
+
+  // WI-2: Record per-field correction events (non-blocking) when reviewed measurements differ from AI.
+  if (reviewedSheet?.measurements && prediction.measurements) {
+    const { data: authUser } = await db.auth.getUser()
+    recordMeasurementDiff({
+      buckId,
+      predictionId,
+      userId: authUser?.user?.id ?? null,
+      correctionSource: 'review_sheet',
+      aiMeasurements: prediction.measurements as Record<string, number | null | undefined>,
+      userMeasurements: reviewedSheet.measurements as Record<string, number | null | undefined>,
+      confidenceTierBefore: (() => {
+        const pct = prediction.confidence_percent ?? 0
+        return pct >= 80 ? 'very_high' : pct >= 65 ? 'high' : pct >= 45 ? 'medium' : 'low'
+      })(),
+    }).catch(err => console.warn('[review-save] recordMeasurementDiff failed (non-blocking)', err))
+  }
+
+  // Phase 52: Fire supervision hooks non-blocking after ground truth is known.
+  // onIntervalMiss   — when verified gross falls outside the predicted interval.
+  // onHighConfidenceMiss — when a high-confidence prediction was far off.
+  if (reviewedGross != null && isOfficial) {
+    const predGross = prediction.predicted_gross
+    const bandLow = prediction.error_band_low
+    const bandHigh = prediction.error_band_high
+    const confPct = prediction.confidence_percent ?? 0
+    // Map confidence percent to tier label for the hook
+    const confTier = confPct >= 80 ? 'very_high' : confPct >= 65 ? 'high' : confPct >= 45 ? 'medium' : 'low'
+
+    if (predGross != null && bandLow != null && bandHigh != null) {
+      if (isIntervalMiss(bandLow, bandHigh, reviewedGross)) {
+        onIntervalMiss({
+          predictionId,
+          buckId,
+          predictedIntervalLow: bandLow,
+          predictedIntervalHigh: bandHigh,
+          actualScore: reviewedGross,
+          confidenceTier: confTier,
+          confidencePercent: confPct,
+        }).catch(err => console.warn('[review-save] onIntervalMiss failed (non-blocking)', err))
+      }
+    }
+
+    if (predGross != null) {
+      const missMagnitude = Math.abs(reviewedGross - predGross)
+      if (missMagnitude > 10 && (confTier === 'high' || confTier === 'very_high')) {
+        const intervalMissed = bandLow != null && bandHigh != null
+          ? isIntervalMiss(bandLow, bandHigh, reviewedGross)
+          : false
+        onHighConfidenceMiss({
+          predictionId,
+          buckId,
+          confidenceTier: confTier,
+          missMagnitude,
+          intervalMiss: intervalMissed,
+          predicted: predGross,
+          actual: reviewedGross,
+        }).catch(err => console.warn('[review-save] onHighConfidenceMiss failed (non-blocking)', err))
+      }
+    }
   }
 
   return NextResponse.json({

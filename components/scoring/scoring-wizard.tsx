@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { ArrowRight, Loader2, Camera, Upload, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScoringForm, type ScoringFormHandle } from './scoring-form'
+import { ScanValidationBanner } from './ScanValidationBanner'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
@@ -15,6 +16,10 @@ import { resolveImageRoles } from '@/lib/scoring/resolve-image-roles'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
+import { validateSubject, canProceedToScoring, mapScanAngleToSection } from '@/lib/capture/subject-validation'
+import type { SubjectValidationResult } from '@/lib/capture/subject-validation'
+import { detectionToScanFeedback } from '@/lib/detection/detection-to-scan-feedback'
+import type { ScanFeedback } from '@/lib/detection/detection-to-scan-feedback'
 import type { ScoringResult, ScoringFormData, AngleType, IntakeQualitySummary } from '@/lib/types'
 import type { ScanAngle } from '@/lib/capture/scan-session'
 import { toast } from 'sonner'
@@ -49,6 +54,11 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const [intakeQuality, setIntakeQuality] = useState<IntakeQualityAssessment | null>(null)
   const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
   const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
+  const [captureValidation, setCaptureValidation] = useState<SubjectValidationResult | null>(null)
+  const [scanFeedback, setScanFeedback] = useState<ScanFeedback | null>(null)
+  const [isDetecting, setIsDetecting] = useState(false)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+  const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
     imgs.map(({ id, url, file, angleType, width, height }) => ({
@@ -80,6 +90,74 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
     setIntakeQuality(assessment)
   }, [])
 
+  // Client-side subject validation — runs instantly on image set change
+  const runCaptureValidation = useCallback((imgs: GridImage[], coverage: { hasFront: boolean; hasLeft: boolean; hasRight: boolean }) => {
+    if (imgs.length === 0) { setCaptureValidation(null); return }
+    const result = validateSubject({
+      imageCount: imgs.length,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      declaredSections: imgs.map(img => mapScanAngleToSection(img.angleType as any)),
+      isSmartScanMode: inputMode === 'smart-scan',
+      coverageZones: {
+        full_rack: coverage.hasFront,
+        left_antler: coverage.hasLeft,
+        right_antler: coverage.hasRight,
+      },
+    })
+    setCaptureValidation(result)
+    setBannerDismissed(false)
+  }, [inputMode])
+
+  // Async detection pre-check — debounced 800ms, non-blocking
+  useEffect(() => {
+    if (gridImages.length === 0) {
+      setScanFeedback(null)
+      setIsDetecting(false)
+      return
+    }
+
+    if (detectDebounceRef.current) clearTimeout(detectDebounceRef.current)
+
+    detectDebounceRef.current = setTimeout(async () => {
+      setIsDetecting(true)
+      try {
+        const fd = new FormData()
+        for (let i = 0; i < gridImages.length; i++) {
+          const img = gridImages[i]
+          // Only send data URLs (preprocessed); skip non-data-URL entries
+          if (img.url.startsWith('data:')) {
+            fd.append(`image_data_${i}`, img.url)
+          } else if (img.file) {
+            // Convert File to data URL for the detect endpoint
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result as string)
+              reader.onerror = reject
+              reader.readAsDataURL(img.file!)
+            })
+            fd.append(`image_data_${i}`, dataUrl)
+          }
+        }
+
+        const resp = await fetch('/api/detect', { method: 'POST', body: fd })
+        if (!resp.ok) throw new Error('Detection request failed')
+        const result = await resp.json()
+        setScanFeedback(detectionToScanFeedback(result))
+        setBannerDismissed(false)
+      } catch {
+        // Degrade silently — never block submit due to pre-check failure
+        setScanFeedback(null)
+      } finally {
+        setIsDetecting(false)
+      }
+    }, 800)
+
+    return () => {
+      if (detectDebounceRef.current) clearTimeout(detectDebounceRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridImages])
+
   const handleGridChange = useCallback((imgs: GridImage[]) => {
     // Use requestAnimationFrame to avoid setState during render chain
     requestAnimationFrame(() => {
@@ -91,8 +169,19 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         return updated.slice(0, imgs.length)
       })
       updateIntakeQuality(imgs)
+      const cq = imgs.length > 0
+        ? buildCaptureQualitySummary({
+            images: imgs.map(img => ({ name: img.id })),
+            selectedAngles: imgs.map(img => img.angleType as CaptureAngle),
+          })
+        : null
+      runCaptureValidation(imgs, {
+        hasFront: cq?.coverage.hasFront ?? false,
+        hasLeft: cq?.coverage.hasLeft ?? false,
+        hasRight: cq?.coverage.hasRight ?? false,
+      })
     })
-  }, [updateIntakeQuality])
+  }, [updateIntakeQuality, runCaptureValidation])
 
   const handleScanFilesReady = useCallback(async (files: File[], angles: ScanAngle[]) => {
     const scanImages: GridImage[] = []
@@ -130,8 +219,17 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
     setGridImages(scanImages)
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
     updateIntakeQuality(scanImages)
+    const cq = buildCaptureQualitySummary({
+      images: scanImages.map(img => ({ name: img.id })),
+      selectedAngles: angles.map(a => a as CaptureAngle),
+    })
+    runCaptureValidation(scanImages, {
+      hasFront: cq.coverage.hasFront,
+      hasLeft: cq.coverage.hasLeft,
+      hasRight: cq.coverage.hasRight,
+    })
     setDetailsOpen(true)
-  }, [updateIntakeQuality])
+  }, [updateIntakeQuality, runCaptureValidation])
 
   const images = toCapturedImages(gridImages)
 
@@ -309,7 +407,10 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
     }
   }
 
-  const canSubmit = gridImages.length >= 1 && (intakeQuality?.canProceed ?? true)
+  const canSubmit =
+    gridImages.length >= 1 &&
+    (intakeQuality?.canProceed ?? true) &&
+    (captureValidation ? canProceedToScoring(captureValidation) : true)
 
   const displayCaptureAngles = gridImages.length > 0
     ? resolveImageRoles(
@@ -496,6 +597,18 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
             ))
           }}
         />
+      )}
+
+      {/* ── 5b. Scan validation banner ──────────────────────────────────── */}
+      {gridImages.length > 0 && !bannerDismissed && (
+        <Section>
+          <ScanValidationBanner
+            validation={captureValidation}
+            feedback={scanFeedback}
+            checking={isDetecting && !scanFeedback}
+            onDismiss={() => setBannerDismissed(true)}
+          />
+        </Section>
       )}
 
       {/* ── 6. Scoring options (collapsible) ────────────────────────────── */}
