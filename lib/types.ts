@@ -371,19 +371,27 @@ export interface ScoringFormData {
   reference_size_value?: number
   reference_size_unit?: 'in' | 'cm' | 'mm'
   reference_placement?: 'same_depth_plane' | 'near_antler_plane' | 'in_front_or_behind' | 'unknown'
-  // Ring reference — optional scale aid
+  // Reference object — optional scale aid (ring or hat)
   reference_object?: {
-    type: 'none' | 'wedding_ring'
+    type: 'none' | 'wedding_ring' | 'hat'
     ring: {
       present: boolean
       ringSizeUS: number | null
       innerDiameterInches: number | null
       confidence: 'none' | 'estimated'
     } | null
+    hat: {
+      present: boolean
+      hatType: 'baseball_cap' | 'baseball_cap_backwards' | 'beanie' | 'skull_cap' | 'stetson' | 'wide_brim' | null
+      brimWidthInches: number | null
+      crownHeightInches: number | null
+      confidence: 'none' | 'estimated'
+    } | null
   } | null
-  // Zod schema fields for ring reference (internal form state)
-  reference_object_type?: 'none' | 'wedding_ring'
+  // Zod schema fields for reference object (internal form state)
+  reference_object_type?: 'none' | 'wedding_ring' | 'hat'
   reference_object_ring_size?: number | null
+  reference_object_hat_type?: 'baseball_cap' | 'baseball_cap_backwards' | 'beanie' | 'skull_cap' | 'stetson' | 'wide_brim' | null
 }
 
 export interface GroundTruthFormData {

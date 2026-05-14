@@ -18,6 +18,8 @@ import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { buildRingReferenceInput, ringSizeToInnerDiameterInches, normalizeRingSizeUS } from '@/lib/scoring/ring-reference'
+import { buildHatReferenceInput, HAT_DIMENSIONS } from '@/lib/scoring/hat-reference'
+import type { HatType } from '@/lib/scoring/reference-object-types'
 import { computeImageDiagnosticsFromFile, summarizeDiagnostics, type ImageDiagnostics, type ImageDiagnosticsSummary } from '@/lib/scoring/image-diagnostics'
 import { cn } from '@/lib/utils'
 import { useState, useRef, useImperativeHandle, forwardRef } from 'react'
@@ -28,8 +30,12 @@ export interface ScoringFormHandle {
 
 const formSchema = z.object({
   state: z.string().optional().nullable(),
-  reference_object_type: z.enum(['none', 'wedding_ring']).optional().default('none'),
+  reference_object_type: z.enum(['none', 'wedding_ring', 'hat']).optional().default('none'),
   reference_object_ring_size: z.coerce.number().min(3).max(16).optional().nullable(),
+  reference_object_hat_type: z.enum([
+    'baseball_cap', 'baseball_cap_backwards', 'beanie',
+    'skull_cap', 'stetson', 'wide_brim',
+  ]).optional().nullable(),
   rack_type: z.enum(['typical', 'non-typical'], { required_error: 'Rack type is required' }),
   harvest_method: z.enum(['bow', 'rifle', 'muzzleloader', 'crossbow', 'other']).optional(),
   source_type: z.enum(['live_deer', 'mounted_photo', 'european_mount', 'trail_cam', 'harvest_photo', 'other']).optional(),
@@ -75,6 +81,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
       state: null,
       reference_object_type: 'none',
       reference_object_ring_size: null,
+      reference_object_hat_type: null,
       rack_type: 'typical',
       harvest_method: undefined,
       source_type: undefined,
@@ -101,6 +108,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   const watchIrregularPoints = form.watch('irregular_points_present')
   const watchReferenceObjectType = form.watch('reference_object_type')
   const watchRingSize = form.watch('reference_object_ring_size')
+  const watchHatType = form.watch('reference_object_hat_type') as HatType | null | undefined
   const ringDiameter = watchRingSize != null ? ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchRingSize) ?? -1) : null
   
   const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
@@ -148,21 +156,33 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   }
 
   const handleInternalSubmit = (data: ScoringFormData) => {
-    const ringType = data.reference_object_type ?? 'none'
-    const ringPresent = ringType === 'wedding_ring'
+    const refType = data.reference_object_type ?? 'none'
+    const ringPresent = refType === 'wedding_ring'
+    const hatPresent = refType === 'hat'
     const ringInput = buildRingReferenceInput({
       present: ringPresent,
       ringSizeUS: data.reference_object_ring_size ?? null,
     })
+    const hatInput = buildHatReferenceInput({
+      present: hatPresent,
+      hatType: data.reference_object_hat_type ?? null,
+    })
     const enrichedData: ScoringFormData = {
       ...data,
       reference_object: {
-        type: ringType,
+        type: refType,
         ring: ringPresent ? {
           present: ringInput.present,
           ringSizeUS: ringInput.ringSizeUS,
           innerDiameterInches: ringInput.innerDiameterInches,
           confidence: ringInput.confidence === 'manual_confirmed' ? 'estimated' : ringInput.confidence,
+        } : null,
+        hat: hatPresent ? {
+          present: hatInput.present,
+          hatType: hatInput.hatType,
+          brimWidthInches: hatInput.brimWidthInches,
+          crownHeightInches: hatInput.crownHeightInches,
+          confidence: hatInput.confidence === 'manual_confirmed' ? 'estimated' : hatInput.confidence,
         } : null,
       },
     }
@@ -392,9 +412,13 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
 
           <div className="space-y-3">
             <div>
-              <label className="text-sm font-medium">Is a wedding band or ring visible in the photo?</label>
-              <div className="flex gap-2 mt-2">
-                {([['none', 'No ring visible'], ['wedding_ring', 'Ring visible']] as const).map(([val, label]) => (
+              <label className="text-sm font-medium">What reference object is visible in the photo?</label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {([
+                  ['none', 'No reference visible'],
+                  ['wedding_ring', 'Wedding band or ring'],
+                  ['hat', 'Hat'],
+                ] as const).map(([val, label]) => (
                   <button
                     key={val}
                     type="button"
@@ -413,10 +437,10 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             </div>
 
             <p className="text-xs text-muted-foreground">
-              A ring can help estimate scale when no ruler or tape is visible. Best results come from a ring lying flat and clearly visible near the antler.
+              A reference object can help estimate scale when no ruler or tape is visible. Best results come from the object clearly visible near the antler.
             </p>
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Ring reference is an estimated calibration aid only. A ruler or tape measure is still more reliable.
+              Reference objects are estimated calibration aids only. A ruler or tape measure is still more reliable.
             </p>
 
             {watchReferenceObjectType === 'wedding_ring' && (
@@ -441,6 +465,42 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                 )}
                 {ringDiameter !== null && (
                   <p className="text-xs text-muted-foreground font-medium">≈ {ringDiameter} in inner diameter</p>
+                )}
+              </div>
+            )}
+
+            {watchReferenceObjectType === 'hat' && (
+              <div className="space-y-2 pt-1">
+                <label className="text-sm font-medium">Hat type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.entries(HAT_DIMENSIONS) as Array<[HatType, typeof HAT_DIMENSIONS[HatType]]>).map(([val, info]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => form.setValue('reference_object_hat_type', val, { shouldDirty: true })}
+                      className={cn(
+                        'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px] text-left',
+                        watchHatType === val
+                          ? 'bg-primary/15 text-primary border-primary/30'
+                          : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
+                      )}
+                    >
+                      {info.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Hat brim width is used as a scale reference. Backwards baseball caps, beanies, and skull caps have no visible brim — these are lower confidence because only the crown dome is usable.
+                </p>
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Hat reference is an estimated calibration aid. Brim width varies between manufacturers. A ruler or tape measure is still more reliable.
+                </p>
+                {watchHatType && HAT_DIMENSIONS[watchHatType] && (
+                  <p className="text-xs text-muted-foreground font-medium">
+                    {HAT_DIMENSIONS[watchHatType].brim != null
+                      ? `Brim ≈ ${HAT_DIMENSIONS[watchHatType].brim}" wide`
+                      : `Crown ≈ ${HAT_DIMENSIONS[watchHatType].crown}" tall (less reliable than brim references)`}
+                  </p>
                 )}
               </div>
             )}
