@@ -194,7 +194,7 @@ export function checkLandmarkConsistency(
       if (typeof value === 'number' && value > 0) {
         // Blend: 70% original + 30% scaled (conservative adjustment)
         const scaled = value * cappedScale
-        ;(adjusted as Record<string, number | null>)[field] = Number(
+        ;(adjusted as unknown as Record<string, number | null>)[field] = Number(
           (value * 0.7 + scaled * 0.3).toFixed(1)
         )
       }

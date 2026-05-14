@@ -109,9 +109,9 @@ export function DPadAdjustmentPanel({
 
       const result = await response.json()
       return {
-        newMeasurementValue: result.preview.newMeasurementValue,
-        newScore: result.preview.newScore,
-        scoreDelta: result.preview.scoreDelta,
+        newMeasurementValue: (result.preview.newMeasurementValue as number | null) ?? null,
+        newScore: (result.preview.newScore as number | null) ?? null,
+        scoreDelta: (result.preview.scoreDelta as number | null) ?? null,
       }
     } catch (err) {
       console.error('[dpad] preview error:', err)

@@ -608,6 +608,7 @@ export function fuseAllFamilies(input: FuseAllFamiliesInput): FuseAllFamiliesRes
     beam: beamResult,
     tine: tineResult,
     mass: massResult,
+    deduction: massResult, // deduction uses same fusion as mass for now
   }
 
   // Build fused measurements

@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { AdminTask, AdminTaskPriority, AdminTaskType } from '@/lib/notifications/service'
 
-const PRIORITY_META: Record<AdminTaskPriority, { icon: React.ElementType; cls: string; label: string }> = {
+const PRIORITY_META: Record<AdminTaskPriority, { icon: React.ComponentType<{ className?: string }>; cls: string; label: string }> = {
   low:      { icon: ChevronRight,  cls: 'text-muted-foreground', label: 'Low' },
   normal:   { icon: ChevronRight,  cls: 'text-foreground',       label: 'Normal' },
   high:     { icon: AlertTriangle, cls: 'text-amber-500',        label: 'High' },
@@ -177,7 +177,7 @@ export function AdminTaskPanel({ initialTasks }: AdminTaskPanelProps) {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium leading-snug">{task.title}</span>
                       <Badge variant="outline" className="text-xs px-1.5 py-0 shrink-0">
-                        {TYPE_LABEL[task.type] ?? task.type}
+                        {TYPE_LABEL[task.type]}
                       </Badge>
                     </div>
                     {task.body && (

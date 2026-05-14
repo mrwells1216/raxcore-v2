@@ -19,6 +19,7 @@ export interface CreateBuckParams {
   rackType: 'typical' | 'non-typical'
   // Optional fields
   userId?: string
+  sessionId?: string
   harvestMethod?: 'bow' | 'rifle' | 'muzzleloader' | 'crossbow' | 'other' | null
   sourceType?: 'live_deer' | 'mount' | 'trail_cam' | 'harvest_photo' | 'other' | null
   earsFullyVisible?: boolean
@@ -29,6 +30,10 @@ export interface CreateBuckParams {
   estimatedIrregularPointsCount?: number
   abnormalPointNotes?: string
   abnormalPointTags?: AbnormalPointTag[]
+  // Optional UI fields
+  nickname?: string
+  harvestDate?: string
+  location?: string
 }
 
 export interface BuckRecord {
@@ -51,6 +56,10 @@ export interface BuckRecord {
   abnormal_point_tags: AbnormalPointTag[] | null
   created_at: string
   updated_at: string
+  // Extended DB fields
+  location?: string | null
+  nickname?: string | null
+  main_frame_points?: number | null
 }
 
 // Normalize source_type values from UI to database-allowed values
@@ -393,6 +402,14 @@ export interface PredictionRecord {
   raw_ai_response: Record<string, unknown> | null
   intake_quality: Record<string, unknown> | null
   created_at: string
+  // Extended fields mirroring Prediction (added later to DB schema)
+  predicted_gross?: number | null
+  predicted_net?: number | null
+  confidence_percent?: number | null
+  confidence_label?: string | null
+  scoring_method?: string | null
+  fallback_used?: boolean | null
+  images_used?: number | null
 }
 
 export interface CreatePredictionParams {
@@ -434,27 +451,29 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
   const supabase = await createClient()
   
   // Normalize all numeric fields to handle string values from heuristic fallback
-  const normalizedConfidence = normalizeConfidence(params.result.confidence)
-  const scoreRangeLow = safeNumeric(params.result.scoreRange?.low)
-  const scoreRangeHigh = safeNumeric(params.result.scoreRange?.high)
-  
+  const pred = params.result.prediction
+  const meas = pred?.measurements
+  const normalizedConfidence = normalizeConfidence(pred?.confidence_percent)
+  const scoreRangeLow = safeNumeric(pred?.score_range_low)
+  const scoreRangeHigh = safeNumeric(pred?.score_range_high)
+
   const { data, error } = await supabase
     .from('predictions')
     .insert({
       buck_id: params.buckId,
       model_version_id: params.modelVersionId || null,
-      estimated_score: safeNumeric(params.result.estimatedScore),
+      estimated_score: safeNumeric(pred?.predicted_gross),
       score_range_low: scoreRangeLow,
       score_range_high: scoreRangeHigh,
       confidence: normalizedConfidence,
-      main_beam_left: safeNumeric(params.result.mainBeamLeft),
-      main_beam_right: safeNumeric(params.result.mainBeamRight),
-      inside_spread: safeNumeric(params.result.insideSpread),
-      points_left: safeNumeric(params.result.pointsLeft),
-      points_right: safeNumeric(params.result.pointsRight),
-      mass_estimate: safeNumeric(params.result.massEstimate),
-      tine_lengths: params.result.tineLengths || null,
-      circumferences: params.result.circumferences || null,
+      main_beam_left: safeNumeric(meas?.main_beam_left),
+      main_beam_right: safeNumeric(meas?.main_beam_right),
+      inside_spread: safeNumeric(meas?.inside_spread),
+      points_left: safeNumeric(meas?.g1_left),
+      points_right: safeNumeric(meas?.g1_right),
+      mass_estimate: safeNumeric(meas?.h1_left),
+      tine_lengths: null,
+      circumferences: null,
       raw_ai_response: params.rawResponse || null,
       intake_quality: params.intakeQuality || null
     })
@@ -1586,7 +1605,7 @@ export async function getBuckBundle(id: string): Promise<{
 
   return {
     buck: (buckResult.data as Buck | null) ?? null,
-    images: (imagesResult.data as BuckImage[]) ?? [],
+    images: (imagesResult.data as unknown as BuckImage[]) ?? [],
     prediction: (predictionsResult.data?.[0] as Prediction | null) ?? null,
     groundTruth: (groundTruthResult.data?.[0] as GroundTruthScore | null) ?? null,
   }
@@ -1630,10 +1649,10 @@ export async function listHistory(options?: {
       .order('created_at', { ascending: false }),
   ])
 
-  const images: BuckImage[] = (imagesResult.data as BuckImage[]) ?? []
-  const predictions: Prediction[] = (predictionsResult.data as Prediction[]) ?? []
+  const images: BuckImage[] = (imagesResult.data as unknown as BuckImage[]) ?? []
+  const predictions: Prediction[] = (predictionsResult.data as unknown as Prediction[]) ?? []
 
-  const data = (bucks as Buck[]).map(buck => ({
+  const data = (bucks as unknown as Buck[]).map(buck => ({
     ...buck,
     buck_images: images.filter(img => img.buck_id === buck.id),
     predictions: predictions.filter(p => p.buck_id === buck.id).slice(0, 1),
@@ -1680,10 +1699,10 @@ export async function listUserBucks(
       .order('created_at', { ascending: false }),
   ])
 
-  const images: BuckImage[] = (imagesResult.data as BuckImage[]) ?? []
-  const predictions: Prediction[] = (predictionsResult.data as Prediction[]) ?? []
+  const images: BuckImage[] = (imagesResult.data as unknown as BuckImage[]) ?? []
+  const predictions: Prediction[] = (predictionsResult.data as unknown as Prediction[]) ?? []
 
-  const data = (bucks as Buck[]).map(buck => ({
+  const data = (bucks as unknown as Buck[]).map(buck => ({
     ...buck,
     buck_images: images.filter(img => img.buck_id === buck.id),
     predictions: predictions.filter(p => p.buck_id === buck.id).slice(0, 1),
@@ -1742,8 +1761,8 @@ export async function getBuckByShareToken(token: string): Promise<(Buck & {
 
   return {
     ...(buck as Buck),
-    buck_images: (imagesResult.data as BuckImage[]) ?? [],
-    predictions: (predictionsResult.data as Prediction[])?.slice(0, 1) ?? [],
+    buck_images: (imagesResult.data as unknown as BuckImage[]) ?? [],
+    predictions: (predictionsResult.data as unknown as Prediction[])?.slice(0, 1) ?? [],
   }
 }
 

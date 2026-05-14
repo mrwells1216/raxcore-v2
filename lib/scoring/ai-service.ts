@@ -115,6 +115,11 @@ export interface ScoringOutput {
     warningsOnly: boolean
     issueCount: number
   } | null
+  // Raw and normalized scoring stages (used in bulk validation)
+  rawVisionGross?: number | null
+  rawVisionNet?: number | null
+  normalizedGross?: number | null
+  normalizedNet?: number | null
   // Phase 25: Calibrated confidence and trust score
   calibratedConfidence?: number
   confidenceTier?: ConfidenceTier

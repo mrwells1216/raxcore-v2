@@ -241,8 +241,8 @@ export function JobsTable({
             >
               <Link href={`/admin/jobs?page=${currentPage - 1}&${new URLSearchParams(
                 Object.fromEntries(
-                  Object.entries({ status: statusFilter, type: typeFilter })
-                    .filter(([, v]) => v)
+                  ([['status', statusFilter], ['type', typeFilter]] as [string, string | undefined][])
+                    .filter((entry): entry is [string, string] => entry[1] != null && entry[1] !== '')
                 )
               ).toString()}`}>
                 <ChevronLeft className="h-4 w-4" />
@@ -257,8 +257,8 @@ export function JobsTable({
             >
               <Link href={`/admin/jobs?page=${currentPage + 1}&${new URLSearchParams(
                 Object.fromEntries(
-                  Object.entries({ status: statusFilter, type: typeFilter })
-                    .filter(([, v]) => v)
+                  ([['status', statusFilter], ['type', typeFilter]] as [string, string | undefined][])
+                    .filter((entry): entry is [string, string] => entry[1] != null && entry[1] !== '')
                 )
               ).toString()}`}>
                 Next

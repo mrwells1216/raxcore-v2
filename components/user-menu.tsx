@@ -30,14 +30,14 @@ export function UserMenu({ initialUser }: UserMenuProps) {
   useEffect(() => {
     // Check initial auth state if not provided
     if (!initialUser) {
-      supabase.auth.getUser().then(({ data: { user } }) => {
+      supabase.auth.getUser().then(({ data: { user } }: { data: { user: User | null } }) => {
         setUser(user)
         setLoading(false)
       })
     }
 
     // Subscribe to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_: string, session: import('@supabase/supabase-js').Session | null) => {
       setUser(session?.user ?? null)
     })
 

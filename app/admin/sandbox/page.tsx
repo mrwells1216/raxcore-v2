@@ -703,13 +703,13 @@ function ShadowStatsCard() {
       </div>
       <div>
         <div className="text-2xl font-bold">
-          {data?.avgGrossDiff !== null ? `${data.avgGrossDiff.toFixed(2)}"` : '-'}
+          {data?.avgGrossDiff != null ? `${data.avgGrossDiff.toFixed(2)}"` : '-'}
         </div>
         <div className="text-sm text-muted-foreground">Avg gross diff</div>
       </div>
       <div>
         <div className="text-2xl font-bold">
-          {data?.avgConfidenceDiff !== null
+          {data?.avgConfidenceDiff != null
             ? `${data.avgConfidenceDiff.toFixed(1)}%`
             : '-'}
         </div>

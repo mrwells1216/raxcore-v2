@@ -24,6 +24,7 @@ import type {
   CaseSupervisionTrail,
   FailureCauseLabel,
   LabelStatus,
+  LabelSource,
   SupervisionType,
   SupervisionSource,
 } from './types'
@@ -139,7 +140,7 @@ export async function createSupervisionEvent(
         },
       })
       .eq('id', input.prediction_id)
-      .catch(() => {
+      .then(() => {
         // Ignore - prediction table may not have these columns yet
       })
   }
@@ -191,8 +192,8 @@ export async function createReversePassSupervisionEvent(params: {
     prediction_id: params.predictionId,
     buck_id: params.buckId,
     reverse_run_id: params.reverseRunId,
-    delta_gross: params.deltaGross,
-    delta_net: params.deltaNet,
+    delta_gross: params.deltaGross ?? undefined,
+    delta_net: params.deltaNet ?? undefined,
     metadata_json: {
       best_hypothesis_type: params.bestHypothesisType,
       error_decomposition: params.errorDecomposition,
@@ -230,8 +231,8 @@ export async function createStructuralSolvingSupervisionEvent(params: {
     prediction_id: params.predictionId,
     buck_id: params.buckId,
     structural_hypothesis_run_id: params.structuralRunId,
-    delta_gross: params.deltaGross,
-    delta_net: params.deltaNet,
+    delta_gross: params.deltaGross ?? undefined,
+    delta_net: params.deltaNet ?? undefined,
     metadata_json: {
       winning_candidate_type: params.winningCandidateType,
       primary_reason: params.primaryReason,
@@ -775,7 +776,7 @@ export async function getCaseSupervisionTrail(predictionId: string): Promise<Cas
   const allLabels: Array<{
     label: FailureCauseLabel
     confidence: number
-    source: string
+    source: LabelSource
     status: LabelStatus
   }> = []
   
@@ -812,7 +813,7 @@ export async function getCaseSupervisionTrail(predictionId: string): Promise<Cas
   
   const associatedPatterns = (patternExamples || []).map(pe => ({
     pattern_id: pe.pattern_id,
-    pattern_name: (pe.hard_case_patterns as { pattern_name: string })?.pattern_name ?? 'Unknown',
+    pattern_name: (pe.hard_case_patterns as unknown as { pattern_name: string })?.pattern_name ?? 'Unknown',
     match_confidence: pe.match_confidence,
   }))
   

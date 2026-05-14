@@ -210,7 +210,8 @@ async function loadSegmentResidualProfiles(): Promise<Map<string, SegmentResidua
     const profiles = new Map<string, SegmentResidualProfile>()
 
     // Group by segment_id, take latest
-    const latestBySegment = new Map<string, typeof metrics extends (infer T)[] ? T : never>()
+    type MetricRow = NonNullable<typeof metrics>[number]
+    const latestBySegment = new Map<string, MetricRow>()
     for (const m of metrics ?? []) {
       if (!latestBySegment.has(m.segment_id)) {
         latestBySegment.set(m.segment_id, m)

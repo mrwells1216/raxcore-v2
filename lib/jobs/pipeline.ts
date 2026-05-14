@@ -39,7 +39,8 @@ export interface PipelineStageDefinition<TInput = unknown, TOutput = unknown> {
  */
 export function definePipeline<TPayload, TResult>(
   name: string,
-  stages: PipelineStageDefinition[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  stages: PipelineStageDefinition<any, any>[]
 ): PipelineDefinition<TPayload, TResult> {
   // Normalize weights to sum to 100
   const totalWeight = stages.reduce((sum, s) => sum + s.weight, 0)

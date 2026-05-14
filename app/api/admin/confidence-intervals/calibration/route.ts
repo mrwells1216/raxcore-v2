@@ -80,7 +80,7 @@ export async function GET() {
     // Aggregate family-level data
     const families = ['spread', 'beam', 'tine', 'mass', 'deduction']
     const familyAnalysis = families.map(family => {
-      const fieldName = `${family}_avg_error` as keyof typeof segmentMetrics[0]
+      const fieldName = `${family}_avg_error` as keyof NonNullable<typeof segmentMetrics>[number]
       const errors = (segmentMetrics ?? [])
         .map(m => m[fieldName] as number | null)
         .filter((e): e is number => e !== null)

@@ -197,7 +197,8 @@ export async function runReadinessChecks(
   // =====================
   
   try {
-    const benchmarkRun = await listBenchmarkRuns(modelVersionId, calibrationProfileId)
+    const benchmarkRunsResult = await listBenchmarkRuns({ limit: 1 })
+    const benchmarkRun = benchmarkRunsResult.data[0] ?? null
     
     if (benchmarkRun) {
       // MAE Gross Check
@@ -210,7 +211,7 @@ export async function runReadinessChecks(
         check_name: 'MAE Gross Score',
         check_category: 'accuracy',
         check_passed: maeGrossPassed,
-        check_value: maeGross,
+        check_value: maeGross ?? undefined,
         check_threshold: fullConfig.maxMaeGross,
         severity: maeGrossPassed ? 'info' : 'blocker',
         check_details: { metric: 'mae_gross', unit: 'inches' },
@@ -230,7 +231,7 @@ export async function runReadinessChecks(
         check_name: 'MAE Net Score',
         check_category: 'accuracy',
         check_passed: maeNetPassed,
-        check_value: maeNet,
+        check_value: maeNet ?? undefined,
         check_threshold: fullConfig.maxMaeNet,
         severity: maeNetPassed ? 'info' : 'blocker',
         check_details: { metric: 'mae_net', unit: 'inches' },
@@ -250,7 +251,7 @@ export async function runReadinessChecks(
         check_name: 'R² Gross Score',
         check_category: 'accuracy',
         check_passed: r2Passed,
-        check_value: r2Gross,
+        check_value: r2Gross ?? undefined,
         check_threshold: fullConfig.minR2Gross,
         severity: r2Passed ? 'info' : 'warning',
         check_details: { metric: 'r2_gross' },
@@ -268,12 +269,12 @@ export async function runReadinessChecks(
           check_name: 'Regression Guardrails',
           check_category: 'accuracy',
           check_passed: guardrailPassed,
-          check_value: guardrailResult.checks_passed,
-          check_threshold: guardrailResult.total_checks,
+          check_value: guardrailResult.checks.filter(c => c.passed).length,
+          check_threshold: guardrailResult.checks.length,
           severity: guardrailPassed ? 'info' : 'blocker',
           check_details: {
-            checks: guardrailResult.check_results,
-            failed_checks: guardrailResult.check_results?.filter((c: { passed: boolean }) => !c.passed) || [],
+            checks: guardrailResult.checks,
+            failed_checks: guardrailResult.checks.filter(c => !c.passed),
           },
         })
         if (guardrailCheck) checks.push(guardrailCheck)
@@ -406,10 +407,8 @@ export async function runReadinessChecks(
           check_passed: true,
           check_details: {
             profile_name: activeCalibration.name,
-            gross_offset: activeCalibration.gross_offset,
-            net_offset: activeCalibration.net_offset,
-            spread_scale: activeCalibration.spread_scale,
-            beam_scale: activeCalibration.beam_scale,
+            spread_correction_weight: activeCalibration.spread_correction_weight,
+            beam_correction_weight: activeCalibration.beam_correction_weight,
           },
         })
         if (calibrationCheck) checks.push(calibrationCheck)
@@ -437,9 +436,19 @@ export async function runReadinessChecks(
   try {
     const healthSummary = await getDatasetHealthSummary()
     
-    if (healthSummary && healthSummary.totals.total > 0) {
+    const totalExamples = Array.isArray(healthSummary)
+      ? healthSummary.reduce((s, h) => s + h.example_count, 0)
+      : 0
+    const healthyExamples = Array.isArray(healthSummary)
+      ? healthSummary.reduce((s, h) => s + h.training_eligible, 0)
+      : 0
+    const outlierExamples = Array.isArray(healthSummary)
+      ? healthSummary.reduce((s, h) => s + h.outlier_count, 0)
+      : 0
+
+    if (healthSummary && totalExamples > 0) {
       // Healthy examples percentage
-      const healthyPercent = (healthSummary.totals.healthy / healthSummary.totals.total) * 100
+      const healthyPercent = (healthyExamples / totalExamples) * 100
       const healthyPassed = healthyPercent >= fullConfig.minHealthyExamplesPercent
       const healthyCheck = await createReleaseReadinessCheck({
         model_version_id: modelVersionId,
@@ -451,8 +460,8 @@ export async function runReadinessChecks(
         check_threshold: fullConfig.minHealthyExamplesPercent,
         severity: healthyPassed ? 'info' : 'warning',
         check_details: {
-          healthy_count: healthSummary.totals.healthy,
-          total_count: healthSummary.totals.total,
+          healthy_count: healthyExamples,
+          total_count: totalExamples,
         },
       })
       if (healthyCheck) checks.push(healthyCheck)
@@ -461,8 +470,8 @@ export async function runReadinessChecks(
       }
 
       // Outlier percentage
-      const outlierPercent = healthSummary.breakdown.outliers_flagged 
-        ? (healthSummary.breakdown.outliers_flagged / healthSummary.totals.total) * 100 
+      const outlierPercent = outlierExamples
+        ? (outlierExamples / totalExamples) * 100
         : 0
       const outlierPassed = outlierPercent <= fullConfig.maxOutlierPercent
       const outlierCheck = await createReleaseReadinessCheck({
@@ -474,7 +483,7 @@ export async function runReadinessChecks(
         check_value: outlierPercent,
         check_threshold: fullConfig.maxOutlierPercent,
         severity: outlierPassed ? 'info' : 'warning',
-        check_details: { outlier_count: healthSummary.breakdown.outliers_flagged || 0 },
+        check_details: { outlier_count: outlierExamples },
       })
       if (outlierCheck) checks.push(outlierCheck)
       if (!outlierPassed) {

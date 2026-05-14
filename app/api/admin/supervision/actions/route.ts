@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   const actions = await listLearningActions({ 
     limit, 
     status: status as 'pending' | 'approved' | 'applied' | 'rejected' | undefined,
-    actionType: actionType as string | undefined,
+    action_type: actionType as import('@/lib/supervision/types').LearningActionType | undefined,
   })
   
   return NextResponse.json(actions)

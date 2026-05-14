@@ -14,6 +14,7 @@ import type {
   Measurements,
   Buck,
   BuckImage,
+  CalibrationProfile,
 } from '@/lib/types'
 import { getScoringVariant, getProductionVariant } from './variant-registry'
 
@@ -253,7 +254,7 @@ export async function executeShadowScoring(
   const { scoreBuck } = await import('@/lib/scoring/ai-service')
 
   // Load the variant's calibration profile if specified
-  let calibrationProfile = null
+  let calibrationProfile: CalibrationProfile | null = null
   if (variant.calibration_profile_id) {
     const supabase = await createClient()
     const { data } = await supabase
@@ -267,7 +268,7 @@ export async function executeShadowScoring(
   // Build scoring input from buck data
   const scoringInput = {
     images: context.images.map(img => ({
-      imageUrl: img.image_url,
+      imageUrl: img.image_url ?? '',
       angleType: img.angle_type as 'front' | 'left' | 'right' | 'back',
       width: img.width || 1024,
       height: img.height || 768,

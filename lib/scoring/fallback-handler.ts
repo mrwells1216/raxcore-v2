@@ -3,12 +3,12 @@
  * Safe fallback logic when vision path fails
  */
 
-import type { 
-  Measurements, 
-  LandmarksDetected, 
-  ScoringOutput,
+import type {
+  Measurements,
+  LandmarksDetected,
   AngleType
 } from '@/lib/types'
+import type { ScoringOutput } from '@/lib/scoring/ai-service'
 import type { VisionRuntimeError, RuntimeMetadata } from './vision-runtime'
 import type { ImageValidationResult } from './image-validation'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'

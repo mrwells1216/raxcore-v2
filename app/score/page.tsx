@@ -35,8 +35,8 @@ function ScorePageContent() {
   }, [])
 
   useEffect(() => {
-    createClient().auth.getUser().then(({ data: { user } }) => {
-      setUserId(user?.id ?? null)
+    createClient().auth.getUser().then((result: { data: { user: { id: string } | null } }) => {
+      setUserId(result.data.user?.id ?? null)
     })
   }, [])
 

@@ -5,6 +5,7 @@
  */
 
 import type { Measurements, AngleType, MeasurementFamily, LandmarksDetected } from '@/lib/types'
+export type { MeasurementFamily }
 
 // ============================================================================
 // STATUS AND METHOD ENUMS

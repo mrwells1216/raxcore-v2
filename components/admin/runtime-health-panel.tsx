@@ -64,6 +64,7 @@ export function RuntimeHealthPanel({ metrics }: RuntimeHealthPanelProps) {
       quota_exceeded: 'bg-red-100 text-red-800',
       model_unavailable: 'bg-gray-100 text-gray-800',
       content_policy: 'bg-pink-100 text-pink-800',
+      config_error: 'bg-red-100 text-red-800',
       unknown: 'bg-gray-100 text-gray-800',
     }
     return colors[type] || 'bg-gray-100 text-gray-800'

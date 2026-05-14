@@ -15,7 +15,7 @@ export async function buildErrorDecomposition(bundle: ReverseBaselineBundle): Pr
   const notes: string[] = []
 
   // Extract signals from prediction metadata
-  const predMeta = prediction as Record<string, unknown>
+  const predMeta = prediction as unknown as Record<string, unknown>
   const landmarks = (predMeta.landmarks ?? {}) as Record<string, unknown>
   const rawResponse = (predMeta.raw_response ?? {}) as Record<string, unknown>
   
@@ -70,7 +70,7 @@ export async function buildErrorDecomposition(bundle: ReverseBaselineBundle): Pr
 
   // Check source type for quality signals
   const sourceType = buck.source_type
-  if (sourceType === 'trail_cam' || sourceType === 'trail_camera') {
+  if ((sourceType as string) === 'trail_cam' || (sourceType as string) === 'trail_camera') {
     causes.push({
       cause: 'lighting_quality_poor',
       weight: 0.45,

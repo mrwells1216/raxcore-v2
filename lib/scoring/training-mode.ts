@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { AngleType, Measurements } from '@/lib/types'
 import type { ImageDiagnostics } from './image-diagnostics'
 import type { ImageAngleScore } from './image-angle-scoring'
-import type { MeasurementFamily } from './cross-view-conflict'
+import type { MeasurementFamily } from './segment-confidence-interval'
 
 // ============================================================================
 // TYPES

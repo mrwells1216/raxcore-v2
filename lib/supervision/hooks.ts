@@ -123,7 +123,7 @@ export async function onReversePassComplete(
       refined_gross: input.refinedGross,
       refined_net: input.refinedNet,
       change_magnitude: changeMagnitude,
-      winning_hypothesis_type: input.winningHypothesisType,
+      winning_hypothesis_type: input.winningHypothesisType ?? undefined,
       inferred_cause: labels[0]?.label ?? null,
       geometry_improvement: input.geometryImprovement ?? null,
       error_decomposition_causes: input.errorDecompositionCauses,

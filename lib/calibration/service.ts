@@ -398,7 +398,7 @@ export async function rollbackModelVersion(
       calibrationProfileId = lastActivation.calibration_profile_id
       
       // Activate the calibration profile
-      await activateCalibrationProfile(calibrationProfileId, rolledBackBy, `Restored as part of rollback to ${targetModel.version_name}`)
+      await activateCalibrationProfile(calibrationProfileId!, rolledBackBy, `Restored as part of rollback to ${targetModel.version_name}`)
     } else {
       warnings.push('No calibration profile was previously active with this model version')
     }
@@ -425,7 +425,7 @@ export async function rollbackModelVersion(
       success: false,
       previous_model_version_id: currentActive?.id || null,
       new_model_version_id: request.target_model_version_id,
-      calibration_profile_id,
+      calibration_profile_id: calibrationProfileId,
       rollback_event_id: '',
       warnings: ['Failed to activate target model version'],
     }
@@ -460,7 +460,7 @@ export async function rollbackModelVersion(
     success: true,
     previous_model_version_id: currentActive?.id || null,
     new_model_version_id: request.target_model_version_id,
-    calibration_profile_id,
+    calibration_profile_id: calibrationProfileId,
     rollback_event_id: rollbackEvent?.id || '',
     warnings,
   }

@@ -106,7 +106,7 @@ export default async function AdminDashboard() {
                       </div>
                       <div>
                         <p className="text-sm font-medium">
-                          {buck.nickname || `Buck ${buck.session_id.slice(-6)}`}
+                          {buck.nickname || `Buck ${buck.session_id?.slice(-6) ?? ''}`}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {new Date(buck.created_at).toLocaleDateString()}

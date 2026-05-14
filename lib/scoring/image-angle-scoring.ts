@@ -11,7 +11,7 @@
 
 import type { AngleType, LandmarksDetected, Measurements } from '@/lib/types'
 import type { ImageDiagnostics } from './image-diagnostics'
-import type { MeasurementFamily } from './cross-view-conflict'
+import type { MeasurementFamily } from './segment-confidence-interval'
 
 // ============================================================================
 // TYPES
@@ -107,12 +107,12 @@ const ANGLE_VISIBILITY_MATRIX: Record<AngleType, {
  * Landmark-based visibility adjustments.
  * If key landmarks are visible, we can be more confident in measurements.
  */
-const LANDMARK_VISIBILITY_BOOST: Record<keyof LandmarksDetected, {
+const LANDMARK_VISIBILITY_BOOST: Partial<Record<keyof LandmarksDetected, {
   spread: number
   beam: number
   tine: number
   mass: number
-}> = {
+}>> = {
   ears_visible: {
     spread: 0.15,   // Ears help calibrate spread
     beam: 0.05,
@@ -172,29 +172,29 @@ export function scoreImageForAngle(
   let massBoost = 0
 
   if (landmarks.ears_visible) {
-    spreadBoost += LANDMARK_VISIBILITY_BOOST.ears_visible.spread
-    beamBoost += LANDMARK_VISIBILITY_BOOST.ears_visible.beam
-    tineBoost += LANDMARK_VISIBILITY_BOOST.ears_visible.tine
-    massBoost += LANDMARK_VISIBILITY_BOOST.ears_visible.mass
+    spreadBoost += LANDMARK_VISIBILITY_BOOST.ears_visible!.spread
+    beamBoost += LANDMARK_VISIBILITY_BOOST.ears_visible!.beam
+    tineBoost += LANDMARK_VISIBILITY_BOOST.ears_visible!.tine
+    massBoost += LANDMARK_VISIBILITY_BOOST.ears_visible!.mass
   }
   if (landmarks.eyes_visible) {
-    spreadBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible.spread
-    beamBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible.beam
-    tineBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible.tine
-    massBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible.mass
+    spreadBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible!.spread
+    beamBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible!.beam
+    tineBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible!.tine
+    massBoost += LANDMARK_VISIBILITY_BOOST.eyes_visible!.mass
   }
   if (landmarks.antlers_visible) {
-    spreadBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible.spread
-    beamBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible.beam
-    tineBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible.tine
-    massBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible.mass
+    spreadBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible!.spread
+    beamBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible!.beam
+    tineBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible!.tine
+    massBoost += LANDMARK_VISIBILITY_BOOST.antlers_visible!.mass
   }
   if (landmarks.ear_base_to_tip !== undefined) {
-    spreadBoost += LANDMARK_VISIBILITY_BOOST.ear_base_to_tip.spread
-    massBoost += LANDMARK_VISIBILITY_BOOST.ear_base_to_tip.mass
+    spreadBoost += LANDMARK_VISIBILITY_BOOST.ear_base_to_tip!.spread
+    massBoost += LANDMARK_VISIBILITY_BOOST.ear_base_to_tip!.mass
   }
   if (landmarks.eye_to_eye !== undefined) {
-    spreadBoost += LANDMARK_VISIBILITY_BOOST.eye_to_eye.spread
+    spreadBoost += LANDMARK_VISIBILITY_BOOST.eye_to_eye!.spread
   }
 
   // Compute visibility scores (capped at 1.0)

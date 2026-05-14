@@ -48,6 +48,13 @@ const landmarkQualityColors: Record<LandmarkQualityTier, string> = {
 }
 
 const referenceSourceLabels: Record<ReferenceSourceType, string> = {
+  eye_box: 'Eye Box',
+  pedicle_spacing: 'Pedicle Spacing',
+  eye_to_pedicle: 'Eye to Pedicle',
+  skull_width: 'Skull Width',
+  nose_bridge: 'Nose Bridge',
+  muzzle_width: 'Muzzle Width',
+  ear_base_spacing: 'Ear Base Spacing',
   strong_ear: 'Strong Ear',
   partial_ear: 'Partial Ear',
   strong_eye: 'Strong Eye',

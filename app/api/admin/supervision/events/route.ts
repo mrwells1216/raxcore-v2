@@ -26,11 +26,10 @@ export async function GET(request: NextRequest) {
   const eventType = searchParams.get('eventType') || undefined
   const severityLevel = searchParams.get('severityLevel') || undefined
 
-  const events = await listSupervisionEvents({ 
-    limit, 
-    offset, 
-    eventType: eventType as 'prediction' | 'validation' | 'pattern_detected' | 'action_applied' | undefined,
-    severityLevel: severityLevel as 'info' | 'warning' | 'critical' | undefined,
+  const events = await listSupervisionEvents({
+    limit,
+    offset,
+    ...(eventType ? { supervision_type: eventType as import('@/lib/supervision/types').SupervisionType } : {}),
   })
   
   return NextResponse.json(events)

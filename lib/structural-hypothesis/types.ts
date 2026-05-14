@@ -4,6 +4,7 @@
  */
 
 import type { Measurements, AngleType, MeasurementFamily, LandmarksDetected } from '@/lib/types'
+export type { MeasurementFamily }
 import type { AllLandmarkId, LandmarkPoint45 } from '@/lib/vision/landmarks/types'
 
 // ============================================================================

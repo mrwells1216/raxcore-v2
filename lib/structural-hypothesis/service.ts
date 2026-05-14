@@ -7,7 +7,7 @@ import 'server-only'
 
 import { getServiceSupabase } from '@/lib/supabase/admin'
 import { onStructuralSolverComplete } from '@/lib/supervision/hooks'
-import type { Measurements, Prediction, Buck, BuckImage } from '@/lib/types'
+import type { Measurements, Prediction, Buck, BuckImage, MeasurementFamily } from '@/lib/types'
 import type {
   StructuralHypothesisRunRow,
   StructuralHypothesisCandidateRow,
@@ -550,7 +550,7 @@ function buildFallbackMeasurements(pred: Prediction): Measurements {
 
 function pickMeasurements(pred: Prediction): Measurements {
   if (pred.measurements) return pred.measurements
-  const rr = (pred as Record<string, unknown>).raw_response as Record<string, unknown> | undefined
+  const rr = (pred as unknown as Record<string, unknown>).raw_response as Record<string, unknown> | undefined
   if (rr?.measurements) return rr.measurements as Measurements
   // Never throw — return estimated fallback measurements from the score instead
   return buildFallbackMeasurements(pred)
@@ -577,7 +577,7 @@ function extractCrossViewConflict(predRecord: Record<string, unknown>): Structur
   if (cvConflict) {
     return {
       disagreementScore: (cvConflict.disagreement_score as number) ?? 0,
-      highDisagreementFamilies: (cvConflict.high_disagreement_families as string[])?.map(f => f as StructuralSolvingInput['crossViewConflict']['highDisagreementFamilies'][number]) ?? [],
+      highDisagreementFamilies: ((cvConflict.high_disagreement_families as string[]) ?? []).map(f => f as MeasurementFamily),
       reverseEngineeringRecommended: (cvConflict.reverse_engineering_recommended as boolean) ?? false,
       rejectedViews: (cvConflict.rejected_views as Array<{ imageIndex: number; reason: string }>) ?? [],
     }
@@ -587,7 +587,7 @@ function extractCrossViewConflict(predRecord: Record<string, unknown>): Structur
     const ds = mv.disagreement_summary as Record<string, unknown>
     return {
       disagreementScore: (ds.avg_family_disagreement as number) ?? 0,
-      highDisagreementFamilies: (ds.high_disagreement_families as string[])?.map(f => f as StructuralSolvingInput['crossViewConflict']['highDisagreementFamilies'][number]) ?? [],
+      highDisagreementFamilies: ((ds.high_disagreement_families as string[]) ?? []).map(f => f as MeasurementFamily),
       reverseEngineeringRecommended: false,
       rejectedViews: [],
     }

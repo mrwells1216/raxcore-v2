@@ -236,7 +236,7 @@ export default async function MonitoringPage() {
             ) : (
               <div>
                 {(['score', 'vision', 'render', 'benchmark'] as const).map(svc => {
-                  const s = serviceSummaries[svc]
+                  const s = (serviceSummaries as Record<string, import('@/lib/monitoring/service').EventSummary | undefined>)[svc]
                   if (!s || s.total === 0) return null
                   return (
                     <ServiceRow

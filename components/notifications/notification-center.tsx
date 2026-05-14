@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import type { UserNotification, NotificationType } from '@/lib/notifications/service'
 
-const TYPE_META: Record<NotificationType, { icon: React.ElementType; color: string; label: string }> = {
+const TYPE_META: Record<NotificationType, { icon: React.ComponentType<{ className?: string }>; color: string; label: string }> = {
   submit_real_score:    { icon: CheckCircle,   color: 'text-primary',          label: 'Score' },
   render_complete:      { icon: Box,           color: 'text-accent',           label: 'Render' },
   render_failed:        { icon: AlertTriangle, color: 'text-destructive',      label: 'Render' },

@@ -399,7 +399,7 @@ export async function solveMultiView(input: MVSolverInput): Promise<MVSolverResu
         angle_class: view.angleClass,
         angle_confidence: view.confidence,
         reference_quality_score: view.referenceQuality,
-        landmark_count: Object.keys(view.landmarks).filter(k => (view.landmarks as Record<string, unknown>)[k] !== null).length,
+        landmark_count: Object.keys(view.landmarks).filter(k => (view.landmarks as unknown as Record<string, unknown>)[k] !== null).length,
         landmark_confidence_avg: view.confidence,
         view_overall_score: graphNode?.overallScore ?? 0,
         spread_contribution_score: graphNode?.familyContributions.spread ?? 0,
@@ -472,10 +472,10 @@ export async function solveMultiView(input: MVSolverInput): Promise<MVSolverResu
       fallbackSourceViewId = mvView?.id ?? null
     } else {
       // Use subgraph fusion (still use fusion result but mark as fallback)
-      fusedMeasurements = buildFusedMeasurements(fusionResult, input.views, graph)
+      fusedMeasurements = buildFusedMeasurements(fusionResult, input.views.map(v => ({ viewIndex: v.imageIndex, measurements: v.measurements })), graph)
     }
   } else {
-    fusedMeasurements = buildFusedMeasurements(fusionResult, input.views, graph)
+    fusedMeasurements = buildFusedMeasurements(fusionResult, input.views.map(v => ({ viewIndex: v.imageIndex, measurements: v.measurements })), graph)
   }
 
   // 9. Create solution record
@@ -652,6 +652,7 @@ export async function getMVSolution(buckId: string): Promise<MVSolverResult | nu
         beam: v.beam_contribution_score || 0,
         tine: v.tine_contribution_score || 0,
         mass: v.mass_contribution_score || 0,
+        deduction: 0,
       },
     })),
     edges: (edges || []).map(e => ({
@@ -666,6 +667,7 @@ export async function getMVSolution(buckId: string): Promise<MVSolverResult | nu
         beam: e.beam_agreement_score || 0,
         tine: e.tine_agreement_score || 0,
         mass: e.mass_agreement_score || 0,
+        deduction: 0,
       },
     })),
     connectivity: mvSet.graph_connectivity_score || 0,

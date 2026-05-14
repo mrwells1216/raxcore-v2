@@ -167,7 +167,7 @@ export function PayloadScoreSheetEditor({
   // Compute scores via rules engine
   const computed = useMemo(() => {
     try {
-      return computeAllScores(sheet)
+      return computeAllScores(sheet.measurements, sheet.scoringSystem)
     } catch {
       return null
     }

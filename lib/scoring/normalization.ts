@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Vision Output Normalization Layer (Phase 9)
  * 
  * Takes raw vision output and normalizes it to ensure:
@@ -230,7 +230,7 @@ export function normalizeMeasurements(raw: Measurements): NormalizationResult {
       if (result.reason) {
         recordAdjustment(key, value, result.value, result.reason)
       }
-      ;(normalized as Record<string, number | null>)[key] = result.value
+      ;(normalized as unknown as Record<string, number | null>)[key] = result.value
     }
   }
 
@@ -264,7 +264,7 @@ export function normalizeMeasurements(raw: Measurements): NormalizationResult {
         if (result.reason) {
           recordAdjustment(key, value, result.value, result.reason)
         }
-        ;(normalized as Record<string, number | null>)[key] = result.value
+        ;(normalized as unknown as Record<string, number | null>)[key] = result.value
       }
     }
   }
@@ -285,8 +285,8 @@ export function normalizeMeasurements(raw: Measurements): NormalizationResult {
         if (balanced.right !== rightVal) {
           recordAdjustment(rightKey, rightVal, balanced.right, 'asymmetry correction')
         }
-        ;(normalized as Record<string, number | null>)[leftKey] = balanced.left
-        ;(normalized as Record<string, number | null>)[rightKey] = balanced.right
+        ;(normalized as unknown as Record<string, number | null>)[leftKey] = balanced.left
+        ;(normalized as unknown as Record<string, number | null>)[rightKey] = balanced.right
       }
     }
   }
@@ -306,7 +306,7 @@ export function normalizeMeasurements(raw: Measurements): NormalizationResult {
         if (result.reason) {
           recordAdjustment(key, value, result.value, result.reason)
         }
-        ;(normalized as Record<string, number | null>)[key] = result.value
+        ;(normalized as unknown as Record<string, number | null>)[key] = result.value
       }
     }
   }
@@ -406,3 +406,4 @@ export function getNormalizationSummary(result: NormalizationResult): string {
 
   return `Applied ${parts.join(', ')} correction(s). Confidence impact: ${result.confidenceImpact}%`
 }
+

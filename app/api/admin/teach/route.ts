@@ -66,6 +66,8 @@ export async function POST(request: Request) {
     // Create buck record
     const buck = await createBuck({
       sessionId,
+      rackType: (rackType as 'typical' | 'non-typical') || 'typical',
+      state: state ?? null,
       nickname: nickname || undefined,
       location: location || state,
       harvestDate: harvestDate || undefined,
@@ -99,16 +101,24 @@ export async function POST(request: Request) {
       buckId: buck.id,
       modelVersionId: model?.id,
       result: {
-        estimatedScore: scored.predictedGross,
-        scoreRange: { low: scored.errorBandLow, high: scored.errorBandHigh },
-        confidence: scored.confidencePercent >= 75 ? 'high' : scored.confidencePercent >= 50 ? 'medium' : 'low',
-        mainBeamLeft: scored.measurements.main_beam_left ?? undefined,
-        mainBeamRight: scored.measurements.main_beam_right ?? undefined,
-        insideSpread: scored.measurements.inside_spread ?? undefined,
-        pointsLeft: scored.measurements.g5_left ? 6 : scored.measurements.g4_left ? 5 : 4,
-        pointsRight: scored.measurements.g5_right ? 6 : scored.measurements.g4_right ? 5 : 4,
-        massEstimate: 'average',
-      }
+        prediction: {
+          id: '',
+          buck_id: buck.id,
+          model_version_id: model?.id ?? null,
+          predicted_gross: scored.predictedGross,
+          predicted_net: scored.predictedNet ?? null,
+          confidence_percent: scored.confidencePercent,
+          score_range_low: scored.errorBandLow ?? null,
+          score_range_high: scored.errorBandHigh ?? null,
+          measurements: scored.measurements ?? null,
+          landmarks: null,
+          state_calibration: null,
+          processing_time_ms: null,
+          images_used: null,
+          error_band_low: scored.errorBandLow ?? null,
+          error_band_high: scored.errorBandHigh ?? null,
+        },
+      } as import('@/lib/types').ScoringResult
     })
 
     await updateBuckStatus(buck.id, 'completed')
@@ -134,7 +144,7 @@ export async function POST(request: Request) {
 
       // Get stored images
       const buckImages = await getBuckImages(buck.id)
-      const storedImageUrls = buckImages.map(img => img.image_url)
+      const storedImageUrls = buckImages.map(img => img.image_url).filter((u): u is string => u != null)
 
       // Create training example
       const trainingExample = await createTrainingExample({

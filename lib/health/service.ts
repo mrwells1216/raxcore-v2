@@ -6,6 +6,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { DEFAULT_HEALTH_CONFIG } from '@/lib/types'
 import type {
   TrainingExampleWithHealth,
   HealthFactors,
@@ -25,7 +26,6 @@ import type {
   DatasetHealthBreakdown,
   HealthFilterOptions,
   HealthComputationConfig,
-  DEFAULT_HEALTH_CONFIG,
   ScoreSource,
   QualityFlags,
 } from '@/lib/types'
@@ -988,10 +988,10 @@ export async function runFullHealthComputation(
     // Detect duplicates first
     const duplicateCandidates: DuplicateCandidate[] = allExamples.map(ex => ({
       example_id: ex.id,
-      buck_id: (ex.prediction as Record<string, unknown>)?.buck_id as string || '',
-      predicted_gross: (ex.prediction as Record<string, unknown>)?.predicted_gross as number | null,
-      predicted_net: (ex.prediction as Record<string, unknown>)?.predicted_net as number | null,
-      official_gross: (ex.ground_truth as Record<string, unknown>)?.official_gross as number | null,
+      buck_id: (ex.prediction as unknown as Record<string, unknown>)?.buck_id as string || '',
+      predicted_gross: (ex.prediction as unknown as Record<string, unknown>)?.predicted_gross as number | null,
+      predicted_net: (ex.prediction as unknown as Record<string, unknown>)?.predicted_net as number | null,
+      official_gross: (ex.ground_truth as unknown as Record<string, unknown>)?.official_gross as number | null,
     }))
     
     const { clusters } = detectDuplicates(duplicateCandidates, config)
@@ -1009,9 +1009,9 @@ export async function runFullHealthComputation(
       example_id: ex.id,
       gross_error: ex.gross_error,
       net_error: ex.net_error,
-      predicted_gross: (ex.prediction as Record<string, unknown>)?.predicted_gross as number | null,
-      official_gross: (ex.ground_truth as Record<string, unknown>)?.official_gross as number | null,
-      confidence_percent: (ex.prediction as Record<string, unknown>)?.confidence_percent as number | null,
+      predicted_gross: (ex.prediction as unknown as Record<string, unknown>)?.predicted_gross as number | null,
+      official_gross: (ex.ground_truth as unknown as Record<string, unknown>)?.official_gross as number | null,
+      confidence_percent: (ex.prediction as unknown as Record<string, unknown>)?.confidence_percent as number | null,
     }))
     
     const { outliers } = detectOutliers(outlierInputs, config)
@@ -1034,8 +1034,8 @@ export async function runFullHealthComputation(
     
     // Compute health scores for each example
     for (const ex of allExamples) {
-      const prediction = ex.prediction as Record<string, unknown> | null
-      const groundTruth = ex.ground_truth as Record<string, unknown> | null
+      const prediction = ex.prediction as unknown as Record<string, unknown> | null
+      const groundTruth = ex.ground_truth as unknown as Record<string, unknown> | null
       const buck = prediction?.buck as Record<string, unknown> | null
       
       const exampleData: ExampleData = {

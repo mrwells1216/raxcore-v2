@@ -86,7 +86,7 @@ interface DPadAdjustmentModalProps {
     newMeasurementValue: number | null
     newScore: number | null
     scoreDelta: number | null
-  }>
+  } | null>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

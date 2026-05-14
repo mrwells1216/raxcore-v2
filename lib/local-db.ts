@@ -60,10 +60,10 @@ function migrateDb(raw: Partial<LocalDb>): LocalDb {
   } as LocalDb
 
   db.bucks = (raw.bucks || []).map((buck) => ({
-    capture_device: null,
-    harvest_year: null,
-    main_frame_points: null,
     ...buck,
+    capture_device: buck.capture_device ?? null,
+    harvest_year: buck.harvest_year ?? null,
+    main_frame_points: buck.main_frame_points ?? null,
   })) as Buck[]
 
   db.buck_images = (raw.buck_images || []) as BuckImage[]

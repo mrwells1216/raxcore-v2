@@ -15,7 +15,7 @@ import {
 import { getCalibrationProfileById } from '@/lib/calibration/utils'
 import { getBuckImages } from '@/lib/storage/service'
 import { scoreBuck } from '@/lib/scoring/ai-service'
-import type { BulkValidationFilters, ModelPredictionResult, BulkRunSummaryMetrics, RackType, SourceType } from '@/lib/types'
+import type { BulkValidationFilters, ModelPredictionResult, BulkRunSummaryMetrics, RackType, SourceType, AngleType } from '@/lib/types'
 
 // POST /api/admin/bulk-validation/runs/[id]/execute - Execute a bulk validation run
 export async function POST(
@@ -103,7 +103,7 @@ export async function POST(
         let imageUrls = example.image_urls || []
         if (example.buck_id && imageUrls.length === 0) {
           const buckImages = await getBuckImages(example.buck_id)
-          imageUrls = buckImages.map((img) => img.image_url)
+          imageUrls = buckImages.map((img) => img.image_url).filter((u): u is string => u != null)
         }
 
         if (imageUrls.length === 0) {
@@ -124,7 +124,7 @@ export async function POST(
           const primaryResult = await scoreBuck({
             images: imageUrls.map((url, i) => ({
               imageUrl: url,
-              angleType: example.angle_tags?.[i] || (i === 0 ? 'front' : 'other'),
+              angleType: (example.angle_tags?.[i] || (i === 0 ? 'front' : 'other')) as AngleType,
               width: 1024,
               height: 1024,
             })),
@@ -181,7 +181,7 @@ export async function POST(
               const compResult = await scoreBuck({
                 images: imageUrls.map((url, idx) => ({
                   imageUrl: url,
-                  angleType: example.angle_tags?.[idx] || (idx === 0 ? 'front' : 'other'),
+                  angleType: (example.angle_tags?.[idx] || (idx === 0 ? 'front' : 'other')) as AngleType,
                   width: 1024,
                   height: 1024,
                 })),
