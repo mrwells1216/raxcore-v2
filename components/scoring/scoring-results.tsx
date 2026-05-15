@@ -26,6 +26,7 @@ import { BCScoreSheet } from './bc-score-sheet'
 import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
 import { LandmarkOverlay } from './landmark-overlay'
+import type { LandmarkMeasurement } from '@/lib/scoring/landmark-geometry'
 import { TrophyEligibilityCta } from '@/components/trophy-room/trophy-eligibility-cta'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
@@ -109,7 +110,7 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
     locatedCount: number
   } | null
   landmarkScore?: {
-    measurements: Array<{ fieldKey: string; valueInches: number | null; combinedConfidence: number; warning?: string }>
+    measurements: LandmarkMeasurement[]
     grossScore: number | null
     calibrationSource: string
     locatedFieldCount: number
@@ -534,7 +535,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
             <div className="absolute inset-0 pointer-events-none">
               <LandmarkOverlay
                 landmarks={result.landmarkDetections.landmarks as any}
-                measurements={result.landmarkScore?.measurements?.map((m) => ({ fieldKey: m.fieldKey, valueInches: m.valueInches })) ?? []}
+                measurements={result.landmarkScore?.measurements ?? []}
                 imageWidth={result.landmarkDetections.imageWidth}
                 imageHeight={result.landmarkDetections.imageHeight}
                 containerWidth={result.landmarkDetections.imageWidth}

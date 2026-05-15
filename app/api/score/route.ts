@@ -126,6 +126,9 @@ export async function POST(request: Request) {
   const referenceSizeUnitRaw = formData.get('reference_size_unit') as string | null
   const referencePlacementRaw = formData.get('reference_placement') as string | null
   const referenceModeSummaryRaw = formData.get('reference_mode_summary') as string | null
+  const referenceRingSizeUSRaw = formData.get('reference_ring_size_us') as string | null
+  const referenceHatTypeRaw = formData.get('reference_hat_type') as string | null
+  const referenceRingSizeUS = referenceRingSizeUSRaw ? Number(referenceRingSizeUSRaw) : null
   const referenceObjectRaw = formData.get('reference_object') as string | null
   let referenceObject: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null = null
   if (referenceObjectRaw) {
@@ -381,7 +384,7 @@ export async function POST(request: Request) {
             extractDepthFromHEIC(imgBuf),
             extractExifCalibration(imgBuf),
           ])
-          if (depthResult) {
+          if (depthResult && exifResult) {
             depthCalibration = computeDepthCalibration(depthResult, exifResult)
           }
         }
@@ -786,14 +789,14 @@ export async function POST(request: Request) {
       if (landmarkDetectionResult) {
         const calibration = resolveCalibration(
           landmarkDetectionResult.landmarks,
-          depthCalibration ? { source: 'depth_map_lidar', pixelsPerInch: depthCalibration.pixelsPerInch, confidence: depthCalibration.confidence } : null,
+          depthCalibration,
           null,
         )
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             landmarkDetectionResult.landmarks,
             calibration.pixelsPerInch,
-            { imageWidth: landmarkDetectionResult.imageWidth, imageHeight: landmarkDetectionResult.imageHeight },
+            { calibrationSource: calibration.source, calibrationConfidence: calibration.confidence },
           )
         }
       }

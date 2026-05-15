@@ -52,7 +52,25 @@ const formSchema = z.object({
   abnormal_point_tags: z.array(z.enum(['drop_tine', 'sticker_point', 'split_tine', 'extra_abnormal_growth', 'palmation_like_growth', 'kicker_point', 'inline_point', 'unknown_abnormality'])).optional(),
   // Precision mode: reference object / scale marker
   precision_mode_enabled: z.boolean().optional().default(false),
-  reference_type: z.enum(['none', 'ruler', 'credit_card', 'coin', 'aruco_marker', 'other_known_object']).optional().default('none'),
+  reference_type: z.enum([
+    'none',
+    'ruler',
+    'credit_card',
+    'coin',
+    'aruco_marker',
+    'other_known_object',
+    'wedding_ring',
+    'hat',
+  ]).optional().default('none'),
+  reference_ring_size_us: z.coerce.number().min(3).max(16).optional().nullable(),
+  reference_hat_type: z.enum([
+    'baseball_cap',
+    'baseball_cap_backwards',
+    'beanie',
+    'skull_cap',
+    'stetson',
+    'wide_brim',
+  ]).optional().nullable(),
   reference_notes: z.string().optional().default(''),
   reference_size_value: z.coerce.number().min(0.1).max(200).optional(),
   reference_size_unit: z.enum(['in', 'cm', 'mm']).optional().default('in'),
@@ -97,6 +115,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
       abnormal_point_tags: [],
       precision_mode_enabled: false,
       reference_type: 'none',
+      reference_ring_size_us: null,
+      reference_hat_type: null,
       reference_notes: '',
       reference_size_value: undefined,
       reference_size_unit: 'in',
@@ -113,6 +133,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   
   const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
   const watchReferenceType = form.watch('reference_type')
+  const watchPrecisionRingSizeUS = form.watch('reference_ring_size_us')
+  const watchPrecisionHatType = form.watch('reference_hat_type')
   const watchReferenceNotes = form.watch('reference_notes')
   const watchReferenceSizeValue = form.watch('reference_size_value')
   const watchReferenceSizeUnit = form.watch('reference_size_unit')
@@ -128,9 +150,13 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
         ? 'Known Object Span'
         : 'Marker Edge'
 
+  // wedding_ring and hat have their own sub-forms; map to 'none' for the standard summary
+  const precisionRefType = (watchReferenceType === 'wedding_ring' || watchReferenceType === 'hat')
+    ? 'none'
+    : watchReferenceType
   const referenceModeSummary = buildReferenceModeSummary({
     precisionModeEnabled: watchPrecisionModeEnabled,
-    referenceType: watchReferenceType,
+    referenceType: precisionRefType,
     referenceNotes: watchReferenceNotes,
     referenceSizeValue: watchReferenceSizeValue,
     referenceSizeUnit: watchReferenceSizeUnit,
@@ -204,15 +230,47 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               name="main_frame_points"
               render={({ field }) => (
                 <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">Frame Points</FormLabel>
-                  <Select onValueChange={(value) => field.onChange(Number(value))} value={field.value ? String(field.value) : ""}>
-                    <FormControl>
-                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="8, 10, 12..." /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {MAIN_FRAME_OPTIONS.map((value) => <SelectItem key={value} value={String(value)}>{value}-point</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center justify-between">
+                    <FormLabel className="text-xs">Frame Points</FormLabel>
+                    {field.value && (
+                      <span className="text-xs font-bold tabular-nums px-2 py-0.5 rounded-full"
+                        style={{
+                          background: 'rgba(251,191,36,0.12)',
+                          color: 'rgba(251,191,36,0.9)',
+                          border: '1px solid rgba(251,191,36,0.25)',
+                        }}>
+                        {field.value}-point
+                      </span>
+                    )}
+                  </div>
+                  <FormControl>
+                    <div className="flex flex-wrap gap-2">
+                      {MAIN_FRAME_OPTIONS.map((pts) => {
+                        const isSelected = field.value === pts
+                        return (
+                          <button
+                            key={pts}
+                            type="button"
+                            onClick={() => field.onChange(field.value === pts ? undefined : pts)}
+                            className="flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl border transition-all touch-manipulation min-w-[52px]"
+                            style={{
+                              background:   isSelected ? 'rgba(251,191,36,0.12)' : 'transparent',
+                              border:       isSelected ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(107,93,82,0.3)',
+                              color:        isSelected ? 'rgba(251,191,36,0.95)' : 'rgba(180,163,145,0.75)',
+                            }}
+                          >
+                            <span className="text-sm font-bold tabular-nums leading-none">{pts}</span>
+                            <span className="text-[9px] uppercase tracking-wide leading-none opacity-70">pt</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </FormControl>
+                  <FormDescription className="text-[11px]">
+                    {field.value
+                      ? `${field.value}-point main frame selected — helps AI identify tine structure`
+                      : 'Tap to select total point count (helps AI identify tine structure)'}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -689,6 +747,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                       <SelectItem value="coin">Coin</SelectItem>
                       <SelectItem value="aruco_marker">Marker</SelectItem>
                       <SelectItem value="other_known_object">Other</SelectItem>
+                      <SelectItem value="wedding_ring">Wedding band / ring</SelectItem>
+                      <SelectItem value="hat">Hat (cap, beanie, Stetson)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -726,6 +786,81 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                   </div>
                 )}
               </div>
+
+              {/* Ring size — only when wedding_ring selected in precision mode */}
+              {watchReferenceType === 'wedding_ring' && (
+                <div className="space-y-2 p-3 rounded-lg"
+                  style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">US Ring Size</label>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Whole and half sizes (3–16). Inner diameter used as scale reference.
+                    </p>
+                  </div>
+                  <Input
+                    type="number"
+                    min="3"
+                    max="16"
+                    step="0.5"
+                    inputMode="decimal"
+                    placeholder="e.g. 8, 9.5, 10"
+                    className="min-h-[48px]"
+                    value={watchPrecisionRingSizeUS ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value ? Number(e.target.value) : null
+                      form.setValue('reference_ring_size_us', raw, { shouldDirty: true })
+                    }}
+                  />
+                  {watchPrecisionRingSizeUS != null && watchPrecisionRingSizeUS >= 3 && watchPrecisionRingSizeUS <= 16 && (
+                    <p className="text-[10px]" style={{ color: 'rgba(251,191,36,0.7)' }}>
+                      ≈ {ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchPrecisionRingSizeUS) ?? -1) ?? '—'}" inner diameter
+                    </p>
+                  )}
+                  <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
+                    Estimated reference only. A ruler or tape measure is more reliable.
+                  </p>
+                </div>
+              )}
+
+              {/* Hat type — only when hat selected in precision mode */}
+              {watchReferenceType === 'hat' && (
+                <div className="space-y-2 p-3 rounded-lg"
+                  style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">Hat Type</label>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Hat brim width is used as a scale reference when clearly visible.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(Object.entries(HAT_DIMENSIONS) as Array<[HatType, typeof HAT_DIMENSIONS[HatType]]>).map(([val, info]) => {
+                      const isSelected = watchPrecisionHatType === val
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => form.setValue('reference_hat_type', isSelected ? null : val, { shouldDirty: true })}
+                          className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-xl border transition-all touch-manipulation text-left"
+                          style={{
+                            background: isSelected ? 'rgba(139,90,43,0.12)' : 'transparent',
+                            border:     isSelected ? '1px solid rgba(139,90,43,0.35)' : '1px solid rgba(107,93,82,0.25)',
+                            color:      isSelected ? 'rgba(210,170,110,0.95)' : 'rgba(180,163,145,0.7)',
+                          }}
+                        >
+                          <span className="text-xs font-medium">{info.label}</span>
+                          {info.brim != null
+                            ? <span className="text-[9px] opacity-70">Brim ≈ {info.brim}"</span>
+                            : <span className="text-[9px] opacity-70">Crown only</span>
+                          }
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
+                    Estimated reference only. Brim widths vary by manufacturer (±0.25").
+                  </p>
+                </div>
+              )}
 
               {watchReferenceType === 'aruco_marker' && (
                 <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">

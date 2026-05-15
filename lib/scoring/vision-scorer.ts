@@ -8,6 +8,7 @@ import { generateObject } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
+import type { AntlerLandmarkId, LandmarkDetection, LandmarkDetectionResult } from './landmark-detection'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
 import { 
   validateImages, 
@@ -1126,9 +1127,110 @@ export function visionOutputToReferenceQualityData(
   
   const ear_spacing_qd = getQD(lm.ear_base_spacing)
   if (ear_spacing_qd) result.ear_base_spacing = ear_spacing_qd
-  
+
   const ear_tip_qd = getQD(lm.ear_base_to_tip)
   if (ear_tip_qd) result.ear_base_to_tip = ear_tip_qd
 
   return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P2: Landmark pixel detection — detect precise (px, py) for every antler landmark
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LandmarkPointSchema = z.object({
+  id: z.string(),
+  px: z.number().nullable(),
+  py: z.number().nullable(),
+  confidence: z.number().min(0).max(1),
+  visibility: z.enum(['clear', 'partially_visible', 'occluded', 'not_visible']),
+  sourceAngle: z.enum(['front', 'left', 'right', 'unknown']),
+})
+
+const LandmarkDetectionSchema = z.object({
+  imageWidth: z.number(),
+  imageHeight: z.number(),
+  landmarks: z.array(LandmarkPointSchema),
+})
+
+const LANDMARK_IDS: AntlerLandmarkId[] = [
+  'eye_left', 'eye_right', 'pedicle_left', 'pedicle_right', 'nose_tip', 'nose_bridge_top',
+  'burr_left', 'burr_right', 'beam_tip_left', 'beam_tip_right',
+  'spread_anchor_left', 'spread_anchor_right',
+  'g1_base_left', 'g1_tip_left', 'g2_base_left', 'g2_tip_left',
+  'g3_base_left', 'g3_tip_left', 'g4_base_left', 'g4_tip_left',
+  'g5_base_left', 'g5_tip_left',
+  'g1_base_right', 'g1_tip_right', 'g2_base_right', 'g2_tip_right',
+  'g3_base_right', 'g3_tip_right', 'g4_base_right', 'g4_tip_right',
+  'g5_base_right', 'g5_tip_right',
+  'h1_center_left', 'h1_center_right', 'h2_center_left', 'h2_center_right',
+  'h3_center_left', 'h3_center_right', 'h4_center_left', 'h4_center_right',
+]
+
+/**
+ * Use GPT-4o to detect pixel (x, y) coordinates for all antler landmarks.
+ * Best-effort — returns null on any failure. Never throws.
+ */
+export async function detectLandmarkPositions(
+  imageUrls: string[],
+): Promise<LandmarkDetectionResult | null> {
+  if (!imageUrls || imageUrls.length === 0) return null
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const imageContent = imageUrls.slice(0, 3).map((url) => ({
+      type: 'image' as const,
+      image: url,
+    }))
+
+    const landmarkList = LANDMARK_IDS.join(', ')
+    const prompt =
+      `You are a deer antler measurement expert. For the provided image(s), locate each antler landmark precisely.\n` +
+      `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
+      `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
+      `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
+      `Landmarks to locate: ${landmarkList}.`
+
+    const { object } = await generateObject({
+      model: openai('gpt-4o'),
+      schema: LandmarkDetectionSchema,
+      messages: [
+        {
+          role: 'user',
+          content: [...imageContent, { type: 'text', text: prompt }],
+        },
+      ],
+      maxRetries: 0,
+    })
+
+    const landmarks: LandmarkDetection[] = object.landmarks
+      .filter((lm) => LANDMARK_IDS.includes(lm.id as AntlerLandmarkId))
+      .map((lm) => ({
+        id: lm.id as AntlerLandmarkId,
+        px: lm.px,
+        py: lm.py,
+        confidence: lm.confidence,
+        visibility: lm.visibility,
+        sourceAngle: lm.sourceAngle,
+        source: 'ai' as const,
+      }))
+
+    const locatedCount = landmarks.filter(
+      (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
+    ).length
+
+    return {
+      landmarks,
+      imageWidth: object.imageWidth,
+      imageHeight: object.imageHeight,
+      modelUsed: 'gpt-4o',
+      detectionTimestamp: new Date().toISOString(),
+      locatedCount,
+      requestedCount: LANDMARK_IDS.length,
+    }
+  } catch {
+    return null
+  }
 }
