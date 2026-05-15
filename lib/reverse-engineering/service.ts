@@ -139,7 +139,7 @@ export async function startPrecisionPass(params: {
   manualOverrides?: Record<string, unknown> | null
   /** Part 6: scoreComparison from the original scoring run, if available */
   scoreComparison?: {
-    activeSource: 'graph_native' | 'legacy'
+    activeSource: 'graph_native' | 'legacy' | 'landmark_geometry'
     legacyGross: number | null
     graphGross: number | null
     legacyNet: number | null

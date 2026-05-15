@@ -527,7 +527,7 @@ export interface ScoringResult {
   effectiveGraphSource?: 'persisted_graph' | 'prediction_graph' | 'fallback' | null
   effectiveGraphVersion?: number | null
   scoreComparison?: {
-    activeSource: 'graph_native' | 'legacy'
+    activeSource: 'graph_native' | 'legacy' | 'landmark_geometry'
     legacyGross: number | null
     graphGross: number | null
     legacyNet: number | null
@@ -537,6 +537,9 @@ export interface ScoringResult {
     graphCompleteness: number
     graphSource: 'persisted_graph' | 'prediction_graph' | 'fallback'
     reason: string
+    landmarkGross?: number | null
+    landmarkNet?: number | null
+    landmarkLocatedFieldFraction?: number | null
   } | null
   confidenceEvidence?: {
     graphSource: string | null
