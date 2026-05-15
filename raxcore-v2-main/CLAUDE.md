@@ -25,15 +25,18 @@ If a feature looks impressive but does not improve measurement truth, do not shi
 
 - **Framework**: Next.js 16 (App Router), React 19.2, TypeScript 5.7, Tailwind 4
 - **Auth + DB + Storage**: Supabase (`@supabase/ssr`, `@supabase/supabase-js`)
-- **AI**: OpenAI vision via `@ai-sdk/openai` + `ai` v6, plus a custom `detectRackWithOpenAI` admission layer
+- **AI**: OpenAI vision via `@ai-sdk/openai` + `ai` v6, plus a custom `detectRackWithOpenAI` admission layer. Anthropic + Gemini keys are env-ready for future ensemble scoring but not yet wired.
 - **2D measurement**: Konva 10 + react-konva 19
 - **3D**: `three@^0.177`, `@react-three/fiber@9.5`, `@react-three/drei@10.7`
   - These are React 19 compatible. The earlier `ReactSharedInternals.ReactCurrentOwner` crash from R3F v8 is resolved. **Do not downgrade these.**
 - **State**: Zustand v5 (`components/measure/measure-store.ts`)
-- **Maps**: Leaflet + react-simple-maps
+- **Maps**: Leaflet (imperative, dynamically imported — NOT react-leaflet). `react-simple-maps` is still installed but replaced by the new `map-viewer.tsx`.
 - **PDF**: jspdf, html2canvas
 - **Billing**: Stripe
 - **Reconstruction**: Luma AI (server-side only via `lib/reconstruction/luma-adapter.ts`); manual upload fallback always available
+- **Image processing**: `sharp` (already installed) — used for Trophy Room watermarks and HEIC depth extraction. Check sharp HEIC auxiliary image support before adding `libheif-js`.
+- **Depth extraction**: `lib/calibration/depth-extractor.ts` (to be built) — server-only HEIC depth map extraction using sharp or libheif-js
+- **Landmark detection**: `lib/scoring/landmark-detection.ts` (to be built) — pixel coordinate detection via OpenAI vision, separate from direct score estimation
 
 `next.config.mjs` and `tsconfig.json` are intentionally permissive. `proxy.ts` is a thin proxy. Do not touch any of those without a clear reason.
 
@@ -80,12 +83,16 @@ lib/
   capture/                         scan-session, subject-validation
   scoring/                         50+ files — the heart of quick scoring
     score-from-graph.ts            graph-native scorer
-    score-comparison.ts            graph_native vs legacy decision
+    score-comparison.ts            graph_native vs legacy vs landmark_geometry decision
     measurement-graph-persistence
     resolve-image-roles.ts         <— the angle-role resolver from the handoff
     landmarks.ts                   heuristic landmark estimator (Phase 42 enhanced)
     next-photo-guidance.ts         WIRED IN lib only, NOT in UI yet
     ai-service.ts                  OpenAI vision orchestration
+    landmark-detection.ts          NEW — AntlerLandmarkId types, zone colors, LandmarkDetection shape
+    landmark-prompt.ts             NEW — prompt builder for pixel coordinate detection
+    landmark-geometry.ts           NEW — pixel distance → inch measurements, curvature correction
+    calibration-resolver.ts        NEW — depth > reference object > anatomical prior resolution
     real-confidence-engine.ts, calibrated-confidence.ts, segment-confidence-interval.ts
     cross-view-conflict.ts, geometry-consistency.ts, landmark-consistency.ts
     intake-quality.ts, capture-quality.ts, image-diagnostics.ts
@@ -111,7 +118,10 @@ lib/
   storage/, supabase/, billing/, usage/, notifications/, monitoring/
   training/, training-packs/, benchmark/, validation/
   supervision/                     Phase 52 supervision events (already shipped)
-  reverse-engineering/, structural-hypothesis/, multiview/, calibration/
+  reverse-engineering/, structural-hypothesis/, multiview/
+  calibration/                     existing calibration profiles
+    depth-extractor.ts             NEW — server-only HEIC LiDAR depth extraction
+    depth-calibration.ts           NEW — pixelsPerInch from depth + EXIF focal length
   rules-engine/, sandbox/, jobs/, retraining/, influence/
   mapping/, render/, review/, release/, health/, auxiliary-labels/
   collections/, notifications/, stripe/
@@ -151,12 +161,13 @@ The surgical scan fix from the handoff is applied:
 5. Calls `scoreBuck` (the legacy AI vision scorer in `lib/scoring/ai-service.ts`).
 6. Calls `persistInitialMeasurementGraph` to write the detection graph.
 7. Calls `loadEffectiveMeasurementGraph` → `scoreFromGraphNative` to produce a graph-native score.
-8. Calls `buildScoreComparison` to decide `activeSource: 'graph_native' | 'legacy'`.
+8. Calls `buildScoreComparison` to decide `activeSource: 'graph_native' | 'legacy' | 'landmark_geometry'`.
 9. Active-source rules (in `lib/scoring/score-comparison.ts`):
    - `graph_native` requires graph source ∈ {persisted_graph, prediction_graph}, completeness ≥ 0.75, finite positive `graphGross`, and **not** (gross delta > 18" while confidence < 45%).
+   - `landmark_geometry` activates when landmark gross and direct estimate agree within 8%, or when landmark-detected > 60% of fields.
    - Otherwise → `legacy`, with a `reason` string.
-10. Confidence engine runs over all signals, including `graphEvidence`.
-11. Response shape is documented in `ScoringResult` in `lib/types.ts` and includes `scoreComparison`, `effectiveGraph`, `effectiveGraphSource`, `effectiveGraphVersion`, `confidenceEvidence`.
+10. Confidence engine runs over all signals, including `graphEvidence` and `depth_map_lidar` calibration evidence.
+11. Response shape is documented in `ScoringResult` in `lib/types.ts` and includes `scoreComparison`, `effectiveGraph`, `effectiveGraphSource`, `effectiveGraphVersion`, `confidenceEvidence`, `depthCalibrationMetadata`, `landmarkDetections`.
 
 ### 4.3. Advanced scoring + Verified Score ✓
 `lib/advanced-scoring/cross-validation.ts` implements the strict Verified Score rules from the handoff:
@@ -168,7 +179,7 @@ The surgical scan fix from the handoff is applied:
 - No session warnings can be unresolved.
 - `quick_ai` alone never verifies. `three_d_mesh_fallback` alone never verifies.
 
-`lib/advanced-scoring/confidence.ts` ranks methods correctly: point cloud (0.92) > photo (0.78) > manual (0.65) > **mesh circumference (0.70)** > mesh fallback (0.50) > quick AI (0.45). Mesh fallback gets an extra 0.80× penalty if not snapped, sparse density (<50 points) costs 0.25×, calibration estimated costs 0.18×, warnings compound. `three_d_mesh_circumference` is accepted as a second source (alongside `photo_polyline`) for H1–H4 circumference fields when its computed confidence ≥ 0.6.
+`lib/advanced-scoring/confidence.ts` ranks methods correctly: point cloud (0.92) > photo (0.78) > manual (0.65) > mesh fallback (0.50) > quick AI (0.45). Mesh fallback gets an extra 0.80× penalty if not snapped, sparse density (<50 points) costs 0.25×, calibration estimated costs 0.18×, warnings compound.
 
 `lib/advanced-scoring/point-cloud.ts` has a spatial-cell index (`createPointCloudIndex`, `findNearestPointCloudAnchorIndexed`, `estimatePointDensityAroundIndexed`) so snapping works on 10k–250k points without scanning linearly. Rendering can downsample to 120k points; snapping must use the full index.
 
@@ -199,52 +210,20 @@ The surgical scan fix from the handoff is applied:
 - `onHighConfidenceMiss` — call from prediction completion handlers.
 - `updatePatternFromAccumulatedEvents` — call from pattern discovery jobs.
 
-These hooks are **defined but not yet called by application code**. That's intentional and the wiring is a separate task.
+These hooks are **defined but not yet called by application code**. Wiring is in AI_LEARNING_PLAN.md WI-1.
 
-### 4.9. Zone overlay + provenance badges ✓
-- `lib/scoring/measurement-zones.ts`: `buildMeasurementZones(measurements2D, measurements3D) → MeasurementZone[]`. Provenance: `quick_ai` → `'ai'`, `photo_polyline | three_d_point_cloud | manual_entry` → `'human'`, else `'heuristic'`. Badge text: `'AI' | 'Heuristic' | 'Human'`.
-- `components/measure/photo-canvas.tsx`: hover-pulse layer (150ms setInterval, opacity 0.45↔0.85) for `hoveredZoneId`; `showZones` renders all zones at 0.4 opacity.
-- `components/measure/scene-3d.tsx`: `AntlerModel` clones hovered zone with pulsing `emissiveIntensity` via `useFrame`. `hoveredZoneId` propagated from store → `<AntlerModel hoveredZoneId={...} />`.
-- `components/measure/score-panel.tsx`: rows fire `setHoveredZoneId` on mouse enter/leave; hovered row gets `outline: '1px solid ' + row.color`.
-- `lib/export/score-pdf-types.ts`: `source?: 'ai' | 'heuristic' | 'human'` and `meshCircumferenceValue?: number` added to `VerifiedPdfMeasurementRow`.
-- `lib/export/build-verified-pdf-data.ts`: populates `source` from method; populates `meshCircumferenceValue` from `three_d_mesh_circumference` measurements.
+### 4.8. Map viewer replacement ✓
+`components/map/map-viewer.tsx` is now a full Leaflet-based implementation (replaced the flat react-simple-maps SVG):
+- Satellite, satellite+labels, topo, terrain base layers (ESRI + OpenTopoMap — free, no API key)
+- Hillshade and slope-shadow elevation overlays (ESRI — free)
+- Live elevation on click via USGS 3DEP Point Query (free, no API key)
+- Deer terrain intelligence zones (Bottom/Creek → High Country) with behavioral hints
+- Leaflet dynamically imported inside useEffect — **never `import L from 'leaflet'` at top level**
+- `react-leaflet` is NOT installed — all Leaflet is imperative
+- Props contract unchanged: `{ pins, onPinClick, onMapClick, selectedPinId }`
+- Exports unchanged: `MapViewer`, `LOCATION_TYPE_COLORS`, `LOCATION_TYPE_LABELS`
 
-### 4.10. Mesh-plane circumference engine ✓
-- `lib/advanced-scoring/mesh-circumference.ts`: pure mesh-plane intersection → ring stitching → `MeshCircumferenceResult`. Confidence: starts 0.70, `-0.10` non-manifold, `-0.10` sparse, `-0.15` per significant open ring. `perimeter: null` for open rings (never invented).
-- `MeasurementMethod` extended with `'three_d_mesh_circumference'` (types.ts, confidence.ts, cross-validation.ts).
-- `CIRCUMFERENCE_FIELDS` set in cross-validation; Verified Score accepts `photo_polyline` + `three_d_mesh_circumference` (confidence ≥ 0.6) as valid for H1–H4.
-- `components/measure/scene-3d.tsx`: "Record Circumference" `<Html>` button renders when `crossSectionPoints.length === 2` and `activeField` type is `'circumference'`. On click: traverses `threeScene`, builds flat position array, calls `computeMeshCircumference`, guards `closedRingCount === 0`, picks longest closed ring, converts via `unitsToInches`, calls `setMeshCircumferenceMeasurement`, clears cross-section. Shows error label inline on failure.
-- `score-panel.tsx` MethodBadge: `three_d_mesh_circumference` → label `'Mesh Circ'`, color `'#d94a4a'`.
-- `measure-store.ts`: `setMeshCircumferenceMeasurement` guards `isFiniteNumber && inchLength > 0 && ringClosed`. Open rings are rejected at the store level.
-
-### 4.11. Admin training import (full flow) ✓
-- `components/admin/training-import-form.tsx`: structured per-field inputs for all 19 B&C fields via `REQUIRED_BC_FIELDS`. Image types: live/mounted/harvest/front/side/angled/trail_cam. Preview table shows filled fields. `isBenchmark` checkbox with confirm Dialog that shows disclaimer copy before submission.
-- `app/admin/training-import/page.tsx`: server-side auth guard (redirect to `/auth/login` if no session, redirect to `/` if not admin), disclaimer note, link back to `/admin/supervision`.
-- `app/api/admin/training-import/route.ts`: accepts `is_benchmark` flag, passes to DB insert. **Note**: requires `ALTER TABLE official_score_sheets ADD COLUMN IF NOT EXISTS is_benchmark BOOLEAN DEFAULT FALSE;` migration.
-
-### 4.12. Capture validation + retake intelligence ✓
-- `app/api/detect/route.ts`: size/count guard — max 6 images, each ≤ 8 MB.
-- `components/scoring/scoring-wizard.tsx`: `runPreScoreDetection` debounced 1200ms on `gridImages`; calls `/api/detect`, maps result through `detectionToScanFeedback` + `validateSubject`; shows colored status (green/yellow/red), retake button on rejection, soft suggestions. Submit blocked only when `subjectBlocked` (AI-detected failure); network errors never block.
-
-### 4.13. Luma webhook + asset auto-wiring ✓
-- `lib/reconstruction/webhook-cache.ts`: module-level in-memory Map, 30s TTL.
-- `app/api/reconstruction/webhook/route.ts`: validates optional `LUMA_WEBHOOK_SECRET` header, stores result in cache.
-- `app/api/reconstruction/status/route.ts`: checks webhook cache first, skips Luma API call within 30s TTL.
-- `components/measure/photogrammetry-panel.tsx`: `useEffect` fires on `reconstructionStatus → 'completed'`; auto-sets `glbUrl` from `mesh_glb` asset, auto-calls `loadPointCloudText` for point cloud assets.
-
-### 4.14. Verified PDF multi-thumbnail ✓
-- `components/measure/score-panel.tsx`: collects up to 4 sources (`photoDataUrl` + `reconstructionAssets.type === 'preview_image'`), resizes each to ≤256px JPEG 70% via `<canvas>`, passes to `photoThumbnails`. Failures are silently skipped.
-
-### 4.15. Phase 52 supervision hooks ✓
-All five supervision hooks in `lib/supervision/hooks.ts` are now wired:
-- `onReversePassComplete` — called from `lib/reverse-engineering/service.ts` at the end of `executePrecisionPass`.
-- `onConflictDetected` — called from `lib/scoring/multi-view-service.ts`.
-- `onStructuralSolverComplete` — called from `lib/structural-hypothesis/service.ts`.
-- `onIntervalMiss` and `onHighConfidenceMiss` — called from `lib/validation/service.ts` inside `createValidationResult`. The function accepts optional `predictionId`, `predictedIntervalLow/High`, `confidenceTier`, `trustTier`, `segment` params; when supplied, both hooks fire after the row insert. Each hook gates internally on meaningful deviation (interval miss ≥ 0.25 in, high-conf miss ≥ 1.0 in + tier ∈ {high, very_high, extreme}). Hook failures are caught and logged, never thrown — they never block the validation insert.
-
-The `createValidationResult` function is defined but has no production callers yet — once an admin route or worker wires it up with the optional supervision context, supervision events will flow automatically.
-
-### 4.8. Render-time Zustand safety ✓
+### 4.9. Render-time Zustand safety ✓
 `useMeasureStore.getState()` is called in 4 places:
 - `score-panel.tsx:331` — inside `handleExportJSON` (event handler, OK).
 - `scene-3d.tsx:737` — inside a useEffect cleanup branch (OK).
@@ -257,33 +236,69 @@ All other consumers use the subscription selector (`useMeasureStore(s => s.foo)`
 ## 5. What is partially done
 
 ### 5.1. Landmark / measurement-zone intelligence (partial)
-- `lib/scoring/landmarks.ts` implements `estimateLandmarks` (procedural, NOT real CV — and the docstring says so explicitly) plus Phase 42 `computeEnhancedLandmarks` with per-landmark quality tiers.
+- `lib/scoring/landmarks.ts` implements `estimateLandmarks` (procedural, heuristic — docstring says so explicitly) plus Phase 42 `computeEnhancedLandmarks` with per-landmark quality tiers.
 - `lib/detection/build-antler-graph.ts` builds an `AntlerMeasurementGraph` from per-image detection landmarks.
-- `lib/measure/graph-builder.ts` converts the measure-store state into a canonical `MeasurementGraph` for `scoreFromGraphNative`.
-- Zone overlay, provenance badges, hover pulse: **DONE** — see §4.9.
-- **Remaining**: Landmarks in `landmarks.ts` produce fixed normalized coordinates ("burr_left at (0.3, 0.15)") rather than real positions. This is a heuristic prior used as a fallback signal for confidence math, not a measurement source. Keep it that way until real CV lands.
+- `lib/measure/graph-builder.ts` converts measure-store state into a canonical `MeasurementGraph` for `scoreFromGraphNative`.
+- **Gaps**: No pixel-coordinate detection, no visual overlay on scoring results, no drag-to-correct. All in LANDMARK_DETECTION_PLAN.md.
 
-### 5.2. `next-photo-guidance.ts`
-Implemented in `lib/scoring/next-photo-guidance.ts` but never imported by any component or API route. It's a ready-to-use retake-recommendation engine.
+### 5.2. Admin training-import (skeleton)
+- `app/api/admin/training-import/route.ts` and `app/admin/training-import/page.tsx` exist.
+- `components/admin/training-import-form.tsx` exists (252 lines) — free-form JSON paste, not structured fields.
+- **Gaps**: Full B&C/P&Y field-by-field form, image type tagging, AI vs official comparison table, promotion workflow. All in AI_LEARNING_PLAN.md WI-3.
+
+### 5.3. `next-photo-guidance.ts` and `subject-validation.ts`
+Implemented in `lib/scoring/` and `lib/capture/` respectively. Neither is wired to the UI. The handoff calls for these to drive retake/feedback between capture and scoring.
 
 ---
 
 ## 6. What is NOT built yet
 
-These are the explicit gaps from the handoff that have no implementation today.
+### 6.1. LiDAR depth extraction (high priority)
+`lib/calibration/depth-extractor.ts` and `depth-calibration.ts` do not exist. Full spec in DEPTH_EXTRACTION_PLAN.md.
+- Extracts embedded depth map from iPhone Portrait Mode HEIC files
+- Computes exact `pixelsPerInch` from camera distance + EXIF focal length
+- Makes RAX CORE the only antler scoring app with automatic LiDAR calibration
+- Requires `sharp` HEIC auxiliary image support OR `libheif-js`
 
-### 6.1. Real terrain (low priority)
-- `lib/mapping/` and the map UI handle 2D properties / pins. No elevation source is wired. Do not fake 3D terrain. `not_started` is the honest label.
+### 6.2. Landmark pixel detection (high priority)
+`lib/scoring/landmark-detection.ts`, `landmark-prompt.ts`, `landmark-geometry.ts` do not exist. Full spec in LANDMARK_DETECTION_PLAN.md.
+- GPT-4o returns pixel coordinates for each antler landmark
+- Geometry math converts pixel distances to inches via calibration
+- Visual overlay shows colored bounding boxes (Trace/NBA-style) on scoring result
+- User drag-to-correct feeds the training flywheel
 
-### 6.2. DB migration for `is_benchmark`
-The training-import API route accepts `is_benchmark` but the DB column must be added:
-```sql
-ALTER TABLE official_score_sheets ADD COLUMN IF NOT EXISTS is_benchmark BOOLEAN DEFAULT FALSE;
-```
-This is the only outstanding DB migration from the market-ready push.
+### 6.3. Calibration resolution stack (high priority)
+`lib/scoring/calibration-resolver.ts` does not exist.
+- Unifies: depth map LiDAR > reference object (ring/hat/ruler) > anatomical priors
+- Used by both depth extraction and landmark detection plans
+- Priority order determines the `pixelsPerInch` value and its confidence tier
 
-### 6.3. `next-photo-guidance.ts` wiring
-`lib/scoring/next-photo-guidance.ts` (`computeNextPhotoGuidance`) is implemented but not called. Wiring it into `/api/score/route.ts` requires computing four server-side pre-requisites that aren't currently produced in that route: `SegmentConfidenceIntervalResult`, `GeometryConsistencyResult`, `TrustScoreResult`, `LandmarksDetected`. Punt until a deliberate refactor adds those upstream — partial wiring would either produce misleading recommendations or silently no-op.
+### 6.4. Point-Cloud Circumference Engine (medium priority)
+No mesh-plane intersection logic exists anywhere. Full spec in CLAUDE_CODE_PLAN.md WI-3.
+- `lib/advanced-scoring/mesh-circumference.ts`
+- Ring-closure check required; open meshes produce warnings
+- New `MeasurementMethod` value: `three_d_mesh_circumference`
+
+### 6.5. Trophy Room (medium priority)
+No `trophy_room_entries` table, no watermark generator, no gallery UI. Full spec in TROPHY_ROOM_PLAN.md.
+- Server-side watermark with RAX CORE branding + score + scoring system
+- User approval required before entry
+- Verified Score OR high-confidence required for eligibility
+- Soft delete
+
+### 6.6. Unified correction events (AI learning — high priority)
+`correction_events` table and `lib/training/correction-events.ts` do not exist. Full spec in AI_LEARNING_PLAN.md WI-2.
+- Captures corrections from all 4 sources: score editor, dpad, precision pass, review sheet
+- Is the data foundation for prompt bias correction (WI-5) and future fine-tuning
+
+### 6.7. Prompt bias correction (medium priority — needs WI-2 data first)
+`lib/scoring/prompt-bias-correction.ts` does not exist. Full spec in AI_LEARNING_PLAN.md WI-5.
+- Queries correction_events for per-field systematic biases
+- Injects bias note into vision prompt after 30+ corrections per field
+- Cached for 1 hour; invalidatable from admin panel
+
+### 6.8. Real terrain / elevation map (low priority)
+No DEM provider chosen. Map shows hillshade overlay (visual only). Do not build 3D terrain until a real elevation data source is chosen. Status: `not_started`.
 
 ---
 
@@ -320,9 +335,8 @@ This is the only outstanding DB migration from the market-ready push.
 ### Files that must not be casually changed
 - `lib/capture/scan-session.ts` (truthful capture contract).
 - `lib/scoring/resolve-image-roles.ts` (angle-role resolver contract).
-- `lib/advanced-scoring/cross-validation.ts` (Verified Score rules + `REQUIRED_BC_FIELDS`).
+- `lib/advanced-scoring/cross-validation.ts` (Verified Score rules).
 - `lib/advanced-scoring/confidence.ts` (method base confidence).
-- `lib/advanced-scoring/mesh-circumference.ts` (ring-closure algorithm — changes affect H1–H4 Verified Score eligibility).
 - `lib/reconstruction/luma-adapter.ts` (server-only contract).
 - `lib/export/score-pdf-builder.ts` disclaimer text.
 - `next.config.mjs`, `tsconfig.json`, `proxy.ts`.
@@ -336,14 +350,17 @@ This is the only outstanding DB migration from the market-ready push.
 | `NEXT_PUBLIC_SUPABASE_URL` | All Supabase | client-safe |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | All Supabase | client-safe |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server | **server-only** |
-| `OPENAI_API_KEY` | Quick scoring, detection | **server-only** |
+| `OPENAI_API_KEY` | Quick scoring, detection, landmark detection | **server-only** |
 | `LUMA_API_KEY` | Reconstruction | **server-only**; absent ⇒ manual fallback |
 | `LUMA_RECON_SUBMIT_URL` | Reconstruction | absent ⇒ manual fallback |
 | `LUMA_RECON_STATUS_URL` | Reconstruction | absent ⇒ manual fallback |
 | `STRIPE_SECRET_KEY` | Billing | **server-only** |
 | `STRIPE_WEBHOOK_SECRET` | Billing webhook | **server-only** |
+| `ROBOFLOW_API_KEY` | Antler localization (Phase 3) | **server-only**; absent ⇒ feature disabled gracefully |
+| `ANTHROPIC_API_KEY` | Future ensemble scoring | **server-only**; not yet wired |
+| `GEMINI_API_KEY` | Future ensemble scoring | **server-only**; not yet wired |
 
-`hasRequiredServerEnv` in `lib/env.ts` is the canonical validator. The score route returns a structured 500 listing what's missing.
+`hasRequiredServerEnv` in `lib/env.ts` is the canonical validator. Optional keys (Roboflow, Anthropic, Gemini) must not block startup if missing — graceful degradation only.
 
 ---
 
@@ -395,28 +412,34 @@ Build / typecheck:
 
 ## 10. Priority order (for any work session)
 
-All 6 market-ready work items from the original plan are **DONE** (WI-1 through WI-6 per §4.9–§4.14).
+This is the order to attack if no specific task is given. Each priority is independently shippable. See MASTER_HANDOFF.md for the phase-by-phase execution order.
 
-**P1. Production validation-result writer — DONE**
-`POST /api/admin/validation/record-result` wires `createValidationResult` with full supervision context. Admin-gated. Accepts `predictionId + runId + groundTruthGross` (+ optional intervals/tiers/segment). Looks up the prediction's `predicted_gross/net/confidence/scoring_method/state/rack_type` and the linked `training_example`, then fires `onIntervalMiss` / `onHighConfidenceMiss` if context is supplied.
+**P1. Depth Map Extraction + Auto-Calibration** (DEPTH_EXTRACTION_PLAN.md)
+Extract LiDAR depth from iPhone HEIC files. Compute exact pixelsPerInch from depth + EXIF. No ruler, no reference object needed. Highest-confidence automatic calibration available.
 
-**P2. `next-photo-guidance.ts` wiring — DONE (lightweight path)**
-A new `computeLightweightPhotoGuidance` export in `lib/scoring/next-photo-guidance.ts` synthesizes the segment-confidence input from overall confidence, then runs the real coverage + quality + guidance pipeline. `/api/score/route.ts` computes `checkGeometryConsistency` (cheap, needs only measurements + landmarks + angles) and feeds it in. Response includes `photoGuidance: PhotoGuidanceMetadata | null`. Full segment-confidence wiring is still available for future upgrade — it just isn't required to get useful guidance to the UI today.
+**P2. Landmark Pixel Detection** (LANDMARK_DETECTION_PLAN.md)
+Ask GPT-4o to return pixel coordinates for each antler landmark. Compute measurements from geometry. Render Trace-style colored bounding boxes on the scoring result. User drag-to-correct feeds the training flywheel.
 
-**P3. Map elevation source decision — DECISION NEEDED (no code yet)**
-Pick one of these DEM providers, then wiring is straightforward:
+**P3. AI Learning — Wire supervision hooks + correction events** (AI_LEARNING_PLAN.md WI-1, WI-2)
+Connect the 4 missing supervision hooks. Create the unified `correction_events` table. Make the training flywheel actually turn.
 
-| Provider | Cost | Coverage | Resolution | Notes |
-|---|---|---|---|---|
-| USGS 3DEP (Elevation Point Query Service) | Free | US only | ~10m | Public, no key. Best for US-first MVP. |
-| Open-Elevation | Free | Global | ~30m (SRTM) | Self-hostable or public endpoint; rate-limited on public host. |
-| Mapbox Terrain-RGB tiles | $0.50 / 1k tile requests after free tier | Global | ~10–30m | Already a Mapbox account if you add Mapbox layers. Best UX. |
-| Google Elevation API | $5 / 1k requests after free tier | Global | varies | Most accurate, most expensive. Overkill for hunting maps. |
+**P4. Calibration Resolver** (lib/scoring/calibration-resolver.ts)
+Unified priority stack: depth map LiDAR > reference object (ring/hat/ruler) > anatomical priors. Used by both P1 and P2.
 
-Recommendation: USGS 3DEP for v1 (US-only deer hunting market), upgrade to Mapbox Terrain-RGB when international users matter. Until decided, `not_started` is the honest label — do not fake 3D terrain.
+**P5. Admin Gold Standard** (AI_LEARNING_PLAN.md WI-3)
+Full B&C/P&Y field-by-field import form, image type tagging, AI vs official comparison table, promotion to benchmark pack.
 
-**P4. Official sheet OCR / PDF transcription**
-The admin training import form has per-field entry. Adding OCR (e.g. via OpenAI vision) to auto-transcribe uploaded official PDF score sheets would reduce manual entry friction.
+**P6. Trophy Room** (TROPHY_ROOM_PLAN.md)
+Curated gallery, server-side watermarks, eligibility gating, soft delete.
+
+**P7. Prompt Bias Correction** (AI_LEARNING_PLAN.md WI-5)
+Auto-injects known systematic biases into the vision prompt after 30+ corrections per field. Needs P3 data first.
+
+**P8. Mesh Cross-Section Circumference Engine** (CLAUDE_CODE_PLAN.md WI-3)
+Honest H-field measurement from 3D. Ring-closure required.
+
+**P9. Luma webhook + asset streaming** (CLAUDE_CODE_PLAN.md WI-6)
+Full polling loop in measure-store, point cloud download → spatial index.
 
 ---
 
@@ -439,5 +462,24 @@ Every change must answer **yes** to:
 3. Does this preserve graceful empty-state fallback when external services are absent?
 4. Does this avoid claiming official certification?
 5. Does this avoid auto-capture, fake detection, or fake percentages?
+6. Does this let each system do what it's best at? (AI identifies; math measures; human corrects)
+7. Does this make the training flywheel turn? (corrections captured → data grows → accuracy improves)
 
 If any answer is no, the change is wrong even if the diff looks clean.
+
+---
+
+## 13. The calibration hierarchy (reference always)
+
+Every scoring path has a calibration source. Claude Code must always know which tier it's working in:
+
+| Source | `calibrationSource` | Confidence | Notes |
+|---|---|---|---|
+| User-drawn ruler/tape (Advanced Scoring) | `physical_reference` | 0.95 | Only thing that unlocks Verified Score |
+| LiDAR depth map + EXIF | `depth_map_lidar` | 0.85–0.90 | Auto — iPhone Pro Portrait Mode only |
+| Anatomical priors (eye box, pedicle) | `anatomical_prior` | 0.50–0.65 | Derived from known whitetail dimensions |
+| Ring reference | `estimated_reference_object` | 0.45 | Optional user input, estimated only |
+| Hat brim reference | `estimated_reference_object` | 0.40 | Optional user input, estimated only |
+| No calibration | `none` | 0.25 | AI estimate with no spatial anchor |
+
+**Verified Score requires `physical_reference` calibration.** LiDAR, ring, hat, and anatomical priors never unlock Verified Score alone.

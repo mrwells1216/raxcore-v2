@@ -46,10 +46,18 @@ import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-meas
 import { scoreFromGraph as scoreFromGraphNative } from '@/lib/scoring/score-from-graph'
 import { convertDetectionGraphToMeasurementGraph } from '@/lib/scoring/graph-conversion'
 import { collectGraphEvidence } from '@/lib/scoring/graph-evidence'
-import { buildScoreComparison, type ScoreComparison } from '@/lib/scoring/score-comparison'
+import { buildScoreComparison, type ScoreComparison, type ActiveScoreSource } from '@/lib/scoring/score-comparison'
 import { computeLightweightPhotoGuidance } from '@/lib/scoring/next-photo-guidance'
 import { checkGeometryConsistency } from '@/lib/scoring/geometry-consistency'
 import { extractPhotoGuidanceMetadata } from '@/lib/scoring/next-photo-guidance'
+import { extractDepthFromHEIC, extractExifCalibration } from '@/lib/calibration/depth-extractor'
+import { computeDepthCalibration } from '@/lib/calibration/depth-calibration'
+import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
+import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
+import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
+import { computeMeasurementsFromLandmarks } from '@/lib/scoring/landmark-geometry'
+import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
+import type { LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -357,6 +365,33 @@ export async function POST(request: Request) {
     // Store the resolved URLs
     await addBuckImages(buck.id, storedImageUrls)
 
+    // ─── Depth extraction (D4) — best-effort, never blocks ──────────────────
+    // Only attempt for the first image (most likely front photo).
+    let depthCalibration: DepthCalibrationResult | null = null
+    try {
+      const firstUrl = storedImageUrls[0]
+      if (firstUrl && firstUrl.startsWith('https://')) {
+        const resp = await fetch(firstUrl)
+        if (resp.ok) {
+          const arrayBuf = await resp.arrayBuffer()
+          const imageBuffer = Buffer.from(arrayBuf)
+          const [depthData, exifData] = await Promise.all([
+            extractDepthFromHEIC(imageBuffer),
+            extractExifCalibration(imageBuffer),
+          ])
+          if (depthData && exifData) {
+            depthCalibration = computeDepthCalibration(depthData, exifData)
+            if (depthCalibration) {
+              console.log(`[depth-calibration] LiDAR: ${depthCalibration.subjectDistanceMeters.toFixed(2)}m, ` +
+                `${depthCalibration.pixelsPerInch.toFixed(1)} px/in, confidence ${depthCalibration.confidence.toFixed(2)}`)
+            }
+          }
+        }
+      }
+    } catch (depthErr) {
+      console.warn('[depth-calibration] extraction failed (non-blocking):', depthErr)
+    }
+
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
 
@@ -541,6 +576,43 @@ export async function POST(request: Request) {
       calibratedGross: calibrated.calibratedGross,
     })
 
+    // ─── Landmark detection (WI-5) — best-effort, runs after direct score ───
+    let landmarkDetectionResult: LandmarkDetectionResult | null = null
+    let landmarkScoreResult: LandmarkScoreResult | null = null
+    try {
+      landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls, {
+        imageWidth: resolvedImages[0]?.width ?? 1920,
+        imageHeight: resolvedImages[0]?.height ?? 1080,
+        traceId: requestId,
+      })
+
+      if (landmarkDetectionResult && landmarkDetectionResult.locatedCount > 0) {
+        const calibration = resolveCalibration(
+          landmarkDetectionResult.landmarks,
+          depthCalibration,
+          null,
+        )
+        if (calibration) {
+          landmarkScoreResult = computeMeasurementsFromLandmarks(
+            landmarkDetectionResult.landmarks,
+            calibration.pixelsPerInch,
+            {
+              calibrationSource: calibration.source,
+              calibrationConfidence: calibration.confidence,
+            },
+          )
+          console.log('[landmark-scoring] completed', {
+            locatedCount: landmarkDetectionResult.locatedCount,
+            grossScore: landmarkScoreResult.grossScore,
+            calibrationSource: calibration.source,
+            calibrationConfidence: calibration.confidence,
+          })
+        }
+      }
+    } catch (landmarkErr) {
+      console.warn('[landmark-scoring] detection failed, using direct estimate only:', landmarkErr)
+    }
+
     // Part 3: Build graph evidence for confidence engine from the detection graph.
     // This is best-effort — any failure leaves graphEvidenceForConfidence null.
     let graphEvidenceForConfidence: import('@/lib/confidence/engine').GraphEvidenceInputs | null = null
@@ -586,6 +658,11 @@ export async function POST(request: Request) {
       calibrationApplied: Boolean((scoringResult as any).calibrationApplied),
       calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
       graphEvidence: graphEvidenceForConfidence,
+      depthCalibration: depthCalibration ? {
+        source: depthCalibration.source,
+        confidence: depthCalibration.confidence,
+        subjectDistanceMeters: depthCalibration.subjectDistanceMeters,
+      } : null,
     })
 
     ;(scoringResult as any).rawConfidence =
@@ -718,6 +795,16 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        // Depth + landmark
+        depth_calibration_metadata: depthCalibration ? {
+          subjectDistanceMeters: depthCalibration.subjectDistanceMeters,
+          pixelsPerInch: depthCalibration.pixelsPerInch,
+          confidence: depthCalibration.confidence,
+          source: depthCalibration.source,
+          warnings: depthCalibration.warnings,
+        } : null,
+        landmarkDetections: landmarkDetectionResult ?? undefined,
+        landmarkScore: landmarkScoreResult ?? undefined,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -758,6 +845,7 @@ export async function POST(request: Request) {
         graphScore,
         graphSource: effective.source,
         confidencePercent: adjustedConfidence,
+        landmarkScore: landmarkScoreResult,
       })
       const legacyGross = helperComparison.legacyGross
       const legacyNet = helperComparison.legacyNet
@@ -767,7 +855,7 @@ export async function POST(request: Request) {
       const netDelta = helperComparison.netDelta
 
       // Active source decision
-      let activeSource: 'graph_native' | 'legacy' = 'legacy'
+      let activeSource: ActiveScoreSource = 'legacy'
       let reason = ''
 
       if (effective.source === 'fallback') {
@@ -1057,6 +1145,17 @@ export async function POST(request: Request) {
       confidenceEvidence: (scoringResult as any).confidenceEvidence ?? null,
       // Phase 47: Next-most-informative-photo guidance (best-effort, may be null)
       photoGuidance,
+      // P1: LiDAR depth auto-calibration (null when photo has no depth map)
+      depthCalibrationMetadata: depthCalibration ? {
+        subjectDistanceMeters: depthCalibration.subjectDistanceMeters,
+        pixelsPerInch: depthCalibration.pixelsPerInch,
+        confidence: depthCalibration.confidence,
+        source: depthCalibration.source,
+        warnings: depthCalibration.warnings,
+      } : null,
+      // P2: Landmark pixel detection results
+      landmarkDetections: landmarkDetectionResult ?? null,
+      landmarkScore: landmarkScoreResult ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

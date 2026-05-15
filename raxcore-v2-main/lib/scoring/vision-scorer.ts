@@ -1096,3 +1096,94 @@ export function visionOutputToReferenceQualityData(
 
   return result
 }
+
+// ─── Landmark pixel-coordinate detection ─────────────────────────────────────
+
+import type { LandmarkDetection, LandmarkDetectionResult } from './landmark-detection'
+import { buildLandmarkDetectionPrompt } from './landmark-prompt'
+
+/**
+ * Ask GPT-4o for pixel coordinates of every antler landmark in the given images.
+ * This is a second OpenAI call per scoring request (runs alongside, not replacing, scoreWithVision).
+ * Returns null on any failure — landmark path is always additive, never blocking.
+ */
+export async function detectLandmarkPositions(
+  imageUrls: string[],
+  options: { imageWidth?: number; imageHeight?: number; traceId?: string } = {},
+): Promise<LandmarkDetectionResult | null> {
+  if (!process.env.OPENAI_API_KEY) return null
+  if (!imageUrls.length) return null
+
+  const imageWidth = options.imageWidth ?? 1920
+  const imageHeight = options.imageHeight ?? 1080
+  const prompt = buildLandmarkDetectionPrompt(imageWidth, imageHeight)
+
+  try {
+    const { default: OpenAI } = await import('openai')
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+    const imageContents = imageUrls.slice(0, 3).map((url) => ({
+      type: 'image_url' as const,
+      image_url: { url, detail: 'high' as const },
+    }))
+
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            ...imageContents,
+          ],
+        },
+      ],
+    })
+
+    const raw = response.choices[0]?.message?.content ?? ''
+    const jsonMatch = raw.match(/\[[\s\S]*\]/)
+    if (!jsonMatch) return null
+
+    const parsed: Array<{
+      id: string
+      px: number | null
+      py: number | null
+      confidence: number
+      visibility: string
+    }> = JSON.parse(jsonMatch[0])
+
+    const landmarks: LandmarkDetection[] = parsed
+      .filter((item) => typeof item.id === 'string')
+      .map((item) => ({
+        id: item.id as LandmarkDetection['id'],
+        px: typeof item.px === 'number' && isFinite(item.px)
+          ? Math.max(0, Math.min(imageWidth, Math.round(item.px)))
+          : null,
+        py: typeof item.py === 'number' && isFinite(item.py)
+          ? Math.max(0, Math.min(imageHeight, Math.round(item.py)))
+          : null,
+        confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
+        visibility: (['clear', 'partially_visible', 'occluded', 'not_visible'].includes(item.visibility)
+          ? item.visibility
+          : 'not_visible') as LandmarkDetection['visibility'],
+        sourceAngle: 'front',
+        source: 'ai',
+      }))
+
+    const locatedCount = landmarks.filter((lm) => lm.px != null && lm.visibility !== 'not_visible').length
+
+    return {
+      landmarks,
+      imageWidth,
+      imageHeight,
+      modelUsed: 'gpt-4o',
+      detectionTimestamp: new Date().toISOString(),
+      locatedCount,
+      requestedCount: landmarks.length,
+    }
+  } catch (err) {
+    console.warn('[vision-scorer] detectLandmarkPositions failed (non-blocking):', err)
+    return null
+  }
+}

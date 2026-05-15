@@ -25,6 +25,7 @@ import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { BCScoreSheet } from './bc-score-sheet'
 import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
+import { LandmarkOverlay } from './landmark-overlay'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { FieldProvenanceMap } from '@/lib/rules-engine'
@@ -75,13 +76,49 @@ type RawScoringResult = Omit<ScoringResult, 'buck' | 'confidence_explanation' | 
   scoreSheet?: ScoreSheet | null
   // Build B: graph-native score comparison
   scoreComparison?: {
-    activeSource: 'graph_native' | 'legacy'
+    activeSource: 'graph_native' | 'legacy' | 'landmark_geometry'
     legacyGross: number | null
     graphGross: number | null
     grossDelta: number | null
     graphCompleteness: number
     graphSource: string
     reason: string
+    landmarkGross?: number | null
+    landmarkLocatedFieldFraction?: number | null
+  } | null
+  // P1: LiDAR depth auto-calibration
+  depthCalibrationMetadata?: {
+    subjectDistanceMeters: number
+    pixelsPerInch: number
+    confidence: number
+    source: string
+    warnings: string[]
+  } | null
+  // P2: Landmark pixel detection
+  landmarkDetections?: {
+    landmarks: Array<{
+      id: string
+      px: number | null
+      py: number | null
+      confidence: number
+      visibility: string
+      source: string
+    }>
+    imageWidth: number
+    imageHeight: number
+    locatedCount: number
+  } | null
+  landmarkScore?: {
+    measurements: Array<{
+      fieldKey: string
+      valueInches: number | null
+      combinedConfidence: number
+      warning?: string
+    }>
+    grossScore: number | null
+    calibrationSource: string
+    locatedFieldCount: number
+    totalFieldCount: number
   } | null
 }
 
@@ -359,6 +396,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
   const [showMeasurements, setShowMeasurements] = useState(false)
   const [showConfidence, setShowConfidence] = useState(false)
   const [showLearning, setShowLearning] = useState(false)
+  const [showLandmarks, setShowLandmarks] = useState(false)
   const [showTrainingForm, setShowTrainingForm] = useState(false)
   const [isSubmittingTraining, setIsSubmittingTraining] = useState(false)
   const [trainingSubmitted, setTrainingSubmitted] = useState(false)
@@ -466,6 +504,64 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         <AntlerImageCarousel images={imageUrls} />
       )}
 
+      {/* Landmark overlay toggle — shown when detection ran */}
+      {result.landmarkDetections && result.landmarkDetections.locatedCount > 0 && imageUrls.length > 0 && (
+        <div className="space-y-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+            onClick={() => setShowLandmarks((v) => !v)}
+          >
+            <Brain className="h-3 w-3" />
+            {showLandmarks ? 'Hide' : 'Show'} Landmark Detection
+            <Badge variant="secondary" className="ml-1 text-xs">
+              {result.landmarkDetections.locatedCount} points
+            </Badge>
+          </Button>
+          {showLandmarks && (
+            <div className="relative rounded-lg overflow-hidden border bg-muted" style={{ aspectRatio: `${result.landmarkDetections.imageWidth}/${result.landmarkDetections.imageHeight}` }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrls[0]} alt="Antler with landmark overlay" className="w-full h-full object-contain" />
+              <div className="absolute inset-0">
+                <LandmarkOverlay
+                  landmarks={result.landmarkDetections.landmarks as any}
+                  measurements={(result.landmarkScore?.measurements ?? []) as any}
+                  imageWidth={result.landmarkDetections.imageWidth}
+                  imageHeight={result.landmarkDetections.imageHeight}
+                  containerWidth={600}
+                  containerHeight={Math.round(600 * result.landmarkDetections.imageHeight / result.landmarkDetections.imageWidth)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LiDAR Auto-Calibration Card — only shown when depth data is present */}
+      {result.depthCalibrationMetadata && (
+        <Card className="border-purple-500/30 bg-purple-50/30 dark:bg-purple-950/20">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-purple-800 dark:text-purple-300">
+                  LiDAR Auto-Calibration Applied
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-purple-700 dark:text-purple-400">
+                  <span>Distance: {result.depthCalibrationMetadata.subjectDistanceMeters.toFixed(1)}m ({(result.depthCalibrationMetadata.subjectDistanceMeters * 3.281).toFixed(1)} ft)</span>
+                  <span>Scale: {result.depthCalibrationMetadata.pixelsPerInch.toFixed(1)} px/in</span>
+                  <span>Confidence: {result.depthCalibrationMetadata.confidence >= 0.85 ? 'High' : result.depthCalibrationMetadata.confidence >= 0.70 ? 'Medium' : 'Low'} ({Math.round(result.depthCalibrationMetadata.confidence * 100)}%)</span>
+                </div>
+                <p className="text-xs text-purple-600/80 dark:text-purple-500">
+                  This photo includes iPhone LiDAR depth data. Scale was calibrated automatically.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Hero Score Card */}
       <Card className="overflow-hidden border-2">
         <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-6">
@@ -508,14 +604,28 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                     'text-xs gap-1',
                     result.scoreComparison.activeSource === 'graph_native'
                       ? 'border-green-500/40 text-green-700 dark:text-green-400'
-                      : 'border-muted-foreground/30 text-muted-foreground',
+                      : result.scoreComparison.activeSource === 'landmark_geometry'
+                        ? 'border-blue-500/40 text-blue-700 dark:text-blue-400'
+                        : 'border-muted-foreground/30 text-muted-foreground',
                   )}
                   title={result.scoreComparison.reason}
                 >
                   <Ruler className="h-3 w-3" />
                   {result.scoreComparison.activeSource === 'graph_native'
                     ? `Graph (${Math.round(result.scoreComparison.graphCompleteness * 100)}%)`
-                    : 'Legacy AI'}
+                    : result.scoreComparison.activeSource === 'landmark_geometry'
+                      ? `Landmark (${Math.round((result.scoreComparison.landmarkLocatedFieldFraction ?? 0) * 100)}%)`
+                      : 'Legacy AI'}
+                </Badge>
+              )}
+              {result.depthCalibrationMetadata && (
+                <Badge
+                  variant="outline"
+                  className="text-xs gap-1 border-purple-500/40 text-purple-700 dark:text-purple-400"
+                  title={`LiDAR auto-calibration at ${result.depthCalibrationMetadata.subjectDistanceMeters.toFixed(1)}m`}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  LiDAR
                 </Badge>
               )}
             </div>

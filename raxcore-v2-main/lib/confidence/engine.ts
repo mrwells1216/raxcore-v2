@@ -56,6 +56,12 @@ export type ConfidenceInputs = {
   calibrationMeta?: any | null
   /** Part 3: graph evidence signals layered on top of existing confidence */
   graphEvidence?: GraphEvidenceInputs | null
+  /** Depth map LiDAR calibration result — boosts confidence when present */
+  depthCalibration?: {
+    source: 'depth_map_lidar'
+    confidence: number
+    subjectDistanceMeters: number
+  } | null
 }
 
 export type ConfidenceResult = {
@@ -428,6 +434,24 @@ export function computeConfidence(inputs: ConfidenceInputs): ConfidenceResult {
       })
     }
   }
+
+  // LiDAR depth calibration boost (NOT physical_reference — does not unlock Verified Score)
+  if (
+    inputs.depthCalibration &&
+    inputs.depthCalibration.source === 'depth_map_lidar' &&
+    inputs.depthCalibration.confidence > 0.5
+  ) {
+    const lidarBoost = Math.round(inputs.depthCalibration.confidence * 6)
+    calibrationScore += lidarBoost
+    reasons.push({
+      type: 'calibration_adjustment',
+      label: 'LiDAR auto-calibration',
+      impact: lidarBoost,
+      direction: 'boost',
+      details: `iPhone LiDAR depth at ${inputs.depthCalibration.subjectDistanceMeters.toFixed(1)}m (confidence ${(inputs.depthCalibration.confidence * 100).toFixed(0)}%).`,
+    })
+  }
+
   total += calibrationScore
 
   // Symmetry
