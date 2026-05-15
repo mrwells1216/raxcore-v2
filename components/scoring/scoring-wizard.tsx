@@ -323,9 +323,12 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       }))
 
       if (data.precision_mode_enabled) {
+        const precisionRefType = (data.reference_type === 'wedding_ring' || data.reference_type === 'hat')
+          ? 'none' as const
+          : data.reference_type
         const referenceModeSummary = buildReferenceModeSummary({
           precisionModeEnabled: data.precision_mode_enabled,
-          referenceType: data.reference_type,
+          referenceType: precisionRefType,
           referenceNotes: data.reference_notes,
           referenceSizeValue: data.reference_size_value,
           referenceSizeUnit: data.reference_size_unit,
@@ -344,6 +347,12 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
           apiFormData.append('reference_placement', data.reference_placement)
         }
         apiFormData.append('reference_mode_summary', JSON.stringify(referenceModeSummary))
+        if (data.reference_ring_size_us != null) {
+          apiFormData.append('reference_ring_size_us', String(data.reference_ring_size_us))
+        }
+        if (data.reference_hat_type) {
+          apiFormData.append('reference_hat_type', data.reference_hat_type)
+        }
       }
 
       if (imageDiagnostics.length > 0) {

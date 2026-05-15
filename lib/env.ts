@@ -61,6 +61,18 @@ export function envPresenceMap(): Record<string, boolean> {
   }
 }
 
+/**
+ * Optional server-only env vars — must NOT block startup if absent.
+ * QStash keys are loaded at runtime; absence means QStash verification is skipped
+ * and the route falls back to CRON_SECRET bearer auth.
+ */
+export type OptionalServerEnv = {
+  QSTASH_TOKEN?: string
+  QSTASH_CURRENT_SIGNING_KEY?: string
+  QSTASH_NEXT_SIGNING_KEY?: string
+  CRON_SECRET?: string
+}
+
 // Boot-time diagnostic log (server-side only, booleans only)
 if (typeof window === 'undefined') {
   console.log('[env] loaded', envPresenceMap())

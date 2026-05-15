@@ -394,7 +394,7 @@ export interface ScoringFormData {
   selected_image_angles?: CaptureAngle[]
   // Precision mode: reference object / scale marker
   precision_mode_enabled?: boolean
-  reference_type?: 'none' | 'ruler' | 'credit_card' | 'coin' | 'aruco_marker' | 'other_known_object'
+  reference_type?: 'none' | 'ruler' | 'credit_card' | 'coin' | 'aruco_marker' | 'other_known_object' | 'wedding_ring' | 'hat'
   reference_notes?: string
   reference_size_value?: number
   reference_size_unit?: 'in' | 'cm' | 'mm'
@@ -420,6 +420,9 @@ export interface ScoringFormData {
   reference_object_type?: 'none' | 'wedding_ring' | 'hat'
   reference_object_ring_size?: number | null
   reference_object_hat_type?: 'baseball_cap' | 'baseball_cap_backwards' | 'beanie' | 'skull_cap' | 'stetson' | 'wide_brim' | null
+  // Precision mode ring/hat fields
+  reference_ring_size_us?: number | null
+  reference_hat_type?: 'baseball_cap' | 'baseball_cap_backwards' | 'beanie' | 'skull_cap' | 'stetson' | 'wide_brim' | null
 }
 
 export interface GroundTruthFormData {
