@@ -1,5 +1,3 @@
-import 'server-only'
-
 /** Every scoreable antler landmark that can be located in a photo */
 export type AntlerLandmarkId =
   // Skull references
