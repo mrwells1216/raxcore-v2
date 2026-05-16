@@ -75,6 +75,11 @@ const BASE_LAYERS = {
     labelsUrl: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
     attribution: 'ESRI World Imagery + Labels',
   },
+  elevationHeat: {
+    name: 'Elevation Heat',
+    url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain_background/{z}/{x}/{y}.png',
+    attribution: '&copy; Stamen Design &copy; Stadia Maps',
+  },
   topo: {
     name: 'Topo',
     url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
