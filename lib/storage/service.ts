@@ -317,8 +317,42 @@ export async function uploadBuckImage(
   return urlData.publicUrl
 }
 
+/**
+ * Upload a server-cropped image buffer to Supabase Storage. Used by the antler
+ * crop box flow — the cropped variant goes to AI scoring while the original
+ * URL remains the display/storage record. Never falls back silently; callers
+ * are expected to handle failure and use the original URL.
+ */
+export async function uploadCroppedBuckImage(
+  buckId: string,
+  buffer: Buffer,
+  index: number,
+  mimeType: string = 'image/jpeg',
+): Promise<string> {
+  const bucket = getBuckImageBucketName()
+  const supabase = await getServiceSupabase()
+
+  const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg'
+  const timestamp = Date.now()
+  const path = `bucks/${buckId}/image_${index}_${timestamp}_cropped.${ext}`
+
+  const { error: uploadError } = await supabase.storage
+    .from(bucket)
+    .upload(path, buffer, { contentType: mimeType, upsert: false })
+
+  if (uploadError) {
+    throw new Error(`[uploadCroppedBuckImage] Upload failed for image ${index}: ${uploadError.message}`)
+  }
+
+  const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path)
+  if (!urlData?.publicUrl) {
+    throw new Error(`[uploadCroppedBuckImage] Could not get public URL for bucket "${bucket}" path "${path}"`)
+  }
+  return urlData.publicUrl
+}
+
 export async function addBuckImages(
-  buckId: string, 
+  buckId: string,
   imageUrls: string[]
 ): Promise<BuckImageRecord[]> {
   const supabase = await createClient()
@@ -480,7 +514,7 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       circumferences: null,
       raw_ai_response: params.rawResponse || null,
       intake_quality: params.intakeQuality || null,
-      ...(params.cropBoxMetadata ? { crop_box_metadata: params.cropBoxMetadata } : {}),
+      crop_box_metadata: params.cropBoxMetadata ?? null,
       ...(params.arucoDetectionMetadata ? { aruco_detection_metadata: params.arucoDetectionMetadata } : {}),
       ...(params.pedicleCalibrationMetadata ? { pedicle_calibration_metadata: params.pedicleCalibrationMetadata } : {}),
       ...(params.vanishingPointMetadata ? { vanishing_point_metadata: params.vanishingPointMetadata } : {}),

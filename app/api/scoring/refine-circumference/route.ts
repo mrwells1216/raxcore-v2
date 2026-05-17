@@ -74,7 +74,10 @@ export async function POST(request: NextRequest) {
   const previousMeas = (raw.measurements ?? {}) as Record<string, number | null | undefined>
 
   // Build a new measurements object preserving every non-H field
-  const updatedMeas: Record<string, number | null> = { ...previousMeas }
+  const updatedMeas: Record<string, number | null> = {}
+  for (const [k, v] of Object.entries(previousMeas)) {
+    updatedMeas[k] = v ?? null
+  }
   let previousCircumferenceTotal = 0
   for (const field of ['h1', 'h2', 'h3', 'h4'] as const) {
     for (const side of ['left', 'right'] as const) {

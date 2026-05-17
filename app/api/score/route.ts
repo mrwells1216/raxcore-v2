@@ -4,12 +4,13 @@ import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { computeConfidence } from '@/lib/confidence/engine'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
-import { 
-  createBuck, 
-  addBuckImages, 
+import {
+  createBuck,
+  addBuckImages,
   uploadBuckImage,
+  uploadCroppedBuckImage,
   getBuckImageBucketName,
-  createPrediction, 
+  createPrediction,
   updateBuckStatus,
   getActiveModelVersion,
   getBuckImages
@@ -55,7 +56,6 @@ import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
 import type { CropRegion } from '@/components/scoring/antler-crop-box'
-import { getServiceSupabase } from '@/lib/supabase/admin'
 import { detectArucoMarker } from '@/lib/calibration/aruco-detector'
 import type { ArucoDetectionResult } from '@/lib/scoring/aruco-types'
 import sharp from 'sharp'
@@ -394,98 +394,68 @@ export async function POST(request: Request) {
       resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
     }
 
-    // Store the resolved URLs
+    // Store the resolved URLs (always the originals — never the cropped variants)
     await addBuckImages(buck.id, storedImageUrls)
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // User-drawn antler crop: optional per-image crop applied server-side
-    // before scoring. Originals remain in storedImageUrls for display; the AI
-    // sees scoringImageUrls. cropMetadata is persisted alongside the prediction.
+    // Antler crop boxes — server-side crop with 12% padding before AI scoring
+    // and detection. Originals remain in storedImageUrls for display, landmarks,
+    // and persistence. Any crop failure falls back silently to the original URL
+    // and records null in the metadata map. Never blocks scoring.
     // ─────────────────────────────────────────────────────────────────────────
     const scoringImageUrls: string[] = [...storedImageUrls]
-    const cropMetadata: Record<string, {
-      originalWidth: number
-      originalHeight: number
-      cropPxX: number
-      cropPxY: number
-      cropPxWidth: number
-      cropPxHeight: number
-      paddingApplied: number
-      croppedUrl: string
-      region: CropRegion
-    } | null> = {}
+    const cropMetadata: Record<string, (Omit<CropResult, 'croppedBuffer'> & { croppedUrl: string; region: CropRegion }) | null> = {}
     let anyCropApplied = false
 
     for (let i = 0; i < storedImageUrls.length; i++) {
-      const region = cropRegions[String(i)] ?? cropRegions[i as unknown as string] ?? null
-      cropMetadata[String(i)] = null
-      if (!region) continue
+      const key = String(i)
+      const region = cropRegions[key] ?? null
+      if (!region) {
+        cropMetadata[key] = null
+        continue
+      }
 
       try {
-        const imgRes = await fetch(storedImageUrls[i])
+        const originalUrl = storedImageUrls[i]
+        const imgRes = await fetch(originalUrl)
         if (!imgRes.ok) {
-          console.warn(`[crop-box] fetch failed for image ${i}: ${imgRes.status}`)
+          console.warn(`[crop-box] fetch failed for image ${i} (status ${imgRes.status}) — using original`)
+          cropMetadata[key] = null
           continue
         }
         const imgBuf = Buffer.from(await imgRes.arrayBuffer())
         const cropped = await cropImageToRegion(imgBuf, region)
         if (!cropped) {
-          console.warn(`[crop-box] crop rejected for image ${i} (too small or invalid)`)
+          console.warn(`[crop-box] crop rejected for image ${i} — using original`)
+          cropMetadata[key] = null
           continue
         }
 
-        const ext = cropped.contentType === 'image/png' ? 'png' : 'jpg'
-        const path = `bucks/${buck.id}/crop_${i}_${Date.now()}.${ext}`
-        const supabase = await getServiceSupabase()
-        const bucket = getBuckImageBucketName()
-        const { error: upErr } = await supabase.storage
-          .from(bucket)
-          .upload(path, cropped.croppedBuffer, {
-            contentType: cropped.contentType,
-            upsert: false,
-          })
-        if (upErr) {
-          console.warn(`[crop-box] cropped upload failed for image ${i}: ${upErr.message}`)
-          continue
-        }
-        const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path)
-        const croppedUrl = urlData?.publicUrl
-        if (!croppedUrl) continue
-
+        const croppedUrl = await uploadCroppedBuckImage(buck.id, cropped.croppedBuffer, i)
         scoringImageUrls[i] = croppedUrl
-        cropMetadata[String(i)] = {
-          originalWidth: cropped.originalWidth,
-          originalHeight: cropped.originalHeight,
-          cropPxX: cropped.cropPxX,
-          cropPxY: cropped.cropPxY,
-          cropPxWidth: cropped.cropPxWidth,
-          cropPxHeight: cropped.cropPxHeight,
-          paddingApplied: cropped.paddingApplied,
-          croppedUrl,
-          region,
-        }
+        resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
+
+        // Strip the buffer before serializing to JSONB
+        const { croppedBuffer: _unused, ...metaForStorage } = cropped
+        void _unused
+        cropMetadata[key] = { ...metaForStorage, croppedUrl, region }
         anyCropApplied = true
         console.log(`[crop-box] image ${i} cropped`, {
           region,
           cropPx: { x: cropped.cropPxX, y: cropped.cropPxY, w: cropped.cropPxWidth, h: cropped.cropPxHeight },
         })
-      } catch (cropErr) {
-        console.warn(`[crop-box] crop pipeline failed for image ${i}, using original:`, cropErr instanceof Error ? cropErr.message : String(cropErr))
-      }
-    }
-
-    // Swap the scoring URLs into resolvedImages (storedImageUrls remains for display)
-    for (let i = 0; i < resolvedImages.length; i++) {
-      resolvedImages[i] = {
-        ...resolvedImages[i],
-        imageUrl: scoringImageUrls[i],
-        hasCropBox: cropMetadata[String(i)] !== null,
+      } catch (err) {
+        console.warn(`[crop-box] crop failed for image ${i}, using original:`, err)
+        cropMetadata[key] = null
       }
     }
 
     // P1: LiDAR depth auto-calibration — extract from first image if HEIC
     let depthCalibration: DepthCalibrationResult | null = null
     let arucoResult: ArucoDetectionResult | null = null
+    // Populated later in the landmark-detection block, but declared here so
+    // it can be referenced by createPrediction (which writes null at that
+    // point — the live result is surfaced via the final JSON response).
+    let vanishingPointResult: import('@/lib/scoring/vanishing-point-types').VanishingPointResult | null = null
     try {
       const firstImageUrl = storedImageUrls[0]
       if (firstImageUrl) {
@@ -948,7 +918,6 @@ export async function POST(request: Request) {
     // P2: Landmark pixel detection — best-effort, never blocks response
     let landmarkDetectionResult: LandmarkDetectionResult | null = null
     let landmarkScoreResult: LandmarkScoreResult | null = null
-    let vanishingPointResult: import('@/lib/scoring/vanishing-point-types').VanishingPointResult | null = null
     try {
       landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls)
       if (landmarkDetectionResult) {
