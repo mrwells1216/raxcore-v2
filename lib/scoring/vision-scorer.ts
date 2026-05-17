@@ -1199,10 +1199,26 @@ const LandmarkPointSchema = z.object({
   isElliptical: z.boolean().optional(),
 })
 
+const ParallelFeatureLineSchema = z.object({
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+})
+
+const ParallelFeatureSchema = z.object({
+  feature_type: z.string(),
+  line_a: ParallelFeatureLineSchema,
+  line_b: ParallelFeatureLineSchema,
+  confidence: z.number().min(0).max(1),
+  known_spacing_inches: z.number().nullable().optional(),
+})
+
 const LandmarkDetectionSchema = z.object({
   imageWidth: z.number(),
   imageHeight: z.number(),
   landmarks: z.array(LandmarkPointSchema),
+  parallel_features: z.array(ParallelFeatureSchema).optional(),
 })
 
 const LANDMARK_IDS: AntlerLandmarkId[] = [
@@ -1250,6 +1266,15 @@ export async function detectLandmarkPositions(
       `  - isElliptical: true when the iris appears as an ellipse (side profile), false when circular (front view)\n` +
       `  - If the eye is occluded, blurred, or not clearly visible, set radiusPx: null. Prefer null over a guessed radius.\n` +
       `\n` +
+      `PARALLEL FEATURES — also return a parallel_features array (optional).\n` +
+      `Look at the BACKGROUND for straight parallel lines: fence rails, fence posts, truck bed sides,\n` +
+      `barn boards, deck/floor boards, door or window frames, roof lines, concrete joints.\n` +
+      `For each pair (max 3) with confidence ≥ 0.4 return:\n` +
+      `  feature_type (short label), line_a {x1,y1,x2,y2}, line_b {x1,y1,x2,y2},\n` +
+      `  confidence 0..1, known_spacing_inches (real-world spacing if the object implies one,\n` +
+      `  e.g. fence rail ~12", truck-bed side rail ~6"; otherwise null).\n` +
+      `Return parallel_features: [] when no usable lines are visible.\n` +
+      `\n` +
       `Landmarks to locate: ${landmarkList}.`
 
     const { object } = await generateObject({
@@ -1283,6 +1308,14 @@ export async function detectLandmarkPositions(
       (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
     ).length
 
+    const parallelFeatures = (object.parallel_features ?? []).map((f) => ({
+      feature_type: f.feature_type,
+      line_a: f.line_a,
+      line_b: f.line_b,
+      confidence: f.confidence,
+      known_spacing_inches: f.known_spacing_inches ?? null,
+    }))
+
     return {
       landmarks,
       imageWidth: object.imageWidth,
@@ -1291,6 +1324,7 @@ export async function detectLandmarkPositions(
       detectionTimestamp: new Date().toISOString(),
       locatedCount,
       requestedCount: LANDMARK_IDS.length,
+      parallelFeatures,
     }
   } catch {
     return null

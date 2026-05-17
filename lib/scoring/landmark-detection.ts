@@ -56,6 +56,8 @@ export interface LandmarkDetectionResult {
   detectionTimestamp: string
   locatedCount: number
   requestedCount: number
+  /** Background parallel-line features for vanishing-point cross-check */
+  parallelFeatures?: import('./vanishing-point-types').ParallelFeature[]
 }
 
 export const LANDMARK_ZONE_COLORS: Record<string, string> = {

@@ -421,6 +421,7 @@ export interface CreatePredictionParams {
   cropBoxMetadata?: Record<string, unknown> | null
   arucoDetectionMetadata?: Record<string, unknown> | null
   pedicleCalibrationMetadata?: Record<string, unknown> | null
+  vanishingPointMetadata?: Record<string, unknown> | null
 }
 
 // Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
@@ -482,6 +483,7 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       ...(params.cropBoxMetadata ? { crop_box_metadata: params.cropBoxMetadata } : {}),
       ...(params.arucoDetectionMetadata ? { aruco_detection_metadata: params.arucoDetectionMetadata } : {}),
       ...(params.pedicleCalibrationMetadata ? { pedicle_calibration_metadata: params.pedicleCalibrationMetadata } : {}),
+      ...(params.vanishingPointMetadata ? { vanishing_point_metadata: params.vanishingPointMetadata } : {}),
     })
     .select()
     .single()

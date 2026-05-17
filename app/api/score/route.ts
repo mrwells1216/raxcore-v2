@@ -914,6 +914,8 @@ export async function POST(request: Request) {
         arucoDetection: arucoResult,
         // User-placed pedicle calibration dots
         pedicleCalibration: pedicleCalibration,
+        // Vanishing-point cross-check (background parallel lines)
+        vanishingPoint: vanishingPointResult,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -928,6 +930,7 @@ export async function POST(request: Request) {
         : null,
       arucoDetectionMetadata: arucoResult,
       pedicleCalibrationMetadata: pedicleCalibration,
+      vanishingPointMetadata: vanishingPointResult,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -945,9 +948,23 @@ export async function POST(request: Request) {
     // P2: Landmark pixel detection — best-effort, never blocks response
     let landmarkDetectionResult: LandmarkDetectionResult | null = null
     let landmarkScoreResult: LandmarkScoreResult | null = null
+    let vanishingPointResult: import('@/lib/scoring/vanishing-point-types').VanishingPointResult | null = null
     try {
       landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls)
       if (landmarkDetectionResult) {
+        // Analyse vanishing-point cross-check from any background parallel features
+        try {
+          const { analyzeVanishingPoints } = await import('@/lib/scoring/vanishing-point-geometry')
+          vanishingPointResult = analyzeVanishingPoints(
+            landmarkDetectionResult.parallelFeatures ?? null,
+            landmarkDetectionResult.imageWidth,
+            landmarkDetectionResult.imageHeight,
+            null,
+          )
+        } catch (vpErr) {
+          console.warn('[vanishing-point] analysis failed (non-blocking):', vpErr)
+        }
+
         const calibration = resolveCalibration({
           landmarks: landmarkDetectionResult.landmarks,
           depthCalibration,
@@ -961,6 +978,7 @@ export async function POST(request: Request) {
                 knownSpacingInches: pedicleCalibration.knownSpacingInches,
               }
             : null,
+          vanishingPoint: vanishingPointResult,
         })
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
@@ -1251,6 +1269,7 @@ export async function POST(request: Request) {
         : null,
       arucoDetection: arucoResult,
       pedicleCalibration,
+      vanishingPoint: vanishingPointResult,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages
