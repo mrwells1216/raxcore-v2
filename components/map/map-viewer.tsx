@@ -1,4 +1,4 @@
-‘use client’
+'use client'
 
 /**
 
@@ -46,8 +46,8 @@
 - LOCATION_TYPE_LABELS    Record<LocationType, string>
   */
 
-import { useEffect, useRef, useState, useCallback } from ‘react’
-import type { MapPin as MapPinType, LocationType } from ‘@/lib/types’
+import { useEffect, useRef, useState, useCallback } from 'react'
+import type { MapPin as MapPinType, LocationType } from '@/lib/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION 1 — TYPES
@@ -63,8 +63,8 @@ selectedPinId?: string
 showPropertyBoundaries?: boolean
 }
 
-export type LayerMode = ‘satellite’ | ‘satellite_labels’ | ‘topo’ | ‘terrain’ | ‘elevation_heat’
-export type OverlayMode = ‘none’ | ‘hillshade’ | ‘slope’
+export type LayerMode = 'satellite' | 'satellite_labels' | 'topo' | 'terrain' | 'elevation_heat'
+export type OverlayMode = 'none' | 'hillshade' | 'slope'
 
 interface ElevationState {
 elevationFt: number
@@ -112,65 +112,65 @@ maxZoom: 19,
 // ── EXTEND ── Add new base layers here + to LayerMode union above
 const TILE_LAYERS: Record<LayerMode, TileLayerConfig> = {
 satellite: {
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© <a href="https://www.esri.com">Esri</a> World Imagery’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+attribution: '© <a href="https://www.esri.com">Esri</a> World Imagery',
 maxZoom:     19,
-label:       ‘Satellite’,
+label:       'Satellite',
 },
 satellite_labels: {
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© <a href="https://www.esri.com">Esri</a> World Imagery’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+attribution: '© <a href="https://www.esri.com">Esri</a> World Imagery',
 maxZoom:     19,
-label:       ‘Satellite + Labels’,
-labelsUrl:   ‘https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}’,
+label:       'Satellite + Labels',
+labelsUrl:   'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
 },
 topo: {
-url:         ‘https://tile.opentopomap.org/{z}/{x}/{y}.png’,
-attribution: ‘© <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)’,
+url:         'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+attribution: '© <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
 maxZoom:     17,
-label:       ‘Topo’,
+label:       'Topo',
 },
 terrain: {
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© <a href="https://www.esri.com">Esri</a> World Terrain’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
+attribution: '© <a href="https://www.esri.com">Esri</a> World Terrain',
 maxZoom:     13,
-label:       ‘Terrain’,
+label:       'Terrain',
 },
 elevation_heat: {
 // ESRI World Physical Map — true hypsometric tint (green lowlands → brown highlands → white peaks)
 // Free, no API key. maxZoom 8 is correct — tiles only exist to zoom 8.
 // Combine with Hillshade overlay for best visual depth.
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© <a href="https://www.esri.com">Esri</a>, US National Park Service’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}',
+attribution: '© <a href="https://www.esri.com">Esri</a>, US National Park Service',
 maxZoom:     8,
-label:       ‘Elevation Heat’,
+label:       'Elevation Heat',
 },
 }
 
 // ── EXTEND ── Add new overlays here + to OverlayMode union above
-const OVERLAY_LAYERS: Record<Exclude<OverlayMode, ‘none’>, ElevationLayerConfig> = {
+const OVERLAY_LAYERS: Record<Exclude<OverlayMode, 'none'>, ElevationLayerConfig> = {
 hillshade: {
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© Esri World Hillshade’,
-label:       ‘Hillshade’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+attribution: '© Esri World Hillshade',
+label:       'Hillshade',
 opacity:     0.45,
 },
 slope: {
-url:         ‘https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}’,
-attribution: ‘© Esri Hillshade Dark’,
-label:       ‘Slope Shadow’,
+url:         'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}',
+attribution: '© Esri Hillshade Dark',
+label:       'Slope Shadow',
 opacity:     0.50,
 },
 }
 
 // ── EXTEND ── Adjust ranges or add zones. Keep ranges contiguous (no gaps/overlaps).
 const TERRAIN_ZONES: TerrainZone[] = [
-{ minElFt: 0,    maxElFt: 200,      label: ‘Bottom / Creek’,  hint: ‘Primary travel & water. Bucks use creek bottoms at night.’,                         color: ‘#2e7a5e’ },
-{ minElFt: 200,  maxElFt: 600,      label: ‘Low Bench’,       hint: ‘Primary feeding zones. Food plots and ag field edges thrive here.’,                  color: ‘#3a6e35’ },
-{ minElFt: 600,  maxElFt: 1200,     label: ‘Mid Slope’,       hint: ‘Primary travel corridors. Set stands on converging draws.’,                          color: ‘#8a6a2a’ },
-{ minElFt: 1200, maxElFt: 2000,     label: ‘Upper Bench’,     hint: ‘Bedding on north-facing slopes. Look for thermal cover.’,                            color: ‘#6b5b93’ },
-{ minElFt: 2000, maxElFt: 3500,     label: ‘Ridgeline’,       hint: ‘Saddles between ridges = major rut movement highways.’,                              color: ‘#7a5030’ },
-{ minElFt: 3500, maxElFt: Infinity, label: ‘High Country’,    hint: ‘Escape cover. Bucks retreat here under heavy post-season pressure.’,                 color: ‘#4a4f58’ },
+{ minElFt: 0,    maxElFt: 200,      label: 'Bottom / Creek',  hint: 'Primary travel & water. Bucks use creek bottoms at night.',                         color: '#2e7a5e' },
+{ minElFt: 200,  maxElFt: 600,      label: 'Low Bench',       hint: 'Primary feeding zones. Food plots and ag field edges thrive here.',                  color: '#3a6e35' },
+{ minElFt: 600,  maxElFt: 1200,     label: 'Mid Slope',       hint: 'Primary travel corridors. Set stands on converging draws.',                          color: '#8a6a2a' },
+{ minElFt: 1200, maxElFt: 2000,     label: 'Upper Bench',     hint: 'Bedding on north-facing slopes. Look for thermal cover.',                            color: '#6b5b93' },
+{ minElFt: 2000, maxElFt: 3500,     label: 'Ridgeline',       hint: 'Saddles between ridges = major rut movement highways.',                              color: '#7a5030' },
+{ minElFt: 3500, maxElFt: Infinity, label: 'High Country',    hint: 'Escape cover. Bucks retreat here under heavy post-season pressure.',                 color: '#4a4f58' },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,35 +179,35 @@ const TERRAIN_ZONES: TerrainZone[] = [
 
 // ── EXTEND ── Add new LocationType values here AND in lib/types.ts
 export const LOCATION_TYPE_COLORS: Record<LocationType, string> = {
-sighting:        ‘#4a7fa5’,
-trailcam:        ‘#6b5b93’,
-harvest:         ‘#8b3a3a’,
-shed:            ‘#8a6a2a’,
-scoring_source:  ‘#2e7a5e’,
-stand:           ‘#3a4a8b’,
-blind:           ‘#5a4a7a’,
-scrape:          ‘#7a5030’,
-rub:             ‘#6b5520’,
-food_plot:       ‘#3a6e35’,
-bedding:         ‘#6b3a7a’,
-travel_corridor: ‘#445060’,
-unknown:         ‘#4a4f58’,
+sighting:        '#4a7fa5',
+trailcam:        '#6b5b93',
+harvest:         '#8b3a3a',
+shed:            '#8a6a2a',
+scoring_source:  '#2e7a5e',
+stand:           '#3a4a8b',
+blind:           '#5a4a7a',
+scrape:          '#7a5030',
+rub:             '#6b5520',
+food_plot:       '#3a6e35',
+bedding:         '#6b3a7a',
+travel_corridor: '#445060',
+unknown:         '#4a4f58',
 }
 
 export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
-sighting:        ‘Sighting’,
-trailcam:        ‘Trail Cam’,
-harvest:         ‘Harvest’,
-shed:            ‘Shed’,
-scoring_source:  ‘Scoring Source’,
-stand:           ‘Stand’,
-blind:           ‘Blind’,
-scrape:          ‘Scrape’,
-rub:             ‘Rub’,
-food_plot:       ‘Food Plot’,
-bedding:         ‘Bedding’,
-travel_corridor: ‘Travel Corridor’,
-unknown:         ‘Unknown’,
+sighting:        'Sighting',
+trailcam:        'Trail Cam',
+harvest:         'Harvest',
+shed:            'Shed',
+scoring_source:  'Scoring Source',
+stand:           'Stand',
+blind:           'Blind',
+scrape:          'Scrape',
+rub:             'Rub',
+food_plot:       'Food Plot',
+bedding:         'Bedding',
+travel_corridor: 'Travel Corridor',
+unknown:         'Unknown',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ TERRAIN_ZONES[TERRAIN_ZONES.length - 1]
 }
 
 function buildPinSvg(color: string, selected: boolean, size = 28): string {
-const stroke = selected ? ‘#ffffff’ : ‘rgba(255,255,255,0.35)’
+const stroke = selected ? '#ffffff' : 'rgba(255,255,255,0.35)'
 const sw     = selected ? 2 : 1
 const h      = Math.round(size * 1.25)
 return (
@@ -245,9 +245,9 @@ if (!res.ok) return null
 const data: unknown = await res.json()
 const meters =
 data !== null &&
-typeof data === ‘object’ &&
-‘value’ in data &&
-typeof (data as Record<string, unknown>).value === ‘number’
+typeof data === 'object' &&
+'value' in data &&
+typeof (data as Record<string, unknown>).value === 'number'
 ? ((data as Record<string, unknown>).value as number)
 : null
 if (meters === null || meters < -500) return null
@@ -270,8 +270,8 @@ const elevLayerRef   = useRef<unknown>(null)
 const pinGroupRef    = useRef<unknown>(null)
 const pendingPinRef  = useRef<unknown>(null)
 
-const [layerMode,   setLayerMode]   = useState<LayerMode>(‘satellite’)
-const [overlayMode, setOverlayMode] = useState<OverlayMode>(‘hillshade’)
+const [layerMode,   setLayerMode]   = useState<LayerMode>('satellite')
+const [overlayMode, setOverlayMode] = useState<OverlayMode>('hillshade')
 const [elevation,   setElevation]   = useState<ElevationState | null>(null)
 const [pendingPin,  setPendingPin]  = useState<{ lat: number; lng: number } | null>(null)
 const [mapReady,    setMapReady]    = useState(false)
@@ -364,28 +364,27 @@ import('leaflet').then((L) => {
   })
 })
 
-return () => {
-  cancelled = true
-  if (mapRef.current) {
-    ;(mapRef.current as import('leaflet').Map).remove()
-    mapRef.current = baseTileRef.current = labelsLayerRef.current =
-      elevLayerRef.current = pinGroupRef.current = pendingPinRef.current = null
+  return () => {
+    cancelled = true
+    if (mapRef.current) {
+      ;(mapRef.current as import('leaflet').Map).remove()
+      mapRef.current = baseTileRef.current = labelsLayerRef.current =
+        elevLayerRef.current = pinGroupRef.current = pendingPinRef.current = null
+    }
   }
-})
-
 }, [])
 
 // ── 5.2 Sync base tile layer ──────────────────────────────────────────────
 useEffect(() => {
 if (!mapReady || !mapRef.current) return
-import(‘leaflet’).then(() => {
-const map    = mapRef.current    as import(‘leaflet’).Map
-const tile   = baseTileRef.current   as import(‘leaflet’).TileLayer
-const labels = labelsLayerRef.current as import(‘leaflet’).TileLayer
+import('leaflet').then(() => {
+const map    = mapRef.current    as import('leaflet').Map
+const tile   = baseTileRef.current   as import('leaflet').TileLayer
+const labels = labelsLayerRef.current as import('leaflet').TileLayer
 const cfg    = TILE_LAYERS[layerMode]
 tile.setUrl(cfg.url)
 tile.options.maxZoom = cfg.maxZoom
-const needLabels = layerMode === ‘satellite_labels’
+const needLabels = layerMode === 'satellite_labels'
 if (needLabels  && !map.hasLayer(labels)) labels.addTo(map)
 if (!needLabels &&  map.hasLayer(labels)) labels.remove()
 })
@@ -394,10 +393,10 @@ if (!needLabels &&  map.hasLayer(labels)) labels.remove()
 // ── 5.3 Sync elevation overlay ────────────────────────────────────────────
 useEffect(() => {
 if (!mapReady || !mapRef.current) return
-import(‘leaflet’).then(() => {
-const map       = mapRef.current       as import(‘leaflet’).Map
-const elevLayer = elevLayerRef.current as import(‘leaflet’).TileLayer
-if (overlayMode === ‘none’) {
+import('leaflet').then(() => {
+const map       = mapRef.current       as import('leaflet').Map
+const elevLayer = elevLayerRef.current as import('leaflet').TileLayer
+if (overlayMode === 'none') {
 if (map.hasLayer(elevLayer)) elevLayer.remove()
 return
 }
@@ -411,29 +410,29 @@ if (!map.hasLayer(elevLayer)) elevLayer.addTo(map)
 // ── 5.4 Sync saved pins ───────────────────────────────────────────────────
 useEffect(() => {
 if (!mapReady || !pinGroupRef.current) return
-import(‘leaflet’).then((L) => {
-const group = pinGroupRef.current as import(‘leaflet’).LayerGroup
+import('leaflet').then((L) => {
+const group = pinGroupRef.current as import('leaflet').LayerGroup
 group.clearLayers()
 for (const pin of pins) {
 if (pin.latitude == null || pin.longitude == null) continue
-const color      = LOCATION_TYPE_COLORS[pin.location_type] ?? ‘#4a4f58’
+const color      = LOCATION_TYPE_COLORS[pin.location_type] ?? '#4a4f58'
 const isSelected = pin.id === selectedPinId
 const icon = L.divIcon({
 html:       buildPinSvg(color, isSelected),
 iconSize:   [28, 35],
 iconAnchor: [14, 35],
-className:  ‘’,
+className:  '',
 })
 const marker = L.marker([pin.latitude, pin.longitude], {
 icon, zIndexOffset: isSelected ? 500 : 0,
 })
-marker.on(‘click’, (e: L.LeafletMouseEvent) => {
+marker.on('click', (e: L.LeafletMouseEvent) => {
 e.originalEvent?.stopPropagation()
 onPinClick?.(pin)
 })
 marker.bindTooltip(
 `<div style="font-size:12px;font-weight:600;color:#1a1a1a">${pin.label ?? LOCATION_TYPE_LABELS[pin.location_type]}</div>`,
-{ direction: ‘top’, offset: [0, -38], className: ‘rax-map-tooltip’ },
+{ direction: 'top', offset: [0, -38], className: 'rax-map-tooltip' },
 )
 group.addLayer(marker)
 }
@@ -445,7 +444,7 @@ const handleConfirmPin = useCallback(() => {
 if (!pendingPin) return
 onMapClick?.(pendingPin.lat, pendingPin.lng)
 if (pendingPinRef.current) {
-;(pendingPinRef.current as import(‘leaflet’).Marker).remove()
+;(pendingPinRef.current as import('leaflet').Marker).remove()
 pendingPinRef.current = null
 }
 setPendingPin(null)
@@ -453,16 +452,16 @@ setPendingPin(null)
 
 const handleCancelPin = useCallback(() => {
 if (pendingPinRef.current) {
-;(pendingPinRef.current as import(‘leaflet’).Marker).remove()
+;(pendingPinRef.current as import('leaflet').Marker).remove()
 pendingPinRef.current = null
 }
 setPendingPin(null)
 setElevation(null)
 }, [])
 
-const zoomIn    = useCallback(() => (mapRef.current as import(‘leaflet’).Map | null)?.zoomIn(), [])
-const zoomOut   = useCallback(() => (mapRef.current as import(‘leaflet’).Map | null)?.zoomOut(), [])
-const resetView = useCallback(() => (mapRef.current as import(‘leaflet’).Map | null)?.setView(MAP_DEFAULTS.center, MAP_DEFAULTS.zoom), [])
+const zoomIn    = useCallback(() => (mapRef.current as import('leaflet').Map | null)?.zoomIn(), [])
+const zoomOut   = useCallback(() => (mapRef.current as import('leaflet').Map | null)?.zoomOut(), [])
+const resetView = useCallback(() => (mapRef.current as import('leaflet').Map | null)?.setView(MAP_DEFAULTS.center, MAP_DEFAULTS.zoom), [])
 
 // ─────────────────────────────────────────────────────────────────────────
 // SECTION 6 — RENDER
@@ -608,31 +607,31 @@ return (
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-return <div className=“text-[9px] font-bold uppercase tracking-[0.12em] mb-2” style={{ color: ‘rgba(180,163,145,0.45)’ }}>{children}</div>
+return <div className="text-[9px] font-bold uppercase tracking-[0.12em] mb-2" style={{ color: 'rgba(180,163,145,0.45)' }}>{children}</div>
 }
 
 function Divider() {
-return <div style={{ height: 1, background: ‘rgba(107,93,82,0.22)’ }} />
+return <div style={{ height: 1, background: 'rgba(107,93,82,0.22)' }} />
 }
 
 function PanelHeader({ icon, label, accentAmber }: { icon: React.ReactNode; label: string; accentAmber?: boolean }) {
 return (
-<div className=“px-3 py-2 flex items-center gap-2” style={{ borderBottom: ‘1px solid rgba(107,93,82,0.2)’, background: accentAmber ? ‘rgba(251,191,36,0.05)’ : ‘rgba(107,93,82,0.07)’ }}>
+<div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(107,93,82,0.2)', background: accentAmber ? 'rgba(251,191,36,0.05)' : 'rgba(107,93,82,0.07)' }}>
 {icon}
-<span className=“text-[9px] font-bold uppercase tracking-[0.12em]” style={{ color: accentAmber ? ‘rgba(251,191,36,0.65)’ : ‘rgba(180,163,145,0.55)’ }}>{label}</span>
+<span className="text-[9px] font-bold uppercase tracking-[0.12em]" style={{ color: accentAmber ? 'rgba(251,191,36,0.65)' : 'rgba(180,163,145,0.55)' }}>{label}</span>
 </div>
 )
 }
 
-function LayerButton({ active, onClick, children, accent }: { active: boolean; onClick: () => void; children: React.ReactNode; accent: ‘amber’ | ‘bronze’ }) {
-const isAmber = accent === ‘amber’
+function LayerButton({ active, onClick, children, accent }: { active: boolean; onClick: () => void; children: React.ReactNode; accent: 'amber' | 'bronze' }) {
+const isAmber = accent === 'amber'
 return (
-<button onClick={onClick} className=“flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs transition-all duration-100” style={{
-background: active ? (isAmber ? ‘rgba(251,191,36,0.1)’ : ‘rgba(139,90,43,0.14)’) : ‘transparent’,
-border:     active ? (isAmber ? ‘1px solid rgba(251,191,36,0.28)’ : ‘1px solid rgba(139,90,43,0.35)’) : ‘1px solid transparent’,
-color:      active ? (isAmber ? ‘rgba(251,191,36,0.95)’ : ‘rgba(210,170,110,0.95)’) : ‘rgba(180,163,145,0.7)’,
+<button onClick={onClick} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs transition-all duration-100" style={{
+background: active ? (isAmber ? 'rgba(251,191,36,0.1)' : 'rgba(139,90,43,0.14)') : 'transparent',
+border:     active ? (isAmber ? '1px solid rgba(251,191,36,0.28)' : '1px solid rgba(139,90,43,0.35)') : '1px solid transparent',
+color:      active ? (isAmber ? 'rgba(251,191,36,0.95)' : 'rgba(210,170,110,0.95)') : 'rgba(180,163,145,0.7)',
 }}>
-<span className=“w-2 h-2 rounded-full flex-shrink-0” style={{ background: active ? (isAmber ? ‘rgba(251,191,36,0.9)’ : ‘rgba(139,90,43,0.9)’) : ‘rgba(107,93,82,0.45)’ }} />
+<span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: active ? (isAmber ? 'rgba(251,191,36,0.9)' : 'rgba(139,90,43,0.9)') : 'rgba(107,93,82,0.45)' }} />
 {children}
 </button>
 )
@@ -663,41 +662,41 @@ return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PANEL_BASE: React.CSSProperties = {
-background:     ‘linear-gradient(145deg, rgba(20,16,12,0.98), rgba(32,26,20,0.96))’,
-border:         ‘1px solid rgba(107,93,82,0.32)’,
-boxShadow:      ‘0 8px 32px rgba(0,0,0,0.65)’,
-backdropFilter: ‘blur(12px)’,
-animation:      ‘raxFadeUp 0.15s ease-out’,
+background:     'linear-gradient(145deg, rgba(20,16,12,0.98), rgba(32,26,20,0.96))',
+border:         '1px solid rgba(107,93,82,0.32)',
+boxShadow:      '0 8px 32px rgba(0,0,0,0.65)',
+backdropFilter: 'blur(12px)',
+animation:      'raxFadeUp 0.15s ease-out',
 }
 
 const STYLES = {
 panel: PANEL_BASE,
 layerBtn: {
-background: ‘linear-gradient(145deg, rgba(26,22,18,0.96), rgba(40,34,28,0.92))’,
-border: ‘1px solid rgba(107,93,82,0.38)’, color: ‘rgba(180,163,145,0.82)’,
-boxShadow: ‘0 4px 16px rgba(0,0,0,0.5)’, backdropFilter: ‘blur(8px)’, letterSpacing: ‘0.08em’,
+background: 'linear-gradient(145deg, rgba(26,22,18,0.96), rgba(40,34,28,0.92))',
+border: '1px solid rgba(107,93,82,0.38)', color: 'rgba(180,163,145,0.82)',
+boxShadow: '0 4px 16px rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', letterSpacing: '0.08em',
 } as React.CSSProperties,
 layerBtnActive: {
-background: ‘rgba(251,191,36,0.14)’, border: ‘1px solid rgba(251,191,36,0.45)’,
-color: ‘rgba(251,191,36,1)’, boxShadow: ‘0 4px 16px rgba(0,0,0,0.5)’,
-backdropFilter: ‘blur(8px)’, letterSpacing: ‘0.08em’,
+background: 'rgba(251,191,36,0.14)', border: '1px solid rgba(251,191,36,0.45)',
+color: 'rgba(251,191,36,1)', boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+backdropFilter: 'blur(8px)', letterSpacing: '0.08em',
 } as React.CSSProperties,
 zoomBtn: {
-width: ‘36px’, height: ‘36px’, display: ‘flex’, alignItems: ‘center’,
-justifyContent: ‘center’, borderRadius: ‘8px’, fontSize: ‘16px’, fontWeight: 700,
-cursor: ‘pointer’, background: ‘linear-gradient(145deg, rgba(26,22,18,0.96), rgba(40,34,28,0.92))’,
-border: ‘1px solid rgba(107,93,82,0.38)’, color: ‘rgba(180,163,145,0.82)’,
-boxShadow: ‘0 4px 16px rgba(0,0,0,0.5)’, backdropFilter: ‘blur(8px)’, transition: ‘all 0.1s’,
+width: '36px', height: '36px', display: 'flex', alignItems: 'center',
+justifyContent: 'center', borderRadius: '8px', fontSize: '16px', fontWeight: 700,
+cursor: 'pointer', background: 'linear-gradient(145deg, rgba(26,22,18,0.96), rgba(40,34,28,0.92))',
+border: '1px solid rgba(107,93,82,0.38)', color: 'rgba(180,163,145,0.82)',
+boxShadow: '0 4px 16px rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', transition: 'all 0.1s',
 } as React.CSSProperties,
 confirmBtn: {
-flex: 1, padding: ‘6px 0’, borderRadius: ‘8px’, fontSize: ‘12px’, fontWeight: 600,
-cursor: ‘pointer’, background: ‘rgba(251,191,36,0.13)’, border: ‘1px solid rgba(251,191,36,0.38)’,
-color: ‘rgba(251,191,36,0.95)’, transition: ‘all 0.1s’,
+flex: 1, padding: '6px 0', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+cursor: 'pointer', background: 'rgba(251,191,36,0.13)', border: '1px solid rgba(251,191,36,0.38)',
+color: 'rgba(251,191,36,0.95)', transition: 'all 0.1s',
 } as React.CSSProperties,
 cancelBtn: {
-flex: 1, padding: ‘6px 0’, borderRadius: ‘8px’, fontSize: ‘12px’, fontWeight: 600,
-cursor: ‘pointer’, background: ‘transparent’, border: ‘1px solid rgba(107,93,82,0.32)’,
-color: ‘rgba(107,93,82,0.78)’, transition: ‘all 0.1s’,
+flex: 1, padding: '6px 0', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+cursor: 'pointer', background: 'transparent', border: '1px solid rgba(107,93,82,0.32)',
+color: 'rgba(107,93,82,0.78)', transition: 'all 0.1s',
 } as React.CSSProperties,
 } as const
 
