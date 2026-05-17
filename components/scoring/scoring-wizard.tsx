@@ -9,6 +9,7 @@ import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
+import { AntlerCropBox, type CropRegion } from './antler-crop-box'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
@@ -58,6 +59,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const [scanFeedback, setScanFeedback] = useState<ScanFeedback | null>(null)
   const [isDetecting, setIsDetecting] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [cropRegions, setCropRegions] = useState<Record<number, CropRegion | null>>({})
+  const [cropSkipped, setCropSkipped] = useState<Record<number, boolean>>({})
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -367,6 +370,15 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         apiFormData.append('reference_object', JSON.stringify(data.reference_object))
       }
 
+      // Antler crop regions — null where the user skipped that image
+      const cropRegionsPayload: Record<string, CropRegion | null> = {}
+      for (let index = 0; index < images.length; index++) {
+        const region = cropRegions[index]
+        const skipped = cropSkipped[index]
+        cropRegionsPayload[String(index)] = skipped || !region ? null : region
+      }
+      apiFormData.append('crop_regions', JSON.stringify(cropRegionsPayload))
+
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
         try {
@@ -606,6 +618,56 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
             ))
           }}
         />
+      )}
+
+      {/* ── 5a. Antler crop boxes (optional, per image) ─────────────────── */}
+      {gridImages.length > 0 && (
+        <Section label="Crop to Antlers (Optional)">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-mono text-muted-foreground">
+                Tighten the amber box around each rack to give the AI 4–8× more detail.
+                Each photo is independent — skip any you don&apos;t want to crop.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const skipAll: Record<number, boolean> = {}
+                  for (let i = 0; i < gridImages.length; i++) skipAll[i] = true
+                  setCropSkipped(skipAll)
+                }}
+                className="shrink-0 text-[10px] font-black tracking-widest uppercase text-muted-foreground hover:text-foreground"
+              >
+                Skip all crops
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {gridImages.map((img, index) => (
+                <AntlerCropBox
+                  key={img.id}
+                  imageUrl={img.url}
+                  region={cropRegions[index] ?? null}
+                  skipped={!!cropSkipped[index]}
+                  label={`Photo ${index + 1} — ${img.angleType}`}
+                  onChange={(region) => {
+                    setCropRegions(prev => ({ ...prev, [index]: region }))
+                  }}
+                  onSkip={() => {
+                    setCropSkipped(prev => ({ ...prev, [index]: true }))
+                  }}
+                  onUnskip={() => {
+                    setCropSkipped(prev => {
+                      const next = { ...prev }
+                      delete next[index]
+                      return next
+                    })
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </Section>
       )}
 
       {/* ── 5b. Scan validation banner ──────────────────────────────────── */}

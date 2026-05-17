@@ -55,6 +55,8 @@ export interface ImageAnalysisInput {
   angleType: AngleType
   width: number
   height: number
+  /** True when this image was server-cropped to the antler region. */
+  hasCropBox?: boolean
 }
 
 export interface ScoringInput {

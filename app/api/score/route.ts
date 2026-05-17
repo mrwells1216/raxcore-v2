@@ -4,16 +4,19 @@ import { scoreBuck, type ImageAnalysisInput } from '@/lib/scoring/ai-service'
 import { computeConfidence } from '@/lib/confidence/engine'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { AngleType, RackType, HarvestMethod, SourceType, CaptureDevice, IntakeQualitySummary, YesNoUnsure, AbnormalPointTag } from '@/lib/types'
-import { 
-  createBuck, 
-  addBuckImages, 
+import {
+  createBuck,
+  addBuckImages,
   uploadBuckImage,
+  uploadCroppedBuckImage,
   getBuckImageBucketName,
-  createPrediction, 
+  createPrediction,
   updateBuckStatus,
   getActiveModelVersion,
   getBuckImages
 } from '@/lib/storage/service'
+import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
+import type { CropRegion } from '@/components/scoring/antler-crop-box'
 import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
 import {
   createUsageRecord,
@@ -369,8 +372,61 @@ export async function POST(request: Request) {
       resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
     }
 
-    // Store the resolved URLs
+    // Store the resolved URLs (always the originals — never the cropped variants)
     await addBuckImages(buck.id, storedImageUrls)
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Antler crop boxes — server-side crop with 12% padding before AI scoring
+    // and detection. Originals remain in storedImageUrls for display, landmarks,
+    // and persistence. Any crop failure falls back silently to the original URL
+    // and records null in the metadata map. Never blocks scoring.
+    // ─────────────────────────────────────────────────────────────────────────
+    const cropRegionsRaw = formData.get('crop_regions') as string | null
+    let cropRegions: Record<string, CropRegion | null> = {}
+    if (cropRegionsRaw) {
+      try { cropRegions = JSON.parse(cropRegionsRaw) } catch { /* ignore parse error */ }
+    }
+
+    const scoringImageUrls: string[] = [...storedImageUrls]
+    const cropMetadata: Record<string, Omit<CropResult, 'croppedBuffer'> | null> = {}
+
+    for (let i = 0; i < storedImageUrls.length; i++) {
+      const key = String(i)
+      const region = cropRegions[key] ?? null
+      if (!region) {
+        cropMetadata[key] = null
+        continue
+      }
+
+      try {
+        const originalUrl = storedImageUrls[i]
+        const imgRes = await fetch(originalUrl)
+        if (!imgRes.ok) {
+          console.warn(`[crop-box] fetch failed for image ${i} (status ${imgRes.status}) — using original`)
+          cropMetadata[key] = null
+          continue
+        }
+        const imgBuf = Buffer.from(await imgRes.arrayBuffer())
+        const cropped = await cropImageToRegion(imgBuf, region)
+        if (!cropped) {
+          console.warn(`[crop-box] crop rejected for image ${i} — using original`)
+          cropMetadata[key] = null
+          continue
+        }
+
+        const croppedUrl = await uploadCroppedBuckImage(buck.id, cropped.croppedBuffer, i)
+        scoringImageUrls[i] = croppedUrl
+
+        // Strip the buffer before serializing to JSONB
+        const { croppedBuffer: _unused, ...metaForStorage } = cropped
+        void _unused
+        cropMetadata[key] = metaForStorage
+        resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
+      } catch (err) {
+        console.warn(`[crop-box] crop failed for image ${i}, using original:`, err)
+        cropMetadata[key] = null
+      }
+    }
 
     // P1: LiDAR depth auto-calibration — extract from first image if HEIC
     let depthCalibration: DepthCalibrationResult | null = null
@@ -402,8 +458,8 @@ export async function POST(request: Request) {
     let detectionSummary: MultiImageDetectionResult | null = null
     
     try {
-      console.log('[score] starting detection phase', { imageCount: storedImageUrls.length })
-      const detectionImages = await detectRackWithOpenAI(storedImageUrls)
+      console.log('[score] starting detection phase', { imageCount: scoringImageUrls.length })
+      const detectionImages = await detectRackWithOpenAI(scoringImageUrls)
       detectionSummary = buildMultiImageDetectionSummary(detectionImages)
       
       console.log('[score] detection complete', {
@@ -760,6 +816,9 @@ export async function POST(request: Request) {
         measurementGraph: detectionSummary?.graph ?? undefined,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
+      cropBoxMetadata: Object.keys(cropMetadata).length > 0
+        ? (cropMetadata as Record<string, unknown>)
+        : null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
         try {
           return JSON.parse(imageDiagnosticsSummaryRaw)
