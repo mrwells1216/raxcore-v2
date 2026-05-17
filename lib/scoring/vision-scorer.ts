@@ -91,6 +91,7 @@ export interface VisionScoringInput {
   mainFramePoints?: number
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -330,6 +331,21 @@ RING REFERENCE (user-reported, estimated only)
 `
       : ''
 
+  const aruco = input.arucoDetection
+  const arucoBlock =
+    aruco?.detected && aruco.pixelsPerInch && aruco.markerSizeInches
+      ? `
+ARUCO MARKER DETECTED
+- A printed ArUco calibration marker is visible in this image.
+- Marker size: ${aruco.markerSizeInches}" × ${aruco.markerSizeInches}"
+- Detected pixel size: ${aruco.sidePixels?.toFixed(1) ?? '—'} px per side
+- Calibration: ${aruco.pixelsPerInch.toFixed(1)} px/in (confidence: ${(aruco.confidence * 100).toFixed(0)}%)
+- Use this as a high-confidence scale reference.
+- If the marker appears angled or folded, apply a confidence penalty to scale-dependent measurements.
+${aruco.warnings.length > 0 ? `- Warnings: ${aruco.warnings.join('; ')}` : ''}
+`
+      : ''
+
   const hat = input.referenceObject?.hat
   const hatReferenceBlock =
     hat?.present && hat.hatType
@@ -363,6 +379,7 @@ IMAGES PROVIDED:
 ${angleDescriptions}
 ${cropNote}
 ${precisionReferenceBlock}
+${arucoBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}
 

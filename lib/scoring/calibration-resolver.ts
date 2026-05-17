@@ -2,6 +2,7 @@ import 'server-only'
 import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
 import type { LandmarkDetection } from './landmark-detection'
 import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
+import type { ArucoDetectionResult } from './aruco-types'
 
 // Known whitetail anatomical references (inches)
 const ANATOMICAL_REFERENCES = {
@@ -9,9 +10,15 @@ const ANATOMICAL_REFERENCES = {
   PEDICLE_SPACING: 4.0,    // typical inter-pedicle spacing
 }
 
+export type CalibrationSource =
+  | 'depth_map_lidar'
+  | 'aruco_marker'
+  | 'reference_object'
+  | 'anatomical_prior'
+
 export interface CalibrationResult {
   pixelsPerInch: number
-  source: 'depth_map_lidar' | 'reference_object' | 'anatomical_prior'
+  source: CalibrationSource
   confidence: number
   method: string
   warnings: string[]
@@ -23,19 +30,27 @@ export interface ReferenceObjectInput {
   pixelSize: number | null
 }
 
+export interface ResolveCalibrationOptions {
+  landmarks: LandmarkDetection[]
+  depthCalibration?: DepthCalibrationResult | null
+  referenceObject?: ReferenceObjectInput | null
+  arucoResult?: ArucoDetectionResult | null
+}
+
 /**
  * Resolve the best available pixelsPerInch calibration.
  *
  * Priority:
- *   1. LiDAR depth map + EXIF (highest)
- *   2. Reference object (ring, hat, ruler)
- *   3. Anatomical priors (eye spacing, pedicle spacing)
+ *   1. LiDAR depth map + EXIF                      (auto, very high)
+ *   2. ArUco marker (GPT-4o detected, conf > 0.5)  (printed marker, auto)
+ *   3. Reference object (ring, hat, ruler)         (user-declared size)
+ *   4. Anatomical priors (eye, pedicle spacing)    (always-on fallback)
  */
 export function resolveCalibration(
-  landmarks: LandmarkDetection[],
-  depthCalibration: DepthCalibrationResult | null,
-  referenceObject: ReferenceObjectInput | null,
+  options: ResolveCalibrationOptions,
 ): CalibrationResult | null {
+  const { landmarks, depthCalibration, referenceObject, arucoResult } = options
+
   // Priority 1: LiDAR depth calibration
   if (
     depthCalibration &&
@@ -52,7 +67,27 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 2: Reference object
+  // Priority 2: ArUco marker (printed, GPT-4o detected)
+  if (
+    arucoResult &&
+    arucoResult.detected &&
+    isFiniteNumber(arucoResult.pixelsPerInch) &&
+    arucoResult.pixelsPerInch > 0 &&
+    arucoResult.confidence > 0.5
+  ) {
+    const sizeLabel = isFiniteNumber(arucoResult.markerSizeInches)
+      ? `${arucoResult.markerSizeInches}" marker`
+      : 'ArUco marker'
+    return {
+      pixelsPerInch: arucoResult.pixelsPerInch,
+      source: 'aruco_marker',
+      confidence: arucoResult.confidence,
+      method: `${sizeLabel} (${arucoResult.method})`,
+      warnings: arucoResult.warnings,
+    }
+  }
+
+  // Priority 3: Reference object
   if (
     referenceObject &&
     referenceObject.type !== 'none' &&
@@ -75,7 +110,7 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 3: Anatomical priors from landmarks
+  // Priority 4: Anatomical priors from landmarks
   return resolveAnatomicalPrior(landmarks)
 }
 

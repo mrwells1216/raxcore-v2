@@ -73,6 +73,7 @@ export interface ScoringInput {
   calibrationProfile?: CalibrationProfile | null
   precisionReferenceProfile?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -765,6 +766,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     mainFramePoints: input.mainFramePoints,
     precisionReference: input.precisionReferenceProfile,
     referenceObject: input.referenceObject ?? undefined,
+    arucoDetection: input.arucoDetection ?? undefined,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 

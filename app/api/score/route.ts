@@ -56,6 +56,9 @@ import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/li
 import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
 import type { CropRegion } from '@/components/scoring/antler-crop-box'
 import { getServiceSupabase } from '@/lib/supabase/admin'
+import { detectArucoMarker } from '@/lib/calibration/aruco-detector'
+import type { ArucoDetectionResult } from '@/lib/scoring/aruco-types'
+import sharp from 'sharp'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -468,6 +471,7 @@ export async function POST(request: Request) {
 
     // P1: LiDAR depth auto-calibration — extract from first image if HEIC
     let depthCalibration: DepthCalibrationResult | null = null
+    let arucoResult: ArucoDetectionResult | null = null
     try {
       const firstImageUrl = storedImageUrls[0]
       if (firstImageUrl) {
@@ -480,6 +484,42 @@ export async function POST(request: Request) {
           ])
           if (depthResult && exifResult) {
             depthCalibration = computeDepthCalibration(depthResult, exifResult)
+          }
+
+          // ArUco marker detection — runs on the ORIGINAL first image
+          // (never the user-drawn crop). Only when the user selected the
+          // aruco_marker reference type and entered a marker size.
+          if (referenceTypeRaw === 'aruco_marker' && referenceSizeValueRaw) {
+            const sizeValue = Number(referenceSizeValueRaw)
+            const unit = (referenceSizeUnitRaw ?? 'in') as 'in' | 'cm' | 'mm'
+            const sizeInches =
+              unit === 'cm' ? sizeValue / 2.54
+              : unit === 'mm' ? sizeValue / 25.4
+              : sizeValue
+            if (Number.isFinite(sizeInches) && sizeInches > 0) {
+              try {
+                const meta = await sharp(imgBuf).metadata()
+                arucoResult = await detectArucoMarker({
+                  markerSizeInches: sizeInches,
+                  imageBuffer: imgBuf,
+                  imageWidth: meta.width ?? 0,
+                  imageHeight: meta.height ?? 0,
+                })
+                if (arucoResult.detected) {
+                  console.log('[aruco] detected', {
+                    pixelsPerInch: arucoResult.pixelsPerInch?.toFixed(1),
+                    sidePixels: arucoResult.sidePixels?.toFixed(1),
+                    confidence: arucoResult.confidence,
+                    method: arucoResult.method,
+                    warnings: arucoResult.warnings,
+                  })
+                } else {
+                  console.log('[aruco] no marker detected', { warnings: arucoResult.warnings })
+                }
+              } catch (arErr) {
+                console.warn('[aruco] detection failed (non-blocking):', arErr)
+              }
+            }
           }
         }
       }
@@ -618,6 +658,7 @@ export async function POST(request: Request) {
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
+      arucoDetection: arucoResult,
       traceId: requestId,
     })
 
@@ -854,6 +895,8 @@ export async function POST(request: Request) {
         measurementGraph: detectionSummary?.graph ?? undefined,
         // User-drawn antler crop regions (per-image)
         cropBoxMetadata: anyCropApplied ? { perImage: cropMetadata, anyCropApplied: true } : null,
+        // ArUco marker detection (printed reference)
+        arucoDetection: arucoResult,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -866,6 +909,7 @@ export async function POST(request: Request) {
       cropBoxMetadata: anyCropApplied
         ? { perImage: cropMetadata, anyCropApplied: true }
         : null,
+      arucoDetectionMetadata: arucoResult,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -886,11 +930,12 @@ export async function POST(request: Request) {
     try {
       landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls)
       if (landmarkDetectionResult) {
-        const calibration = resolveCalibration(
-          landmarkDetectionResult.landmarks,
+        const calibration = resolveCalibration({
+          landmarks: landmarkDetectionResult.landmarks,
           depthCalibration,
-          null,
-        )
+          referenceObject: null,
+          arucoResult,
+        })
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             landmarkDetectionResult.landmarks,
@@ -1178,6 +1223,7 @@ export async function POST(request: Request) {
       cropBoxMetadata: anyCropApplied
         ? { perImage: cropMetadata, anyCropApplied: true }
         : null,
+      arucoDetection: arucoResult,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

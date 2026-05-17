@@ -863,12 +863,59 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
               )}
 
               {watchReferenceType === 'aruco_marker' && (
-                <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
-                  <a href="/precision-marker" target="_blank" rel="noreferrer">
-                    <Printer className="h-3.5 w-3.5" />
-                    Print marker
-                  </a>
-                </Button>
+                <div className="space-y-2 p-3 rounded-lg"
+                  style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
+                  <p className="text-[10px] text-muted-foreground">
+                    Tap a common size or enter a custom value above. Measure the black outer border corner-to-corner.
+                  </p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[2, 3, 4, 5, 6].map(size => {
+                      const selected =
+                        watchReferenceSizeValue === size &&
+                        (watchReferenceSizeUnit ?? 'in') === 'in'
+                      return (
+                        <button
+                          key={size}
+                          type="button"
+                          onClick={() => {
+                            form.setValue('reference_size_value', size, { shouldDirty: true })
+                            form.setValue('reference_size_unit', 'in', { shouldDirty: true })
+                          }}
+                          className="px-3 py-1.5 rounded-md text-xs font-bold border transition-all touch-manipulation min-h-[36px]"
+                          style={{
+                            background: selected ? 'rgba(251,191,36,0.12)' : 'transparent',
+                            border: selected
+                              ? '1px solid rgba(251,191,36,0.35)'
+                              : '1px solid rgba(107,93,82,0.3)',
+                            color: selected
+                              ? 'rgba(251,191,36,0.95)'
+                              : 'rgba(180,163,145,0.75)',
+                          }}
+                        >
+                          {size}&quot;
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
+                    <a href="/precision-marker" target="_blank" rel="noreferrer">
+                      <Printer className="h-3.5 w-3.5" />
+                      Print marker
+                    </a>
+                  </Button>
+                  <p className="text-[10px]" style={{ color: 'rgba(107,93,82,0.65)' }}>
+                    Or{' '}
+                    <a
+                      href="https://chev.me/arucogen/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'rgba(251,191,36,0.75)', textDecoration: 'underline' }}
+                    >
+                      generate a free ArUco marker
+                    </a>
+                    {' '}— print at your chosen size, place flat near the antlers.
+                  </p>
+                </div>
               )}
 
               {referenceModeSummary.referencePresent && (
