@@ -323,7 +323,7 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
 
       // Re-add overlay on top
       if (overlayLayerRef.current) {
-        ;(overlayLayerRef.current as L.Layer).bringToFront()
+        ;(overlayLayerRef.current as L.TileLayer).bringToFront()
       }
     }
 

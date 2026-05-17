@@ -55,7 +55,7 @@ export interface ImageAnalysisInput {
   angleType: AngleType
   width: number
   height: number
-  /** True when this image was server-cropped to the antler region. */
+  /** True when the user drew a crop box and this image is the cropped version */
   hasCropBox?: boolean
 }
 
@@ -73,6 +73,15 @@ export interface ScoringInput {
   calibrationProfile?: CalibrationProfile | null
   precisionReferenceProfile?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
+  pedicleCalibration?: {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelsPerInch: number
+    confidence: number
+    knownSpacingInches: number | null
+    source: 'user_placed_known' | 'user_placed_anatomical'
+  } | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -765,6 +774,8 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     mainFramePoints: input.mainFramePoints,
     precisionReference: input.precisionReferenceProfile,
     referenceObject: input.referenceObject ?? undefined,
+    arucoDetection: input.arucoDetection ?? undefined,
+    pedicleCalibration: input.pedicleCalibration ?? undefined,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 

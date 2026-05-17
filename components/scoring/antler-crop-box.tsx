@@ -1,8 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { cn } from '@/lib/utils'
 
 export interface CropRegion {
+  /** Normalized 0..1 relative to displayed image dimensions */
   x: number
   y: number
   width: number
@@ -11,308 +13,341 @@ export interface CropRegion {
 
 interface AntlerCropBoxProps {
   imageUrl: string
-  region: CropRegion | null
-  skipped: boolean
-  onChange: (region: CropRegion) => void
-  onSkip: () => void
-  onUnskip?: () => void
+  onCrop: (region: CropRegion) => void
+  onClear: () => void
+  initialRegion?: CropRegion | null
+  /** Optional label for the photo (e.g. "Front") */
   label?: string
 }
 
-type DragMode =
-  | { kind: 'none' }
-  | { kind: 'move'; startX: number; startY: number; origin: CropRegion }
-  | { kind: 'resize'; handle: HandleId; origin: CropRegion; startX: number; startY: number }
+type Mode =
+  | { kind: 'idle' }
+  | { kind: 'drawing'; startX: number; startY: number }
+  | { kind: 'moving'; offsetX: number; offsetY: number }
+  | { kind: 'resizing'; handle: ResizeHandle }
 
-type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+type ResizeHandle =
+  | 'nw' | 'n' | 'ne'
+  | 'w'        | 'e'
+  | 'sw' | 's' | 'se'
 
-const DEFAULT_REGION: CropRegion = { x: 0.15, y: 0.15, width: 0.7, height: 0.7 }
-const MIN_DIMENSION = 0.1
+const MIN_SIZE = 0.10
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
+function clamp01(v: number): number {
+  if (v < 0) return 0
+  if (v > 1) return 1
+  return v
 }
 
-function clampRegion(r: CropRegion): CropRegion {
-  const width = clamp(r.width, MIN_DIMENSION, 1)
-  const height = clamp(r.height, MIN_DIMENSION, 1)
-  const x = clamp(r.x, 0, 1 - width)
-  const y = clamp(r.y, 0, 1 - height)
-  return { x, y, width, height }
+function normalizeRegion(r: CropRegion): CropRegion {
+  let x = clamp01(r.x)
+  let y = clamp01(r.y)
+  let w = clamp01(r.width)
+  let h = clamp01(r.height)
+  if (w < MIN_SIZE) w = MIN_SIZE
+  if (h < MIN_SIZE) h = MIN_SIZE
+  if (x + w > 1) x = 1 - w
+  if (y + h > 1) y = 1 - h
+  return { x, y, width: w, height: h }
 }
 
 export function AntlerCropBox({
   imageUrl,
-  region,
-  skipped,
-  onChange,
-  onSkip,
-  onUnskip,
+  onCrop,
+  onClear,
+  initialRegion = null,
   label,
 }: AntlerCropBoxProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<DragMode>({ kind: 'none' })
-  const [, forceRender] = useState(0)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [region, setRegion] = useState<CropRegion | null>(initialRegion)
+  const [mode, setMode] = useState<Mode>({ kind: 'idle' })
+  const [committed, setCommitted] = useState<boolean>(Boolean(initialRegion))
 
-  const activeRegion = region ?? DEFAULT_REGION
-
-  useEffect(() => {
-    if (!region && !skipped) {
-      onChange(DEFAULT_REGION)
-    }
-  }, [region, skipped, onChange])
-
-  const getRelativePoint = useCallback((clientX: number, clientY: number) => {
+  // Compute normalized pointer coordinates relative to the container
+  const pointToNormalized = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current
     if (!el) return { x: 0, y: 0 }
     const rect = el.getBoundingClientRect()
     return {
-      x: clamp((clientX - rect.left) / rect.width, 0, 1),
-      y: clamp((clientY - rect.top) / rect.height, 0, 1),
+      x: clamp01((clientX - rect.left) / rect.width),
+      y: clamp01((clientY - rect.top) / rect.height),
     }
   }, [])
 
-  const handlePointerMove = useCallback(
-    (e: PointerEvent) => {
-      const mode = dragRef.current
-      if (mode.kind === 'none') return
-      const p = getRelativePoint(e.clientX, e.clientY)
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return
+      const target = e.target as HTMLElement
+      const handle = target.dataset.handle as ResizeHandle | undefined
+      const isBoxBody = target.dataset.role === 'box-body'
+      const el = containerRef.current
+      if (!el) return
+      el.setPointerCapture(e.pointerId)
 
-      if (mode.kind === 'move') {
-        const dx = p.x - mode.startX
-        const dy = p.y - mode.startY
-        onChange(
-          clampRegion({
-            x: mode.origin.x + dx,
-            y: mode.origin.y + dy,
-            width: mode.origin.width,
-            height: mode.origin.height,
-          }),
-        )
+      const p = pointToNormalized(e.clientX, e.clientY)
+
+      if (handle && region) {
+        setMode({ kind: 'resizing', handle })
+        setCommitted(false)
+        return
+      }
+      if (isBoxBody && region) {
+        setMode({
+          kind: 'moving',
+          offsetX: p.x - region.x,
+          offsetY: p.y - region.y,
+        })
+        setCommitted(false)
+        return
+      }
+      // Draw a new box from this point
+      setRegion({ x: p.x, y: p.y, width: 0, height: 0 })
+      setMode({ kind: 'drawing', startX: p.x, startY: p.y })
+      setCommitted(false)
+    },
+    [pointToNormalized, region],
+  )
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (mode.kind === 'idle') return
+      const p = pointToNormalized(e.clientX, e.clientY)
+
+      if (mode.kind === 'drawing') {
+        const x = Math.min(mode.startX, p.x)
+        const y = Math.min(mode.startY, p.y)
+        const width = Math.abs(p.x - mode.startX)
+        const height = Math.abs(p.y - mode.startY)
+        setRegion({ x, y, width, height })
         return
       }
 
-      if (mode.kind === 'resize') {
-        const o = mode.origin
-        let { x, y, width, height } = o
-        const right = o.x + o.width
-        const bottom = o.y + o.height
+      if (mode.kind === 'moving' && region) {
+        const x = clamp01(p.x - mode.offsetX)
+        const y = clamp01(p.y - mode.offsetY)
+        setRegion({
+          x: Math.min(x, 1 - region.width),
+          y: Math.min(y, 1 - region.height),
+          width: region.width,
+          height: region.height,
+        })
+        return
+      }
 
-        if (mode.handle.includes('n')) {
-          y = clamp(p.y, 0, bottom - MIN_DIMENSION)
-          height = bottom - y
-        }
-        if (mode.handle.includes('s')) {
-          height = clamp(p.y - o.y, MIN_DIMENSION, 1 - o.y)
-        }
+      if (mode.kind === 'resizing' && region) {
+        const next = { ...region }
+        const right = region.x + region.width
+        const bottom = region.y + region.height
         if (mode.handle.includes('w')) {
-          x = clamp(p.x, 0, right - MIN_DIMENSION)
-          width = right - x
+          const newX = Math.min(p.x, right - MIN_SIZE)
+          next.x = clamp01(newX)
+          next.width = right - next.x
         }
         if (mode.handle.includes('e')) {
-          width = clamp(p.x - o.x, MIN_DIMENSION, 1 - o.x)
+          const newRight = Math.max(p.x, region.x + MIN_SIZE)
+          next.width = clamp01(newRight) - next.x
         }
-        onChange(clampRegion({ x, y, width, height }))
+        if (mode.handle.includes('n')) {
+          const newY = Math.min(p.y, bottom - MIN_SIZE)
+          next.y = clamp01(newY)
+          next.height = bottom - next.y
+        }
+        if (mode.handle.includes('s')) {
+          const newBottom = Math.max(p.y, region.y + MIN_SIZE)
+          next.height = clamp01(newBottom) - next.y
+        }
+        setRegion(next)
       }
     },
-    [getRelativePoint, onChange],
+    [mode, pointToNormalized, region],
   )
 
-  const endDrag = useCallback(() => {
-    if (dragRef.current.kind !== 'none') {
-      dragRef.current = { kind: 'none' }
-      forceRender((n) => n + 1)
-    }
-    window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
-  }, [handlePointerMove])
-
-  const startDrag = useCallback(
-    (mode: DragMode) => {
-      dragRef.current = mode
-      window.addEventListener('pointermove', handlePointerMove)
-      window.addEventListener('pointerup', endDrag)
-      window.addEventListener('pointercancel', endDrag)
-      forceRender((n) => n + 1)
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const el = containerRef.current
+      if (el && el.hasPointerCapture(e.pointerId)) {
+        el.releasePointerCapture(e.pointerId)
+      }
+      if (mode.kind === 'drawing' && region) {
+        if (region.width < MIN_SIZE || region.height < MIN_SIZE) {
+          setRegion(null)
+        } else {
+          setRegion(normalizeRegion(region))
+        }
+      } else if ((mode.kind === 'moving' || mode.kind === 'resizing') && region) {
+        setRegion(normalizeRegion(region))
+      }
+      setMode({ kind: 'idle' })
     },
-    [endDrag, handlePointerMove],
+    [mode, region],
   )
 
-  useEffect(() => () => endDrag(), [endDrag])
+  useEffect(() => {
+    if (!initialRegion) return
+    setRegion(initialRegion)
+    setCommitted(true)
+  }, [initialRegion])
 
-  const handleBodyPointerDown = (e: React.PointerEvent) => {
-    if (skipped) return
-    e.preventDefault()
-    const p = getRelativePoint(e.clientX, e.clientY)
-    startDrag({
-      kind: 'move',
-      startX: p.x,
-      startY: p.y,
-      origin: activeRegion,
-    })
+  const commit = () => {
+    if (!region) return
+    const final = normalizeRegion(region)
+    setRegion(final)
+    setCommitted(true)
+    onCrop(final)
   }
 
-  const handleHandlePointerDown = (handle: HandleId) => (e: React.PointerEvent) => {
-    if (skipped) return
-    e.preventDefault()
-    e.stopPropagation()
-    const p = getRelativePoint(e.clientX, e.clientY)
-    startDrag({
-      kind: 'resize',
-      handle,
-      origin: activeRegion,
-      startX: p.x,
-      startY: p.y,
-    })
+  const clear = () => {
+    setRegion(null)
+    setCommitted(false)
+    onClear()
   }
 
-  const widthPct = Math.round(activeRegion.width * 100)
-  const heightPct = Math.round(activeRegion.height * 100)
+  const pctW = region ? Math.round(region.width * 100) : 0
+  const pctH = region ? Math.round(region.height * 100) : 0
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {label && (
-        <div className="flex items-center justify-between">
-          <span
-            className="text-[10px] font-black tracking-[0.18em] uppercase"
-            style={{ color: 'var(--bronze-light)' }}
-          >
-            {label}
-          </span>
-          {skipped ? (
-            <button
-              type="button"
-              onClick={onUnskip}
-              className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            >
-              Use crop box
-            </button>
-          ) : (
-            <span className="text-[10px] font-mono text-muted-foreground">
-              {widthPct}% × {heightPct}%
-            </span>
-          )}
-        </div>
+        <p className="text-[11px] font-mono tracking-widest uppercase text-muted-foreground">
+          {label}
+        </p>
       )}
-
       <div
         ref={containerRef}
-        className="relative w-full overflow-hidden rounded select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        className={cn(
+          'relative w-full select-none touch-none overflow-hidden rounded',
+          !region && 'cursor-crosshair',
+        )}
         style={{
+          aspectRatio: '4 / 3',
+          background: '#0f0d0b',
           border: '1px solid var(--bronze-dark)',
-          background: '#0d0a06',
-          touchAction: 'none',
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
-          alt="Crop preview"
+          alt="Photo to crop"
           draggable={false}
-          className="block w-full h-auto pointer-events-none"
-          style={{ opacity: skipped ? 0.55 : 1 }}
+          className="absolute inset-0 h-full w-full object-contain pointer-events-none"
         />
 
-        {skipped && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span
-              className="text-[10px] font-black tracking-[0.2em] uppercase px-2 py-1 rounded"
-              style={{
-                color: 'var(--bronze-light)',
-                background: 'rgba(0,0,0,0.55)',
-                border: '1px solid var(--bronze-dark)',
-              }}
-            >
-              Using full photo
-            </span>
+        {!region && (
+          <div className="absolute inset-3 rounded border-2 border-dashed border-amber-400/60 pointer-events-none animate-pulse flex items-center justify-center">
+            <div className="bg-black/60 px-3 py-2 rounded text-center">
+              <p className="text-[12px] font-bold text-amber-200">
+                Draw a box around the antlers
+              </p>
+              <p className="text-[10px] font-mono text-amber-100/70 mt-1">
+                Drag from one burr base to the opposite beam tip
+              </p>
+            </div>
           </div>
         )}
 
-        {!skipped && (
+        {region && (
           <>
+            {/* Dim overlay outside the crop */}
             <div
               className="absolute inset-0 pointer-events-none"
               style={{
-                background: `linear-gradient(rgba(0,0,0,0.45),rgba(0,0,0,0.45))`,
-                WebkitMaskImage: `linear-gradient(#000,#000), linear-gradient(#000,#000)`,
-                WebkitMaskComposite: 'xor' as unknown as string,
+                background: `linear-gradient(0deg, rgba(0,0,0,0.45), rgba(0,0,0,0.45))`,
+                WebkitMaskImage: `linear-gradient(#000, #000), linear-gradient(#000, #000)`,
+                WebkitMaskComposite: 'destination-out',
+                maskImage: `linear-gradient(#000, #000)`,
+                clipPath: `polygon(
+                  0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+                  ${region.x * 100}% ${region.y * 100}%,
+                  ${region.x * 100}% ${(region.y + region.height) * 100}%,
+                  ${(region.x + region.width) * 100}% ${(region.y + region.height) * 100}%,
+                  ${(region.x + region.width) * 100}% ${region.y * 100}%,
+                  ${region.x * 100}% ${region.y * 100}%
+                )`,
               }}
             />
+            {/* The box */}
             <div
-              className="absolute"
+              data-role="box-body"
+              className="absolute cursor-move border-2 border-dashed border-amber-400"
               style={{
-                left: `${activeRegion.x * 100}%`,
-                top: `${activeRegion.y * 100}%`,
-                width: `${activeRegion.width * 100}%`,
-                height: `${activeRegion.height * 100}%`,
-                boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
-                outline: '2px dashed var(--bronze-light)',
-                outlineOffset: -1,
-                background: 'rgba(212,168,75,0.10)',
-                cursor: 'move',
-                touchAction: 'none',
+                left: `${region.x * 100}%`,
+                top: `${region.y * 100}%`,
+                width: `${region.width * 100}%`,
+                height: `${region.height * 100}%`,
+                background: 'rgba(245, 175, 60, 0.10)',
+                boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
               }}
-              onPointerDown={handleBodyPointerDown}
             >
-              {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as HandleId[]).map((h) => (
-                <Handle key={h} id={h} onPointerDown={handleHandlePointerDown(h)} />
+              <div className="absolute -top-6 left-0 bg-black/80 px-2 py-0.5 rounded text-[10px] font-mono text-amber-200 whitespace-nowrap pointer-events-none">
+                {pctW}% × {pctH}% of photo
+              </div>
+              {(['nw','n','ne','w','e','sw','s','se'] as ResizeHandle[]).map((h) => (
+                <span
+                  key={h}
+                  data-handle={h}
+                  className="absolute h-3 w-3 -m-1.5 bg-amber-300 border border-black/60 rounded-sm"
+                  style={handlePosition(h)}
+                />
               ))}
             </div>
           </>
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[11px] font-mono">
-        <p className="text-muted-foreground">
-          {skipped
-            ? 'Skipped — original photo will be sent to scoring.'
-            : 'Drag the box to cover the antlers. Resize with the corner handles.'}
-        </p>
-        {!skipped && (
-          <button
-            type="button"
-            onClick={onSkip}
-            className="uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            Skip — use full photo
-          </button>
-        )}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={commit}
+          disabled={!region || (region.width < MIN_SIZE || region.height < MIN_SIZE)}
+          className="flex-1 min-h-[40px] rounded text-xs font-black tracking-widest uppercase transition-all touch-manipulation"
+          style={
+            region && region.width >= MIN_SIZE && region.height >= MIN_SIZE
+              ? {
+                  background: committed
+                    ? 'linear-gradient(180deg, #2d2719, #1f1a12)'
+                    : 'linear-gradient(180deg, var(--bronze-light), var(--bronze-mid), var(--bronze-dark))',
+                  color: committed ? 'var(--bronze-light)' : '#161412',
+                  boxShadow: committed
+                    ? 'inset 0 2px 4px rgba(0,0,0,0.45)'
+                    : '0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 3px 14px rgba(0,0,0,0.55)',
+                  border: committed ? '1px solid var(--bronze-dark)' : 'none',
+                }
+              : {
+                  background: '#252118',
+                  color: 'var(--muted-foreground)',
+                  cursor: 'not-allowed',
+                  boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.40)',
+                }
+          }
+        >
+          {committed ? 'Region saved · tap to update' : 'Score this region'}
+        </button>
+        <button
+          type="button"
+          onClick={clear}
+          className="min-h-[40px] px-4 rounded text-xs font-bold tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors touch-manipulation"
+          style={{ border: '1px solid var(--bronze-dark)', background: '#1a1714' }}
+        >
+          {region ? 'Clear' : 'Use full photo'}
+        </button>
       </div>
     </div>
   )
 }
 
-function Handle({
-  id,
-  onPointerDown,
-}: {
-  id: HandleId
-  onPointerDown: (e: React.PointerEvent) => void
-}) {
-  const positions: Record<HandleId, React.CSSProperties> = {
-    nw: { top: -6, left: -6, cursor: 'nwse-resize' },
-    n: { top: -6, left: '50%', marginLeft: -6, cursor: 'ns-resize' },
-    ne: { top: -6, right: -6, cursor: 'nesw-resize' },
-    e: { top: '50%', right: -6, marginTop: -6, cursor: 'ew-resize' },
-    se: { bottom: -6, right: -6, cursor: 'nwse-resize' },
-    s: { bottom: -6, left: '50%', marginLeft: -6, cursor: 'ns-resize' },
-    sw: { bottom: -6, left: -6, cursor: 'nesw-resize' },
-    w: { top: '50%', left: -6, marginTop: -6, cursor: 'ew-resize' },
+function handlePosition(h: ResizeHandle): React.CSSProperties {
+  switch (h) {
+    case 'nw': return { left: 0, top: 0, cursor: 'nwse-resize' }
+    case 'n':  return { left: '50%', top: 0, cursor: 'ns-resize' }
+    case 'ne': return { right: 0, top: 0, cursor: 'nesw-resize' }
+    case 'w':  return { left: 0, top: '50%', cursor: 'ew-resize' }
+    case 'e':  return { right: 0, top: '50%', cursor: 'ew-resize' }
+    case 'sw': return { left: 0, bottom: 0, cursor: 'nesw-resize' }
+    case 's':  return { left: '50%', bottom: 0, cursor: 'ns-resize' }
+    case 'se': return { right: 0, bottom: 0, cursor: 'nwse-resize' }
   }
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      style={{
-        position: 'absolute',
-        width: 12,
-        height: 12,
-        background: 'var(--bronze-light)',
-        border: '1px solid #0d0a06',
-        borderRadius: 2,
-        touchAction: 'none',
-        ...positions[id],
-      }}
-    />
-  )
 }

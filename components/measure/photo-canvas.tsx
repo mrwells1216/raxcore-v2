@@ -16,6 +16,7 @@ import {
   type FieldId,
   type Point2D,
 } from './measure-store'
+import { refineToSubPixelEdge } from '@/lib/measure/subpixel-refine'
 import { curveAccuracyWarning } from '@/lib/advanced-scoring/geometry'
 
 const SNAP_RADIUS = 12
@@ -86,6 +87,10 @@ export function PhotoCanvas() {
   // and prevent unnecessary re-renders on each click.
   const dblTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Offscreen canvas cache for sub-pixel edge refinement (built once per image)
+  const refineCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const refineCtxRef = useRef<CanvasRenderingContext2D | null>(null)
+
   const {
     photoDataUrl, photoFilter,
     mode, activeField, calibration,
@@ -121,6 +126,30 @@ export function PhotoCanvas() {
     if (!htmlImage) return
     setFilteredEl(applyFilter(htmlImage, photoFilter))
   }, [htmlImage, photoFilter])
+
+  // Build a cached offscreen canvas of the natural-size image once, used
+  // by the click handler for sub-pixel edge refinement getImageData calls.
+  useEffect(() => {
+    if (!htmlImage) {
+      refineCanvasRef.current = null
+      refineCtxRef.current = null
+      return
+    }
+    try {
+      const c = document.createElement('canvas')
+      c.width = htmlImage.naturalWidth
+      c.height = htmlImage.naturalHeight
+      const ctx = c.getContext('2d', { willReadFrequently: true })
+      if (!ctx) return
+      ctx.drawImage(htmlImage, 0, 0)
+      refineCanvasRef.current = c
+      refineCtxRef.current = ctx
+    } catch {
+      // Cross-origin or canvas-tainted — refinement falls back to raw click
+      refineCanvasRef.current = null
+      refineCtxRef.current = null
+    }
+  }, [htmlImage])
 
   // Auto-fit on load
   useEffect(() => {
@@ -210,11 +239,43 @@ export function PhotoCanvas() {
         return
       }
 
+      // Sub-pixel edge refinement on the cached natural-size canvas.
+      // If the click landed on (or near) a high-contrast edge, snap the
+      // recorded coordinate to the true sub-pixel edge position. Falls
+      // back to the raw click whenever the math or the read fails.
+      let refinedRaw: Point2D = raw
+      const ctx = refineCtxRef.current
+      const cnv = refineCanvasRef.current
+      if (ctx && cnv) {
+        try {
+          const REGION = 20
+          const ix = Math.round(raw.x)
+          const iy = Math.round(raw.y)
+          const sx = Math.max(0, ix - REGION)
+          const sy = Math.max(0, iy - REGION)
+          const sw = Math.min(cnv.width - sx, REGION * 2)
+          const sh = Math.min(cnv.height - sy, REGION * 2)
+          if (sw > 8 && sh > 8) {
+            const imgData = ctx.getImageData(sx, sy, sw, sh)
+            const refined = refineToSubPixelEdge(
+              { data: imgData.data, width: imgData.width, height: imgData.height },
+              raw.x - sx,
+              raw.y - sy,
+            )
+            if (refined.refined) {
+              refinedRaw = { x: sx + refined.x, y: sy + refined.y }
+            }
+          }
+        } catch {
+          // ignore — fall back to raw click
+        }
+      }
+
       // Snap to existing points across all fields
       const all: Point2D[] = []
       const state = useMeasureStore.getState()
       for (const fd of FIELD_DEFS) all.push(...state.measurements2D[fd.id].points)
-      const snapped = snapPoint(raw, all, sc)
+      const snapped = snapPoint(refinedRaw, all, sc)
       addPoint2D(currentField, snapped)
 
       dblTimerRef.current = setTimeout(() => {

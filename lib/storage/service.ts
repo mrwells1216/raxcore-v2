@@ -453,6 +453,9 @@ export interface CreatePredictionParams {
   rawResponse?: Record<string, unknown>
   intakeQuality?: Record<string, unknown> | null
   cropBoxMetadata?: Record<string, unknown> | null
+  arucoDetectionMetadata?: Record<string, unknown> | null
+  pedicleCalibrationMetadata?: Record<string, unknown> | null
+  vanishingPointMetadata?: Record<string, unknown> | null
 }
 
 // Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
@@ -512,6 +515,9 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       raw_ai_response: params.rawResponse || null,
       intake_quality: params.intakeQuality || null,
       crop_box_metadata: params.cropBoxMetadata ?? null,
+      ...(params.arucoDetectionMetadata ? { aruco_detection_metadata: params.arucoDetectionMetadata } : {}),
+      ...(params.pedicleCalibrationMetadata ? { pedicle_calibration_metadata: params.pedicleCalibrationMetadata } : {}),
+      ...(params.vanishingPointMetadata ? { vanishing_point_metadata: params.vanishingPointMetadata } : {}),
     })
     .select()
     .single()

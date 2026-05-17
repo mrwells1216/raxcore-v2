@@ -77,7 +77,7 @@ export interface VisionImageInput {
   angleType: AngleType
   width: number
   height: number
-  /** True when this image was server-cropped to the antler region. */
+  /** True when the user drew a crop box and this image is the cropped version */
   hasCropBox?: boolean
 }
 
@@ -91,6 +91,15 @@ export interface VisionScoringInput {
   mainFramePoints?: number
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
+  pedicleCalibration?: {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelsPerInch: number
+    confidence: number
+    knownSpacingInches: number | null
+    source: 'user_placed_known' | 'user_placed_anatomical'
+  } | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -294,12 +303,13 @@ export type VisionOutput = z.infer<typeof VisionOutputSchema>
  */
 function buildVisionPrompt(input: VisionScoringInput): string {
   const angleDescriptions = input.images.map((img, i) =>
-    `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})${img.hasCropBox ? ' [CROPPED]' : ''}`
+    `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})${img.hasCropBox ? ' [CROPPED to antler region]' : ''}`
   ).join('\n')
-
-  const anyCropped = input.images.some((img) => img.hasCropBox)
-  const cropNote = anyCropped
-    ? `\nUSER CROP NOTE: One or more images have been cropped server-side to focus on the antler region. The full photo context (hunter, background, body) has been removed from cropped frames. The antlers fill most of these frames, so do not expect to see ears, eyes, or body for anatomical proportion references on cropped images — rely on other calibration signals (precision reference, ring/hat reference, or remaining un-cropped frames). Uncropped images are marked with their original angle only.\n`
+  const croppedIndices = input.images
+    .map((img, i) => (img.hasCropBox ? i + 1 : null))
+    .filter((v): v is number => v !== null)
+  const cropNote = croppedIndices.length > 0
+    ? `\nUSER CROP NOTE: Image(s) ${croppedIndices.join(', ')} have been cropped to focus on the antler region only. The full photo context (hunter, background, body) has been removed. The antlers fill most of these frames. Do not expect to see ears or body in cropped images for anatomical proportion references — rely on any other available calibration signals for those frames.\n`
     : ''
   const precisionReferenceBlock = input.precisionReference?.promptBlock
     ? `
@@ -326,6 +336,35 @@ RING REFERENCE (user-reported, estimated only)
 - Do NOT rely on this reference if the ring is angled, occluded, distorted, or not clearly visible.
 - Treat ring-based scale as lower confidence than a ruler or tape measure.
 - This does NOT satisfy precision reference mode.
+`
+      : ''
+
+  const aruco = input.arucoDetection
+  const arucoBlock =
+    aruco?.detected && aruco.pixelsPerInch && aruco.markerSizeInches
+      ? `
+ARUCO MARKER DETECTED
+- A printed ArUco calibration marker is visible in this image.
+- Marker size: ${aruco.markerSizeInches}" × ${aruco.markerSizeInches}"
+- Detected pixel size: ${aruco.sidePixels?.toFixed(1) ?? '—'} px per side
+- Calibration: ${aruco.pixelsPerInch.toFixed(1)} px/in (confidence: ${(aruco.confidence * 100).toFixed(0)}%)
+- Use this as a high-confidence scale reference.
+- If the marker appears angled or folded, apply a confidence penalty to scale-dependent measurements.
+${aruco.warnings.length > 0 ? `- Warnings: ${aruco.warnings.join('; ')}` : ''}
+`
+      : ''
+
+  const ped = input.pedicleCalibration
+  const pedicleBlock =
+    ped && ped.leftDot && ped.rightDot
+      ? `
+PEDICLE CALIBRATION (user-confirmed dot placement)
+- The user dragged calibration dots to the left and right pedicle bases.
+- Left pedicle:  (${(ped.leftDot.x * 100).toFixed(1)}%, ${(ped.leftDot.y * 100).toFixed(1)}%) of the image
+- Right pedicle: (${(ped.rightDot.x * 100).toFixed(1)}%, ${(ped.rightDot.y * 100).toFixed(1)}%) of the image
+- Pedicle spacing: ${ped.knownSpacingInches ?? 4.5}" ${ped.knownSpacingInches ? '(user-measured)' : '(anatomical average)'}
+- Computed scale: ${ped.pixelsPerInch.toFixed(1)} px/in (confidence ${(ped.confidence * 100).toFixed(0)}%)
+- Use these positions as a confirmed scale reference AND as the exact anchor for main-beam measurements (burr starts here on each side).
 `
       : ''
 
@@ -362,6 +401,8 @@ IMAGES PROVIDED:
 ${angleDescriptions}
 ${cropNote}
 ${precisionReferenceBlock}
+${arucoBlock}
+${pedicleBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}
 
@@ -1152,12 +1193,32 @@ const LandmarkPointSchema = z.object({
   confidence: z.number().min(0).max(1),
   visibility: z.enum(['clear', 'partially_visible', 'occluded', 'not_visible']),
   sourceAngle: z.enum(['front', 'left', 'right', 'unknown']),
+  // Eye circle fields — populated only for eye_left / eye_right
+  radiusPx: z.number().nullable().optional(),
+  radiusMajorPx: z.number().nullable().optional(),
+  isElliptical: z.boolean().optional(),
+})
+
+const ParallelFeatureLineSchema = z.object({
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+})
+
+const ParallelFeatureSchema = z.object({
+  feature_type: z.string(),
+  line_a: ParallelFeatureLineSchema,
+  line_b: ParallelFeatureLineSchema,
+  confidence: z.number().min(0).max(1),
+  known_spacing_inches: z.number().nullable().optional(),
 })
 
 const LandmarkDetectionSchema = z.object({
   imageWidth: z.number(),
   imageHeight: z.number(),
   landmarks: z.array(LandmarkPointSchema),
+  parallel_features: z.array(ParallelFeatureSchema).optional(),
 })
 
 const LANDMARK_IDS: AntlerLandmarkId[] = [
@@ -1198,6 +1259,22 @@ export async function detectLandmarkPositions(
       `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
       `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
       `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
+      `\n` +
+      `EYE CIRCLE — for eye_left and eye_right, also return:\n` +
+      `  - radiusPx: radius in pixels of the visible iris (the dark circular area only — NOT the eyelid or sclera)\n` +
+      `  - radiusMajorPx: longer radius if the iris appears elliptical (side profile); equal to radiusPx for circular eyes\n` +
+      `  - isElliptical: true when the iris appears as an ellipse (side profile), false when circular (front view)\n` +
+      `  - If the eye is occluded, blurred, or not clearly visible, set radiusPx: null. Prefer null over a guessed radius.\n` +
+      `\n` +
+      `PARALLEL FEATURES — also return a parallel_features array (optional).\n` +
+      `Look at the BACKGROUND for straight parallel lines: fence rails, fence posts, truck bed sides,\n` +
+      `barn boards, deck/floor boards, door or window frames, roof lines, concrete joints.\n` +
+      `For each pair (max 3) with confidence ≥ 0.4 return:\n` +
+      `  feature_type (short label), line_a {x1,y1,x2,y2}, line_b {x1,y1,x2,y2},\n` +
+      `  confidence 0..1, known_spacing_inches (real-world spacing if the object implies one,\n` +
+      `  e.g. fence rail ~12", truck-bed side rail ~6"; otherwise null).\n` +
+      `Return parallel_features: [] when no usable lines are visible.\n` +
+      `\n` +
       `Landmarks to locate: ${landmarkList}.`
 
     const { object } = await generateObject({
@@ -1222,11 +1299,22 @@ export async function detectLandmarkPositions(
         visibility: lm.visibility,
         sourceAngle: lm.sourceAngle,
         source: 'ai' as const,
+        radiusPx: lm.radiusPx ?? null,
+        radiusMajorPx: lm.radiusMajorPx ?? lm.radiusPx ?? null,
+        isElliptical: lm.isElliptical ?? false,
       }))
 
     const locatedCount = landmarks.filter(
       (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
     ).length
+
+    const parallelFeatures = (object.parallel_features ?? []).map((f) => ({
+      feature_type: f.feature_type,
+      line_a: f.line_a,
+      line_b: f.line_b,
+      confidence: f.confidence,
+      known_spacing_inches: f.known_spacing_inches ?? null,
+    }))
 
     return {
       landmarks,
@@ -1236,6 +1324,7 @@ export async function detectLandmarkPositions(
       detectionTimestamp: new Date().toISOString(),
       locatedCount,
       requestedCount: LANDMARK_IDS.length,
+      parallelFeatures,
     }
   } catch {
     return null

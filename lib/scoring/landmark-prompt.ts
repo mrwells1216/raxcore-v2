@@ -11,7 +11,11 @@ TASK: Locate the following antler landmarks in this image. Return the PIXEL COOR
 LANDMARKS TO FIND:
 
 SKULL REFERENCES (for scale calibration):
-  - eye_left, eye_right: center of each visible eye socket
+  - eye_left, eye_right: center of the visible iris (the dark circular area, not the whole socket)
+      Also return: radiusPx (iris radius in pixels), radiusMajorPx (longer radius if elliptical
+      side profile, otherwise equal to radiusPx), isElliptical (true for side-profile views).
+      Measure the iris only — NOT the eyelid or sclera. If the eye is occluded, blurred, or
+      not clearly visible, set radiusPx: null. Prefer null over a guessed radius.
   - pedicle_left, pedicle_right: center of each antler base (where antler meets skull)
   - nose_tip: tip of the nose
   - nose_bridge_top: top of the nose bridge between the eyes
@@ -47,5 +51,20 @@ RULES:
 Return as a JSON array of objects with shape:
 { "id": string, "px": number|null, "py": number|null, "confidence": number, "visibility": string }
 
-Return the JSON array only, no other text.`
+PARALLEL FEATURES (optional — perspective cross-check):
+Also look at the BACKGROUND for any straight parallel lines (fence rails,
+fence posts, truck bed sides, barn boards, deck/floor boards, door or window
+frames, roof lines, concrete joints). For each pair you can identify with
+confidence ≥ 0.4, return:
+  - feature_type: short label (e.g. "fence_rail", "truck_bed", "barn_board")
+  - line_a: { x1, y1, x2, y2 } pixel endpoints
+  - line_b: { x1, y1, x2, y2 } pixel endpoints
+  - confidence: 0..1 — be conservative
+  - known_spacing_inches: real-world perpendicular spacing if the object is
+    recognizable (fence rail ~12", truck bed side rail ~6"), otherwise null
+Return at most 3 pairs. If none are visible, return an empty array.
+
+Add to your response under "parallel_features": [ ... ].
+
+Return the JSON only, no other text.`
 }

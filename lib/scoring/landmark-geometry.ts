@@ -26,6 +26,110 @@ export interface LandmarkScoreResult {
   warnings: string[]
 }
 
+/** Known deer eye iris physical dimensions */
+const DEER_EYE_IRIS = {
+  /** Apparent radius when viewed front-on (inches) */
+  frontRadiusInches: 0.55,
+  /** Semi-major axis when viewed from side (inches) */
+  sideRadiusInches: 0.65,
+  /** Minimum plausible radius in pixels to trust detection */
+  minRadiusPx: 8,
+  /** Maximum plausible radius (very close shot) */
+  maxRadiusPx: 200,
+}
+
+export interface EyeCircleCalibrationResult {
+  pixelsPerInch: number
+  eyeUsed: 'eye_left' | 'eye_right' | 'average'
+  radiusPxUsed: number
+  referenceInches: number
+  confidence: number
+  isElliptical: boolean
+  warnings: string[]
+}
+
+/**
+ * Derive pixelsPerInch from detected eye iris circle(s).
+ * Returns null if no eye landmark has a usable radius.
+ */
+export function computeCalibrationFromEyeCircle(
+  landmarks: LandmarkDetection[],
+): EyeCircleCalibrationResult | null {
+  const eyes = landmarks.filter(
+    (lm) =>
+      (lm.id === 'eye_left' || lm.id === 'eye_right') &&
+      lm.visibility !== 'not_visible' &&
+      lm.confidence >= 0.5 &&
+      isFiniteNumber(lm.radiusPx) &&
+      (lm.radiusPx as number) >= DEER_EYE_IRIS.minRadiusPx &&
+      (lm.radiusPx as number) <= DEER_EYE_IRIS.maxRadiusPx,
+  )
+
+  if (eyes.length === 0) return null
+
+  const warnings: string[] = []
+
+  const perEye = eyes.map((eye) => {
+    const elliptical = eye.isElliptical === true
+    const r = elliptical ? (eye.radiusMajorPx ?? eye.radiusPx!) : (eye.radiusPx as number)
+    const refIn = elliptical ? DEER_EYE_IRIS.sideRadiusInches : DEER_EYE_IRIS.frontRadiusInches
+    return {
+      id: eye.id as 'eye_left' | 'eye_right',
+      ppi: r / refIn,
+      radiusPx: r,
+      refIn,
+      confidence: eye.confidence * (elliptical ? 0.85 : 1.0),
+      elliptical,
+    }
+  })
+
+  if (perEye.length === 2) {
+    const delta = Math.abs(perEye[0].ppi - perEye[1].ppi) / Math.max(perEye[0].ppi, perEye[1].ppi)
+    if (delta > 0.15) {
+      warnings.push(
+        `Left and right eye radii differ by ${(delta * 100).toFixed(0)}% — using higher-confidence eye only`,
+      )
+      const best = [...perEye].sort((a, b) => b.confidence - a.confidence)[0]
+      return {
+        pixelsPerInch: best.ppi,
+        eyeUsed: best.id,
+        radiusPxUsed: best.radiusPx,
+        referenceInches: best.refIn,
+        confidence: best.confidence * 0.90,
+        isElliptical: best.elliptical,
+        warnings,
+      }
+    }
+    const avgPpi = (perEye[0].ppi + perEye[1].ppi) / 2
+    const avgConf = (perEye[0].confidence + perEye[1].confidence) / 2
+    const avgRadiusPx = (perEye[0].radiusPx + perEye[1].radiusPx) / 2
+    return {
+      pixelsPerInch: avgPpi,
+      eyeUsed: 'average',
+      radiusPxUsed: avgRadiusPx,
+      referenceInches: (perEye[0].refIn + perEye[1].refIn) / 2,
+      confidence: Math.min(0.72, avgConf * 1.05),
+      isElliptical: perEye.some((e) => e.elliptical),
+      warnings,
+    }
+  }
+
+  // Single eye
+  const e = perEye[0]
+  if (e.elliptical) {
+    warnings.push('Eye appears elliptical (side profile) — reduced confidence')
+  }
+  return {
+    pixelsPerInch: e.ppi,
+    eyeUsed: e.id,
+    radiusPxUsed: e.radiusPx,
+    referenceInches: e.refIn,
+    confidence: e.confidence,
+    isElliptical: e.elliptical,
+    warnings,
+  }
+}
+
 // Field definitions: fieldKey → [fromId, toId]
 const FIELD_PAIRS: Array<[string, AntlerLandmarkId, AntlerLandmarkId]> = [
   ['inside_spread',    'spread_anchor_left',  'spread_anchor_right'],

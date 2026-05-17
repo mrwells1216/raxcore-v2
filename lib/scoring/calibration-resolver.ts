@@ -2,6 +2,9 @@ import 'server-only'
 import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
 import type { LandmarkDetection } from './landmark-detection'
 import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
+import type { ArucoDetectionResult } from './aruco-types'
+import type { VanishingPointResult } from './vanishing-point-types'
+import { computeCalibrationFromEyeCircle } from './landmark-geometry'
 
 // Known whitetail anatomical references (inches)
 const ANATOMICAL_REFERENCES = {
@@ -9,9 +12,26 @@ const ANATOMICAL_REFERENCES = {
   PEDICLE_SPACING: 4.0,    // typical inter-pedicle spacing
 }
 
+export type CalibrationSource =
+  | 'depth_map_lidar'
+  | 'aruco_marker'
+  | 'user_placed_known'
+  | 'user_placed_anatomical'
+  | 'reference_object'
+  | 'eye_circle_anatomical'
+  | 'anatomical_prior'
+  | 'vanishing_point'
+
+export interface PedicleCalibrationInput {
+  source: 'user_placed_known' | 'user_placed_anatomical'
+  pixelsPerInch: number
+  confidence: number
+  knownSpacingInches: number | null
+}
+
 export interface CalibrationResult {
   pixelsPerInch: number
-  source: 'depth_map_lidar' | 'reference_object' | 'anatomical_prior'
+  source: CalibrationSource
   confidence: number
   method: string
   warnings: string[]
@@ -23,19 +43,36 @@ export interface ReferenceObjectInput {
   pixelSize: number | null
 }
 
+export interface ResolveCalibrationOptions {
+  landmarks: LandmarkDetection[]
+  depthCalibration?: DepthCalibrationResult | null
+  referenceObject?: ReferenceObjectInput | null
+  arucoResult?: ArucoDetectionResult | null
+  pedicleCalibration?: PedicleCalibrationInput | null
+  vanishingPoint?: VanishingPointResult | null
+}
+
 /**
  * Resolve the best available pixelsPerInch calibration.
  *
  * Priority:
- *   1. LiDAR depth map + EXIF (highest)
- *   2. Reference object (ring, hat, ruler)
- *   3. Anatomical priors (eye spacing, pedicle spacing)
+ *   1. LiDAR depth map + EXIF                      (auto, very high)
+ *   2. ArUco marker (GPT-4o detected, conf > 0.5)  (printed marker, auto)
+ *   3. Reference object (ring, hat, ruler)         (user-declared size)
+ *   4. Anatomical priors (eye, pedicle spacing)    (always-on fallback)
  */
 export function resolveCalibration(
-  landmarks: LandmarkDetection[],
-  depthCalibration: DepthCalibrationResult | null,
-  referenceObject: ReferenceObjectInput | null,
+  options: ResolveCalibrationOptions,
 ): CalibrationResult | null {
+  const {
+    landmarks,
+    depthCalibration,
+    referenceObject,
+    arucoResult,
+    pedicleCalibration,
+    vanishingPoint,
+  } = options
+
   // Priority 1: LiDAR depth calibration
   if (
     depthCalibration &&
@@ -43,16 +80,56 @@ export function resolveCalibration(
     depthCalibration.pixelsPerInch > 0 &&
     depthCalibration.confidence > 0.4
   ) {
-    return {
+    return applyVanishingPointCrossCheck({
       pixelsPerInch: depthCalibration.pixelsPerInch,
       source: 'depth_map_lidar',
       confidence: depthCalibration.confidence,
       method: `LiDAR depth at ${depthCalibration.subjectDistanceMeters.toFixed(2)}m`,
       warnings: depthCalibration.warnings,
-    }
+    }, vanishingPoint)
   }
 
-  // Priority 2: Reference object
+  // Priority 2: ArUco marker (printed, GPT-4o detected)
+  if (
+    arucoResult &&
+    arucoResult.detected &&
+    isFiniteNumber(arucoResult.pixelsPerInch) &&
+    arucoResult.pixelsPerInch > 0 &&
+    arucoResult.confidence > 0.5
+  ) {
+    const sizeLabel = isFiniteNumber(arucoResult.markerSizeInches)
+      ? `${arucoResult.markerSizeInches}" marker`
+      : 'ArUco marker'
+    return applyVanishingPointCrossCheck({
+      pixelsPerInch: arucoResult.pixelsPerInch,
+      source: 'aruco_marker',
+      confidence: arucoResult.confidence,
+      method: `${sizeLabel} (${arucoResult.method})`,
+      warnings: arucoResult.warnings,
+    }, vanishingPoint)
+  }
+
+  // Priority 2b: User-placed pedicle calibration dots
+  if (
+    pedicleCalibration &&
+    isFiniteNumber(pedicleCalibration.pixelsPerInch) &&
+    pedicleCalibration.pixelsPerInch > 0 &&
+    pedicleCalibration.confidence > 0.5
+  ) {
+    const spacingLabel =
+      pedicleCalibration.source === 'user_placed_known' && pedicleCalibration.knownSpacingInches
+        ? `${pedicleCalibration.knownSpacingInches}" measured`
+        : '4.5" anatomical average'
+    return applyVanishingPointCrossCheck({
+      pixelsPerInch: pedicleCalibration.pixelsPerInch,
+      source: pedicleCalibration.source,
+      confidence: pedicleCalibration.confidence,
+      method: `pedicle dots (${spacingLabel})`,
+      warnings: [],
+    }, vanishingPoint)
+  }
+
+  // Priority 3: Reference object
   if (
     referenceObject &&
     referenceObject.type !== 'none' &&
@@ -66,17 +143,90 @@ export function resolveCalibration(
       : referenceObject.type === 'ring' ? 0.45
       : 0.40
 
-    return {
+    return applyVanishingPointCrossCheck({
       pixelsPerInch,
       source: 'reference_object',
       confidence,
       method: `${referenceObject.type} reference (${referenceObject.knownSizeInches}" known)`,
       warnings: [],
+    }, vanishingPoint)
+  }
+
+  // Priority 4: Eye iris circle (per-eye anatomical reference)
+  // — preferred over the inter-eye box prior because it works with a
+  //   single eye visible and the iris size is more stable across deer.
+  const eyeCircle = computeCalibrationFromEyeCircle(landmarks)
+  if (
+    eyeCircle &&
+    isFiniteNumber(eyeCircle.pixelsPerInch) &&
+    eyeCircle.pixelsPerInch > 0 &&
+    eyeCircle.confidence > 0.45
+  ) {
+    return applyVanishingPointCrossCheck({
+      pixelsPerInch: eyeCircle.pixelsPerInch,
+      source: 'eye_circle_anatomical',
+      confidence: eyeCircle.confidence,
+      method:
+        eyeCircle.eyeUsed === 'average'
+          ? `iris average (both eyes, ${eyeCircle.radiusPxUsed.toFixed(1)}px)`
+          : `iris (${eyeCircle.eyeUsed}, ${eyeCircle.radiusPxUsed.toFixed(1)}px${eyeCircle.isElliptical ? ', elliptical' : ''})`,
+      warnings: eyeCircle.warnings,
+    }, vanishingPoint)
+  }
+
+  // Priority 5: Anatomical priors from landmarks (inter-eye / inter-pedicle)
+  const anatomical = resolveAnatomicalPrior(landmarks)
+  if (anatomical) {
+    return applyVanishingPointCrossCheck(anatomical, vanishingPoint)
+  }
+
+  // Priority 6: Vanishing point (lowest — cross-check only)
+  if (
+    vanishingPoint &&
+    isFiniteNumber(vanishingPoint.pixelsPerInch) &&
+    (vanishingPoint.pixelsPerInch as number) > 0 &&
+    vanishingPoint.confidence > 0.3
+  ) {
+    const warnings = [...vanishingPoint.warnings]
+    if (vanishingPoint.tiltAngleDeg != null && Math.abs(vanishingPoint.tiltAngleDeg) > 20) {
+      warnings.push(
+        `Camera tilt ${Math.abs(vanishingPoint.tiltAngleDeg).toFixed(1)}° detected — a more level photo improves accuracy`,
+      )
+    }
+    return {
+      pixelsPerInch: vanishingPoint.pixelsPerInch as number,
+      source: 'vanishing_point',
+      confidence: vanishingPoint.confidence,
+      method: `vanishing point (${vanishingPoint.scaleSource ?? 'background lines'})`,
+      warnings,
     }
   }
 
-  // Priority 3: Anatomical priors from landmarks
-  return resolveAnatomicalPrior(landmarks)
+  return null
+}
+
+/**
+ * When a higher-priority source already won, but the vanishing-point
+ * analysis disagrees with it by more than 35%, attach a warning.
+ * Pure: returns a new CalibrationResult with the warning appended.
+ */
+function applyVanishingPointCrossCheck(
+  primary: CalibrationResult,
+  vanishingPoint: VanishingPointResult | null | undefined,
+): CalibrationResult {
+  if (
+    !vanishingPoint ||
+    !isFiniteNumber(vanishingPoint.pixelsPerInch) ||
+    (vanishingPoint.pixelsPerInch as number) <= 0 ||
+    vanishingPoint.confidence < 0.3
+  ) {
+    return primary
+  }
+  const vpPpi = vanishingPoint.pixelsPerInch as number
+  const delta = Math.abs(vpPpi - primary.pixelsPerInch) / primary.pixelsPerInch
+  if (delta <= 0.35) return primary
+  const note = `Perspective analysis suggests a different scale than the primary calibration (${Math.round(delta * 100)}% difference). Advanced Scoring with a physical ruler is recommended.`
+  return { ...primary, warnings: [...primary.warnings, note] }
 }
 
 function resolveAnatomicalPrior(landmarks: LandmarkDetection[]): CalibrationResult | null {

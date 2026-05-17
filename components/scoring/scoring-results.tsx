@@ -28,6 +28,7 @@ import { AntlerImageCarousel } from './antler-image-carousel'
 import { LandmarkOverlay } from './landmark-overlay'
 import type { LandmarkMeasurement } from '@/lib/scoring/landmark-geometry'
 import { TrophyEligibilityCta } from '@/components/trophy-room/trophy-eligibility-cta'
+import { CircumferenceRefineCard } from './circumference-refine-card'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 import type { FieldProvenanceMap } from '@/lib/rules-engine'
@@ -1091,6 +1092,17 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
       {/* Trophy Room eligibility CTA */}
       {result.buck?.id && <TrophyEligibilityCta buckId={result.buck.id} />}
+
+      {/* Circumference taper refinement — one-measurement, derives H1–H4 both sides */}
+      {normalized.predictionId && (normalized.confidencePercent ?? 0) < 90 && (
+        <CircumferenceRefineCard
+          predictionId={normalized.predictionId}
+          buckId={result.buck?.id}
+          alreadyRefined={Boolean(
+            (result?.prediction?.raw_ai_response as any)?.circumferenceRefinement,
+          )}
+        />
+      )}
 
       {/* Human Review / Edit Mode for AI Score Sheets */}
       {result.scoreSheet && normalized.predictionId && result.buck?.id && (

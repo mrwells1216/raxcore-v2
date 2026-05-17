@@ -15,8 +15,6 @@ import {
   getActiveModelVersion,
   getBuckImages
 } from '@/lib/storage/service'
-import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
-import type { CropRegion } from '@/components/scoring/antler-crop-box'
 import { createGatedUserNotification, createAdminTask } from '@/lib/notifications/service'
 import {
   createUsageRecord,
@@ -56,6 +54,11 @@ import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
 import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
+import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
+import type { CropRegion } from '@/components/scoring/antler-crop-box'
+import { detectArucoMarker } from '@/lib/calibration/aruco-detector'
+import type { ArucoDetectionResult } from '@/lib/scoring/aruco-types'
+import sharp from 'sharp'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -144,6 +147,25 @@ export async function POST(request: Request) {
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
   const userId = formData.get('user_id') as string | null
+  const cropRegionsRaw = formData.get('crop_regions') as string | null
+  let cropRegions: Record<string, CropRegion | null> = {}
+  if (cropRegionsRaw) {
+    try { cropRegions = JSON.parse(cropRegionsRaw) || {} } catch { /* optional */ }
+  }
+  const pedicleCalibrationRaw = formData.get('pedicle_calibration') as string | null
+  let pedicleCalibration: import('@/lib/scoring/calibration-resolver').PedicleCalibrationInput & {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelDistance?: number
+  } | null = null
+  if (pedicleCalibrationRaw) {
+    try {
+      const parsed = JSON.parse(pedicleCalibrationRaw)
+      if (parsed && typeof parsed.pixelsPerInch === 'number' && typeof parsed.confidence === 'number') {
+        pedicleCalibration = parsed
+      }
+    } catch { /* optional */ }
+  }
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -375,20 +397,14 @@ export async function POST(request: Request) {
     // Store the resolved URLs (always the originals — never the cropped variants)
     await addBuckImages(buck.id, storedImageUrls)
 
-    // ─────────────────────────────────────────────────────────────────────────
     // Antler crop boxes — server-side crop with 12% padding before AI scoring
     // and detection. Originals remain in storedImageUrls for display, landmarks,
     // and persistence. Any crop failure falls back silently to the original URL
     // and records null in the metadata map. Never blocks scoring.
     // ─────────────────────────────────────────────────────────────────────────
-    const cropRegionsRaw = formData.get('crop_regions') as string | null
-    let cropRegions: Record<string, CropRegion | null> = {}
-    if (cropRegionsRaw) {
-      try { cropRegions = JSON.parse(cropRegionsRaw) } catch { /* ignore parse error */ }
-    }
-
     const scoringImageUrls: string[] = [...storedImageUrls]
-    const cropMetadata: Record<string, Omit<CropResult, 'croppedBuffer'> | null> = {}
+    const cropMetadata: Record<string, (Omit<CropResult, 'croppedBuffer'> & { croppedUrl: string; region: CropRegion }) | null> = {}
+    let anyCropApplied = false
 
     for (let i = 0; i < storedImageUrls.length; i++) {
       const key = String(i)
@@ -416,12 +432,17 @@ export async function POST(request: Request) {
 
         const croppedUrl = await uploadCroppedBuckImage(buck.id, cropped.croppedBuffer, i)
         scoringImageUrls[i] = croppedUrl
+        resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
 
         // Strip the buffer before serializing to JSONB
         const { croppedBuffer: _unused, ...metaForStorage } = cropped
         void _unused
-        cropMetadata[key] = metaForStorage
-        resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
+        cropMetadata[key] = { ...metaForStorage, croppedUrl, region }
+        anyCropApplied = true
+        console.log(`[crop-box] image ${i} cropped`, {
+          region,
+          cropPx: { x: cropped.cropPxX, y: cropped.cropPxY, w: cropped.cropPxWidth, h: cropped.cropPxHeight },
+        })
       } catch (err) {
         console.warn(`[crop-box] crop failed for image ${i}, using original:`, err)
         cropMetadata[key] = null
@@ -430,6 +451,11 @@ export async function POST(request: Request) {
 
     // P1: LiDAR depth auto-calibration — extract from first image if HEIC
     let depthCalibration: DepthCalibrationResult | null = null
+    let arucoResult: ArucoDetectionResult | null = null
+    // Populated later in the landmark-detection block, but declared here so
+    // it can be referenced by createPrediction (which writes null at that
+    // point — the live result is surfaced via the final JSON response).
+    let vanishingPointResult: import('@/lib/scoring/vanishing-point-types').VanishingPointResult | null = null
     try {
       const firstImageUrl = storedImageUrls[0]
       if (firstImageUrl) {
@@ -442,6 +468,42 @@ export async function POST(request: Request) {
           ])
           if (depthResult && exifResult) {
             depthCalibration = computeDepthCalibration(depthResult, exifResult)
+          }
+
+          // ArUco marker detection — runs on the ORIGINAL first image
+          // (never the user-drawn crop). Only when the user selected the
+          // aruco_marker reference type and entered a marker size.
+          if (referenceTypeRaw === 'aruco_marker' && referenceSizeValueRaw) {
+            const sizeValue = Number(referenceSizeValueRaw)
+            const unit = (referenceSizeUnitRaw ?? 'in') as 'in' | 'cm' | 'mm'
+            const sizeInches =
+              unit === 'cm' ? sizeValue / 2.54
+              : unit === 'mm' ? sizeValue / 25.4
+              : sizeValue
+            if (Number.isFinite(sizeInches) && sizeInches > 0) {
+              try {
+                const meta = await sharp(imgBuf).metadata()
+                arucoResult = await detectArucoMarker({
+                  markerSizeInches: sizeInches,
+                  imageBuffer: imgBuf,
+                  imageWidth: meta.width ?? 0,
+                  imageHeight: meta.height ?? 0,
+                })
+                if (arucoResult.detected) {
+                  console.log('[aruco] detected', {
+                    pixelsPerInch: arucoResult.pixelsPerInch?.toFixed(1),
+                    sidePixels: arucoResult.sidePixels?.toFixed(1),
+                    confidence: arucoResult.confidence,
+                    method: arucoResult.method,
+                    warnings: arucoResult.warnings,
+                  })
+                } else {
+                  console.log('[aruco] no marker detected', { warnings: arucoResult.warnings })
+                }
+              } catch (arErr) {
+                console.warn('[aruco] detection failed (non-blocking):', arErr)
+              }
+            }
           }
         }
       }
@@ -458,7 +520,7 @@ export async function POST(request: Request) {
     let detectionSummary: MultiImageDetectionResult | null = null
     
     try {
-      console.log('[score] starting detection phase', { imageCount: scoringImageUrls.length })
+      console.log('[score] starting detection phase', { imageCount: scoringImageUrls.length, anyCropApplied })
       const detectionImages = await detectRackWithOpenAI(scoringImageUrls)
       detectionSummary = buildMultiImageDetectionSummary(detectionImages)
       
@@ -580,6 +642,8 @@ export async function POST(request: Request) {
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
+      arucoDetection: arucoResult,
+      pedicleCalibration: pedicleCalibration ?? undefined,
       traceId: requestId,
     })
 
@@ -814,18 +878,29 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        // User-drawn antler crop regions (per-image)
+        cropBoxMetadata: anyCropApplied ? { perImage: cropMetadata, anyCropApplied: true } : null,
+        // ArUco marker detection (printed reference)
+        arucoDetection: arucoResult,
+        // User-placed pedicle calibration dots
+        pedicleCalibration: pedicleCalibration,
+        // Vanishing-point cross-check (background parallel lines)
+        vanishingPoint: vanishingPointResult,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
-      cropBoxMetadata: Object.keys(cropMetadata).length > 0
-        ? (cropMetadata as Record<string, unknown>)
-        : null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
         try {
           return JSON.parse(imageDiagnosticsSummaryRaw)
         } catch {
           return null
         }
-      })() : null
+      })() : null,
+      cropBoxMetadata: anyCropApplied
+        ? { perImage: cropMetadata, anyCropApplied: true }
+        : null,
+      arucoDetectionMetadata: arucoResult,
+      pedicleCalibrationMetadata: pedicleCalibration,
+      vanishingPointMetadata: vanishingPointResult,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -846,11 +921,34 @@ export async function POST(request: Request) {
     try {
       landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls)
       if (landmarkDetectionResult) {
-        const calibration = resolveCalibration(
-          landmarkDetectionResult.landmarks,
+        // Analyse vanishing-point cross-check from any background parallel features
+        try {
+          const { analyzeVanishingPoints } = await import('@/lib/scoring/vanishing-point-geometry')
+          vanishingPointResult = analyzeVanishingPoints(
+            landmarkDetectionResult.parallelFeatures ?? null,
+            landmarkDetectionResult.imageWidth,
+            landmarkDetectionResult.imageHeight,
+            null,
+          )
+        } catch (vpErr) {
+          console.warn('[vanishing-point] analysis failed (non-blocking):', vpErr)
+        }
+
+        const calibration = resolveCalibration({
+          landmarks: landmarkDetectionResult.landmarks,
           depthCalibration,
-          null,
-        )
+          referenceObject: null,
+          arucoResult,
+          pedicleCalibration: pedicleCalibration
+            ? {
+                source: pedicleCalibration.source,
+                pixelsPerInch: pedicleCalibration.pixelsPerInch,
+                confidence: pedicleCalibration.confidence,
+                knownSpacingInches: pedicleCalibration.knownSpacingInches,
+              }
+            : null,
+          vanishingPoint: vanishingPointResult,
+        })
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             landmarkDetectionResult.landmarks,
@@ -1135,6 +1233,12 @@ export async function POST(request: Request) {
           }
         : null,
       landmarkScore: landmarkScoreResult ?? null,
+      cropBoxMetadata: anyCropApplied
+        ? { perImage: cropMetadata, anyCropApplied: true }
+        : null,
+      arucoDetection: arucoResult,
+      pedicleCalibration,
+      vanishingPoint: vanishingPointResult,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages
