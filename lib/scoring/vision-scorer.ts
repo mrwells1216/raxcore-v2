@@ -77,6 +77,8 @@ export interface VisionImageInput {
   angleType: AngleType
   width: number
   height: number
+  /** True when the user drew a crop box and this image is the cropped version */
+  hasCropBox?: boolean
 }
 
 export interface VisionScoringInput {
@@ -291,9 +293,15 @@ export type VisionOutput = z.infer<typeof VisionOutputSchema>
  * Build a detailed prompt for the vision model
  */
 function buildVisionPrompt(input: VisionScoringInput): string {
-  const angleDescriptions = input.images.map((img, i) => 
-    `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})`
+  const angleDescriptions = input.images.map((img, i) =>
+    `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})${img.hasCropBox ? ' [CROPPED to antler region]' : ''}`
   ).join('\n')
+  const croppedIndices = input.images
+    .map((img, i) => (img.hasCropBox ? i + 1 : null))
+    .filter((v): v is number => v !== null)
+  const cropNote = croppedIndices.length > 0
+    ? `\nUSER CROP NOTE: Image(s) ${croppedIndices.join(', ')} have been cropped to focus on the antler region only. The full photo context (hunter, background, body) has been removed. The antlers fill most of these frames. Do not expect to see ears or body in cropped images for anatomical proportion references — rely on any other available calibration signals for those frames.\n`
+    : ''
   const precisionReferenceBlock = input.precisionReference?.promptBlock
     ? `
 PRECISION REFERENCE MODE
@@ -353,7 +361,7 @@ CONTEXT:
 
 IMAGES PROVIDED:
 ${angleDescriptions}
-
+${cropNote}
 ${precisionReferenceBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}

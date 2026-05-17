@@ -9,6 +9,7 @@ import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
+import { AntlerCropBox, type CropRegion } from './antler-crop-box'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
@@ -58,6 +59,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const [scanFeedback, setScanFeedback] = useState<ScanFeedback | null>(null)
   const [isDetecting, setIsDetecting] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [cropRegions, setCropRegions] = useState<Record<number, CropRegion | null>>({})
+  const [cropStepSkipped, setCropStepSkipped] = useState(false)
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -168,6 +171,15 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         while (updated.length < imgs.length) updated.push(null)
         return updated.slice(0, imgs.length)
       })
+      // Drop any crop region tied to an index that no longer exists
+      setCropRegions(prev => {
+        const next: Record<number, CropRegion | null> = {}
+        for (let i = 0; i < imgs.length; i++) {
+          if (prev[i] !== undefined) next[i] = prev[i]
+        }
+        return next
+      })
+      setCropStepSkipped(false)
       updateIntakeQuality(imgs)
       const cq = imgs.length > 0
         ? buildCaptureQualitySummary({
@@ -218,6 +230,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
 
     setGridImages(scanImages)
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
+    setCropRegions({})
+    setCropStepSkipped(false)
     updateIntakeQuality(scanImages)
     const cq = buildCaptureQualitySummary({
       images: scanImages.map(img => ({ name: img.id })),
@@ -366,6 +380,13 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       if (data.reference_object) {
         apiFormData.append('reference_object', JSON.stringify(data.reference_object))
       }
+
+      // User-drawn antler crop regions (optional, per image index)
+      const cropRegionsByIndex: Record<string, CropRegion | null> = {}
+      for (let i = 0; i < images.length; i++) {
+        cropRegionsByIndex[String(i)] = cropRegions[i] ?? null
+      }
+      apiFormData.append('crop_regions', JSON.stringify(cropRegionsByIndex))
 
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
@@ -606,6 +627,34 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
             ))
           }}
         />
+      )}
+
+      {/* ── 5a. Antler crop boxes (optional) ───────────────────────────── */}
+      {gridImages.length > 0 && !cropStepSkipped && (
+        <Section label="Crop to antlers" sublabel="Optional — gives the AI 4–8× more detail">
+          <div className="space-y-5">
+            {gridImages.map((img, i) => (
+              <AntlerCropBox
+                key={img.id}
+                imageUrl={img.url}
+                label={`Photo ${i + 1} of ${gridImages.length} · ${img.angleType}`}
+                initialRegion={cropRegions[i] ?? null}
+                onCrop={(r) => setCropRegions(prev => ({ ...prev, [i]: r }))}
+                onClear={() => setCropRegions(prev => ({ ...prev, [i]: null }))}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setCropRegions({})
+                setCropStepSkipped(true)
+              }}
+              className="w-full text-[11px] font-mono tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors py-2"
+            >
+              Skip cropping — use full photos
+            </button>
+          </div>
+        </Section>
       )}
 
       {/* ── 5b. Scan validation banner ──────────────────────────────────── */}

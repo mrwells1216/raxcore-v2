@@ -55,6 +55,8 @@ export interface ImageAnalysisInput {
   angleType: AngleType
   width: number
   height: number
+  /** True when the user drew a crop box and this image is the cropped version */
+  hasCropBox?: boolean
 }
 
 export interface ScoringInput {

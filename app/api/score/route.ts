@@ -53,6 +53,9 @@ import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
 import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
+import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
+import type { CropRegion } from '@/components/scoring/antler-crop-box'
+import { getServiceSupabase } from '@/lib/supabase/admin'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -141,6 +144,11 @@ export async function POST(request: Request) {
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
   const userId = formData.get('user_id') as string | null
+  const cropRegionsRaw = formData.get('crop_regions') as string | null
+  let cropRegions: Record<string, CropRegion | null> = {}
+  if (cropRegionsRaw) {
+    try { cropRegions = JSON.parse(cropRegionsRaw) || {} } catch { /* optional */ }
+  }
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -372,6 +380,92 @@ export async function POST(request: Request) {
     // Store the resolved URLs
     await addBuckImages(buck.id, storedImageUrls)
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // User-drawn antler crop: optional per-image crop applied server-side
+    // before scoring. Originals remain in storedImageUrls for display; the AI
+    // sees scoringImageUrls. cropMetadata is persisted alongside the prediction.
+    // ─────────────────────────────────────────────────────────────────────────
+    const scoringImageUrls: string[] = [...storedImageUrls]
+    const cropMetadata: Record<string, {
+      originalWidth: number
+      originalHeight: number
+      cropPxX: number
+      cropPxY: number
+      cropPxWidth: number
+      cropPxHeight: number
+      paddingApplied: number
+      croppedUrl: string
+      region: CropRegion
+    } | null> = {}
+    let anyCropApplied = false
+
+    for (let i = 0; i < storedImageUrls.length; i++) {
+      const region = cropRegions[String(i)] ?? cropRegions[i as unknown as string] ?? null
+      cropMetadata[String(i)] = null
+      if (!region) continue
+
+      try {
+        const imgRes = await fetch(storedImageUrls[i])
+        if (!imgRes.ok) {
+          console.warn(`[crop-box] fetch failed for image ${i}: ${imgRes.status}`)
+          continue
+        }
+        const imgBuf = Buffer.from(await imgRes.arrayBuffer())
+        const cropped = await cropImageToRegion(imgBuf, region)
+        if (!cropped) {
+          console.warn(`[crop-box] crop rejected for image ${i} (too small or invalid)`)
+          continue
+        }
+
+        const ext = cropped.contentType === 'image/png' ? 'png' : 'jpg'
+        const path = `bucks/${buck.id}/crop_${i}_${Date.now()}.${ext}`
+        const supabase = await getServiceSupabase()
+        const bucket = getBuckImageBucketName()
+        const { error: upErr } = await supabase.storage
+          .from(bucket)
+          .upload(path, cropped.croppedBuffer, {
+            contentType: cropped.contentType,
+            upsert: false,
+          })
+        if (upErr) {
+          console.warn(`[crop-box] cropped upload failed for image ${i}: ${upErr.message}`)
+          continue
+        }
+        const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path)
+        const croppedUrl = urlData?.publicUrl
+        if (!croppedUrl) continue
+
+        scoringImageUrls[i] = croppedUrl
+        cropMetadata[String(i)] = {
+          originalWidth: cropped.originalWidth,
+          originalHeight: cropped.originalHeight,
+          cropPxX: cropped.cropPxX,
+          cropPxY: cropped.cropPxY,
+          cropPxWidth: cropped.cropPxWidth,
+          cropPxHeight: cropped.cropPxHeight,
+          paddingApplied: cropped.paddingApplied,
+          croppedUrl,
+          region,
+        }
+        anyCropApplied = true
+        console.log(`[crop-box] image ${i} cropped`, {
+          region,
+          cropPx: { x: cropped.cropPxX, y: cropped.cropPxY, w: cropped.cropPxWidth, h: cropped.cropPxHeight },
+        })
+      } catch (cropErr) {
+        console.warn(`[crop-box] crop pipeline failed for image ${i}, using original:`, cropErr instanceof Error ? cropErr.message : String(cropErr))
+      }
+    }
+
+    // Swap the scoring URLs into resolvedImages (storedImageUrls remains for display)
+    for (let i = 0; i < resolvedImages.length; i++) {
+      resolvedImages[i] = {
+        ...resolvedImages[i],
+        imageUrl: scoringImageUrls[i],
+        hasCropBox: cropMetadata[String(i)] !== null,
+      }
+    }
+
     // P1: LiDAR depth auto-calibration — extract from first image if HEIC
     let depthCalibration: DepthCalibrationResult | null = null
     try {
@@ -402,8 +496,8 @@ export async function POST(request: Request) {
     let detectionSummary: MultiImageDetectionResult | null = null
     
     try {
-      console.log('[score] starting detection phase', { imageCount: storedImageUrls.length })
-      const detectionImages = await detectRackWithOpenAI(storedImageUrls)
+      console.log('[score] starting detection phase', { imageCount: scoringImageUrls.length, anyCropApplied })
+      const detectionImages = await detectRackWithOpenAI(scoringImageUrls)
       detectionSummary = buildMultiImageDetectionSummary(detectionImages)
       
       console.log('[score] detection complete', {
@@ -758,6 +852,8 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        // User-drawn antler crop regions (per-image)
+        cropBoxMetadata: anyCropApplied ? { perImage: cropMetadata, anyCropApplied: true } : null,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -766,7 +862,10 @@ export async function POST(request: Request) {
         } catch {
           return null
         }
-      })() : null
+      })() : null,
+      cropBoxMetadata: anyCropApplied
+        ? { perImage: cropMetadata, anyCropApplied: true }
+        : null,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -1076,6 +1175,9 @@ export async function POST(request: Request) {
           }
         : null,
       landmarkScore: landmarkScoreResult ?? null,
+      cropBoxMetadata: anyCropApplied
+        ? { perImage: cropMetadata, anyCropApplied: true }
+        : null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages
