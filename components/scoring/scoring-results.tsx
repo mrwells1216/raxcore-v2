@@ -19,6 +19,11 @@ import { ConfidenceIndicator, ConfidenceExplanation, ConfidenceBadge } from './c
 import { IntakeQualityDisplay, IntakeQualityBadge } from './intake-quality-display'
 import { BuckLocationLink } from '@/components/map/buck-location-link'
 import { buildMeasurementDiff } from '@/lib/review/measurement-diff'
+import {
+  getLearningScoreWeightLabel,
+  parseApproximateLearningScoreInput,
+  type ApproximateLearningScoreMetadata,
+} from '@/lib/review/types'
 import { PrecisionPassCard } from './precision-pass-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
@@ -349,6 +354,32 @@ function extractFieldProvenance(result: any): FieldProvenanceMap | null {
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
+function extractApproximateScoreFromReview(reviewedScoreSheet: any): ApproximateLearningScoreMetadata | null {
+  const candidate =
+    reviewedScoreSheet?.sheet_json?.metadata?.approximate_score ??
+    reviewedScoreSheet?.sheet_json?.approximate_score ??
+    reviewedScoreSheet?.approximate_score ??
+    null
+
+  return parseApproximateLearningScoreInput(candidate).value
+}
+
+function formatApproximateScoreSource(score: ApproximateLearningScoreMetadata): string {
+  if (score.source === 'official_score_sheet' && score.precision === 'exact') {
+    return 'official score sheet'
+  }
+  if (score.source === 'manual_exact_measurements' && score.precision === 'exact') {
+    return 'exact manual measurements'
+  }
+  if (score.precision === 'rough_estimate') {
+    return 'rough memory estimate'
+  }
+  if (score.source === 'approximate_user_estimate') {
+    return 'approximate estimate'
+  }
+  return 'unknown source'
+}
+
 export function ScoringResults({ result, formData, onReset }: ScoringResultsProps) {
   const { data: latestRun } = useSWR(
     result?.prediction?.id
@@ -388,6 +419,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
           reviewData.reviewedScoreSheet?.created_by ??
           reviewData.reviewedScoreSheet?.reviewed_by ??
           'human_review',
+        approximateScore: extractApproximateScoreFromReview(reviewData.reviewedScoreSheet),
       }
     : null
 
@@ -863,6 +895,33 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
                   </div>
                 </div>
               </div>
+
+              {reviewedScoreSheet.approximateScore && (
+                <div className="mt-3 rounded-md border border-dashed px-3 py-2 text-xs">
+                  <div className="mb-1 font-medium">Known or approximate score</div>
+                  <div className="grid gap-1 text-muted-foreground sm:grid-cols-2">
+                    {reviewedScoreSheet.approximateScore.grossScore != null && (
+                      <div>
+                        Approx. gross provided: {reviewedScoreSheet.approximateScore.grossScore}
+                      </div>
+                    )}
+                    {reviewedScoreSheet.approximateScore.netScore != null && (
+                      <div>
+                        Approx. net provided: {reviewedScoreSheet.approximateScore.netScore}
+                      </div>
+                    )}
+                    <div>
+                      Learning weight: {getLearningScoreWeightLabel(reviewedScoreSheet.approximateScore.learningWeight)} - {formatApproximateScoreSource(reviewedScoreSheet.approximateScore)}
+                    </div>
+                    <div>Not used for Verified Score</div>
+                  </div>
+                  {reviewedScoreSheet.approximateScore.notes && (
+                    <div className="mt-2 text-muted-foreground">
+                      Notes: {reviewedScoreSheet.approximateScore.notes}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

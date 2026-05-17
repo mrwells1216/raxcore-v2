@@ -10,6 +10,156 @@ import type { ScoreSheet } from '@/lib/scoring/score-sheet'
 export type ReviewerType = 'human' | 'expert' | 'automated'
 export type ReviewStatus = 'draft' | 'final' | 'archived'
 
+export type LearningScoreSource =
+  | 'official_score_sheet'
+  | 'manual_exact_measurements'
+  | 'approximate_user_estimate'
+  | 'unknown'
+
+export type LearningScorePrecision =
+  | 'exact'
+  | 'approximate'
+  | 'rough_estimate'
+  | 'unknown'
+
+export interface ApproximateLearningScoreInput {
+  grossScore: number | null
+  netScore: number | null
+  source: LearningScoreSource
+  precision: LearningScorePrecision
+  notes?: string | null
+}
+
+export interface ApproximateLearningScoreMetadata extends ApproximateLearningScoreInput {
+  learningWeight: number
+  learningUse: 'aggregate_score_comparison_only'
+  fieldLevelCalibration: false
+  verifiedScoreEligible: false
+  note: string
+}
+
+export const APPROXIMATE_SCORE_LEARNING_NOTE =
+  'Aggregate approximate score only - not suitable for field-level calibration.'
+
+export function normalizeOptionalScore(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  if (n < 0 || n > 400) return null
+  return Math.round(n * 10) / 10
+}
+
+function hasProvidedScoreValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false
+  return typeof value === 'string' ? value.trim() !== '' : true
+}
+
+export function normalizeLearningScoreSource(value: unknown): LearningScoreSource {
+  if (
+    value === 'official_score_sheet' ||
+    value === 'manual_exact_measurements' ||
+    value === 'approximate_user_estimate' ||
+    value === 'unknown'
+  ) {
+    return value
+  }
+
+  return 'approximate_user_estimate'
+}
+
+export function normalizeLearningScorePrecision(value: unknown): LearningScorePrecision {
+  if (
+    value === 'exact' ||
+    value === 'approximate' ||
+    value === 'rough_estimate' ||
+    value === 'unknown'
+  ) {
+    return value
+  }
+
+  return 'approximate'
+}
+
+export function getLearningScoreWeight(
+  sourceOrInput: LearningScoreSource | ApproximateLearningScoreInput | null | undefined,
+  precisionArg?: LearningScorePrecision
+): number {
+  const source =
+    typeof sourceOrInput === 'string'
+      ? sourceOrInput
+      : sourceOrInput?.source ?? 'unknown'
+  const precision =
+    typeof sourceOrInput === 'string'
+      ? precisionArg ?? 'unknown'
+      : sourceOrInput?.precision ?? 'unknown'
+
+  if (source === 'official_score_sheet' && precision === 'exact') return 1.0
+  if (source === 'manual_exact_measurements' && precision === 'exact') return 0.85
+  if (source === 'approximate_user_estimate' && precision === 'approximate') return 0.35
+  if (source === 'approximate_user_estimate' && precision === 'rough_estimate') return 0.18
+  return 0.1
+}
+
+export function getLearningScoreWeightLabel(weight: number): string {
+  if (weight >= 0.85) return 'High'
+  if (weight >= 0.35) return 'Low'
+  if (weight >= 0.18) return 'Very low'
+  return 'Minimal'
+}
+
+export function parseApproximateLearningScoreInput(input: unknown): {
+  value: ApproximateLearningScoreMetadata | null
+  error: string | null
+} {
+  if (!input || typeof input !== 'object') {
+    return { value: null, error: null }
+  }
+
+  const record = input as Record<string, unknown>
+  const rawGross = record.grossScore ?? record.gross_score
+  const rawNet = record.netScore ?? record.net_score
+  const grossProvided = hasProvidedScoreValue(rawGross)
+  const netProvided = hasProvidedScoreValue(rawNet)
+
+  if (!grossProvided && !netProvided) {
+    return { value: null, error: null }
+  }
+
+  const grossScore = normalizeOptionalScore(rawGross)
+  const netScore = normalizeOptionalScore(rawNet)
+
+  if (grossProvided && grossScore === null) {
+    return { value: null, error: 'Approximate gross score must be a finite number from 0 to 400.' }
+  }
+
+  if (netProvided && netScore === null) {
+    return { value: null, error: 'Approximate net score must be a finite number from 0 to 400.' }
+  }
+
+  const source = normalizeLearningScoreSource(record.source)
+  const precision = normalizeLearningScorePrecision(record.precision)
+  const notes = typeof record.notes === 'string' && record.notes.trim()
+    ? record.notes.trim()
+    : null
+  const learningWeight = getLearningScoreWeight(source, precision)
+
+  return {
+    value: {
+      grossScore,
+      netScore,
+      source,
+      precision,
+      notes,
+      learningWeight,
+      learningUse: 'aggregate_score_comparison_only',
+      fieldLevelCalibration: false,
+      verifiedScoreEligible: false,
+      note: APPROXIMATE_SCORE_LEARNING_NOTE,
+    },
+    error: null,
+  }
+}
+
 /**
  * Corrected measurements - flat structure for easy editing
  */

@@ -39,7 +39,15 @@ import {
 } from '@/lib/scoring/measurement-display-confidence'
 import { cn } from '@/lib/utils'
 import type { ScoreSheet } from '@/lib/scoring/score-sheet'
-import type { CorrectedMeasurements } from '@/lib/review/types'
+import {
+  getLearningScoreWeight,
+  getLearningScoreWeightLabel,
+  parseApproximateLearningScoreInput,
+  type ApproximateLearningScoreInput,
+  type CorrectedMeasurements,
+  type LearningScorePrecision,
+  type LearningScoreSource,
+} from '@/lib/review/types'
 import {
   calculateGrossScore,
   calculateNetScore,
@@ -61,6 +69,43 @@ import type {
 
 // Local type - no dependency on old review system
 type ReviewStatus = 'draft' | 'final'
+type ApproximateScoreOptionValue = 'official' | 'manual_exact' | 'approximate' | 'rough'
+
+const APPROXIMATE_SCORE_OPTIONS: Array<{
+  value: ApproximateScoreOptionValue
+  label: string
+  source: LearningScoreSource
+  precision: LearningScorePrecision
+}> = [
+  {
+    value: 'official',
+    label: 'Official score sheet',
+    source: 'official_score_sheet',
+    precision: 'exact',
+  },
+  {
+    value: 'manual_exact',
+    label: 'Exact manual measurements',
+    source: 'manual_exact_measurements',
+    precision: 'exact',
+  },
+  {
+    value: 'approximate',
+    label: 'Approximate estimate',
+    source: 'approximate_user_estimate',
+    precision: 'approximate',
+  },
+  {
+    value: 'rough',
+    label: 'Rough memory estimate',
+    source: 'approximate_user_estimate',
+    precision: 'rough_estimate',
+  },
+]
+
+function getApproximateScoreOption(value: ApproximateScoreOptionValue) {
+  return APPROXIMATE_SCORE_OPTIONS.find((option) => option.value === value) ?? APPROXIMATE_SCORE_OPTIONS[2]
+}
 
 interface ScoreSheetEditorProps {
   /** Prediction ID for creating/loading review */
@@ -295,6 +340,10 @@ export function ScoreSheetEditor({
   const [rackType, setRackType] = useState<'typical' | 'non-typical'>(aiScoreSheet.metadata.rack_type)
   const [mainFramePoints, setMainFramePoints] = useState<number>(aiScoreSheet.metadata.main_frame_points)
   const [reviewNotes, setReviewNotes] = useState<string>('')
+  const [approxGrossScore, setApproxGrossScore] = useState<string>('')
+  const [approxNetScore, setApproxNetScore] = useState<string>('')
+  const [approxScoreOption, setApproxScoreOption] = useState<ApproximateScoreOptionValue>('approximate')
+  const [approxScoreNotes, setApproxScoreNotes] = useState<string>('')
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('draft')
   const [isExpanded, setIsExpanded] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -325,6 +374,10 @@ export function ScoreSheetEditor({
     setHasSaved(false)
     setReviewStatus('draft')
     setSaveError(null)
+    setApproxGrossScore('')
+    setApproxNetScore('')
+    setApproxScoreOption('approximate')
+    setApproxScoreNotes('')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [predictionId, precisionRunId])
 
@@ -332,6 +385,22 @@ export function ScoreSheetEditor({
   const correctedGross = calculateGrossScore(measurements)
   const correctedNet = calculateNetScore(measurements, rackType)
   const correctedDeductions = calculateSymmetryDeductions(measurements)
+  const selectedApproxScoreOption = getApproximateScoreOption(approxScoreOption)
+  const approximateScorePreview = parseApproximateLearningScoreInput({
+    grossScore: approxGrossScore,
+    netScore: approxNetScore,
+    source: selectedApproxScoreOption.source,
+    precision: selectedApproxScoreOption.precision,
+    notes: approxScoreNotes,
+  })
+  const approximateLearningWeight = getLearningScoreWeight(
+    selectedApproxScoreOption.source,
+    selectedApproxScoreOption.precision,
+  )
+  const approximateNetExceedsGross =
+    approximateScorePreview.value?.grossScore != null &&
+    approximateScorePreview.value?.netScore != null &&
+    approximateScorePreview.value.netScore > approximateScorePreview.value.grossScore
 
   // Sync auto-computed symmetry deductions back into measurements without recursion.
   // Use a ref to compare the previous computed value so we only call setMeasurements
@@ -388,6 +457,29 @@ export function ScoreSheetEditor({
     
     try {
       const newStatus: ReviewStatus = asFinal ? 'final' : 'draft'
+      const approximateOption = getApproximateScoreOption(approxScoreOption)
+      const approximateScoreResult = parseApproximateLearningScoreInput({
+        grossScore: approxGrossScore,
+        netScore: approxNetScore,
+        source: approximateOption.source,
+        precision: approximateOption.precision,
+        notes: approxScoreNotes,
+      })
+
+      if (approximateScoreResult.error) {
+        setSaveError(approximateScoreResult.error)
+        return
+      }
+
+      const approximateScore: ApproximateLearningScoreInput | null = approximateScoreResult.value
+        ? {
+            grossScore: approximateScoreResult.value.grossScore,
+            netScore: approximateScoreResult.value.netScore,
+            source: approximateScoreResult.value.source,
+            precision: approximateScoreResult.value.precision,
+            notes: approximateScoreResult.value.notes,
+          }
+        : null
       
       // Convert AI sheet to canonical payload
       const aiPayload = toScoreSheetPayload(aiScoreSheet, {
@@ -447,6 +539,7 @@ export function ScoreSheetEditor({
           aiSheet: aiPayload,
           notes: reviewNotes || null,
           isTrainingTruth: asFinal,
+          ...(approximateScore ? { approximate_score: approximateScore } : {}),
         }),
       })
       
@@ -480,6 +573,12 @@ export function ScoreSheetEditor({
     correctedGross,
     correctedNet,
     reviewNotes,
+    approxGrossScore,
+    approxNetScore,
+    approxScoreOption,
+    approxScoreNotes,
+    isFallback,
+    aiFieldProvenance,
     onSave,
     onFinalize,
   ])
@@ -740,6 +839,99 @@ export function ScoreSheetEditor({
                   </span>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Optional aggregate learning score */}
+          <div className="space-y-3 rounded-lg border border-dashed border-border/70 bg-muted/20 p-3">
+            <div className="space-y-1">
+              <div className="text-sm font-semibold">Known or Approximate Score</div>
+              <p className="text-xs text-muted-foreground">
+                If you do not have every official measurement, you can still add an approximate gross or net score.
+                RAX CORE will treat this as a lower-weight learning signal, not an official score.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="approx-gross-score">Approximate Gross Score</Label>
+                <Input
+                  id="approx-gross-score"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  max="400"
+                  placeholder="Example: 156.5"
+                  value={approxGrossScore}
+                  onChange={(e) => setApproxGrossScore(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="approx-net-score">Approximate Net Score</Label>
+                <Input
+                  id="approx-net-score"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  max="400"
+                  placeholder="Example: 149"
+                  value={approxNetScore}
+                  onChange={(e) => setApproxNetScore(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Score source / confidence</Label>
+              <Select
+                value={approxScoreOption}
+                onValueChange={(value) => setApproxScoreOption(value as ApproximateScoreOptionValue)}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {APPROXIMATE_SCORE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="approx-score-notes">Optional notes</Label>
+              <Textarea
+                id="approx-score-notes"
+                placeholder="Example: scored by taxidermist, rough tape estimate, friend estimated, official B&C sheet pending."
+                value={approxScoreNotes}
+                onChange={(e) => setApproxScoreNotes(e.target.value)}
+                rows={2}
+              />
+            </div>
+
+            {approximateScorePreview.error && (
+              <p className="text-xs font-medium text-destructive">
+                {approximateScorePreview.error}
+              </p>
+            )}
+
+            {approximateNetExceedsGross && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Net score is usually less than or equal to gross. Double-check this value.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="text-[11px] text-muted-foreground">
+              Learning weight: {getLearningScoreWeightLabel(approximateLearningWeight)} - {selectedApproxScoreOption.label.toLowerCase()}.
+              {' '}Exact score sheet measurements remain primary. Not used for Verified Score.
             </div>
           </div>
 

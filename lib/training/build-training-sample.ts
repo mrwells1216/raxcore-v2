@@ -23,6 +23,10 @@ export function buildTrainingSample(params: {
       ?.map((img: any) => img.image_url || img.public_url)
       .filter(Boolean) ??
     []
+  const approximateScore =
+    reviewedSheet?.metadata?.approximate_score ??
+    reviewedSheet?.approximate_score ??
+    null
 
   return {
     buck_id: buckId,
@@ -59,6 +63,17 @@ export function buildTrainingSample(params: {
         reviewedSheet?.netScore ??
         null,
       measurements: reviewedSheet?.measurements ?? null,
+      ...(approximateScore
+        ? {
+            approximate_score: approximateScore,
+            learning_metadata: {
+              aggregate_only: true,
+              field_level_calibration: false,
+              verified_score_eligible: false,
+              note: 'Aggregate approximate score only - not suitable for field-level calibration.',
+            },
+          }
+        : {}),
     },
 
     review_completeness: reviewCompleteness,

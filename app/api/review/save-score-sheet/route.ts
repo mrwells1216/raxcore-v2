@@ -3,11 +3,39 @@ import { createClient } from '@/lib/supabase/server'
 import { buildTrainingSample } from '@/lib/training/build-training-sample'
 import { getReviewCompleteness } from '@/lib/review/review-completeness'
 import { isOfficialReview } from '@/lib/review/is-official-review'
+import {
+  APPROXIMATE_SCORE_LEARNING_NOTE,
+  parseApproximateLearningScoreInput,
+  type ApproximateLearningScoreMetadata,
+} from '@/lib/review/types'
 import { loadEffectiveMeasurementGraph } from '@/lib/scoring/load-effective-measurement-graph'
 import { getServiceSupabase } from '@/lib/supabase/admin'
 import { onIntervalMiss, onHighConfidenceMiss } from '@/lib/supervision/hooks'
 import { isIntervalMiss } from '@/lib/supervision/interval-miss-detector'
 import { recordMeasurementDiff } from '@/lib/training/correction-events'
+
+function attachApproximateScoreMetadata(
+  reviewedSheet: any,
+  approximateScore: ApproximateLearningScoreMetadata | null
+) {
+  if (!approximateScore || !reviewedSheet || typeof reviewedSheet !== 'object') {
+    return reviewedSheet
+  }
+
+  const existingMetadata =
+    reviewedSheet.metadata && typeof reviewedSheet.metadata === 'object'
+      ? reviewedSheet.metadata
+      : {}
+
+  return {
+    ...reviewedSheet,
+    metadata: {
+      ...existingMetadata,
+      approximate_score: approximateScore,
+      learning_score_note: APPROXIMATE_SCORE_LEARNING_NOTE,
+    },
+  }
+}
 
 export async function POST(req: Request) {
   const db = await createClient()
@@ -17,6 +45,8 @@ export async function POST(req: Request) {
     predictionId,
     buckId,
     reviewedSheet,
+    approximate_score,
+    approximateScore,
     isTrainingTruth = false,
   } = body ?? {}
 
@@ -27,8 +57,28 @@ export async function POST(req: Request) {
     )
   }
 
+  const approximateScoreResult = parseApproximateLearningScoreInput(
+    approximate_score ??
+    approximateScore ??
+    reviewedSheet?.metadata?.approximate_score ??
+    reviewedSheet?.approximate_score ??
+    null
+  )
+
+  if (approximateScoreResult.error) {
+    return NextResponse.json(
+      { error: approximateScoreResult.error },
+      { status: 400 }
+    )
+  }
+
+  const reviewedSheetForSave = attachApproximateScoreMetadata(
+    reviewedSheet,
+    approximateScoreResult.value
+  )
+
   const reviewStatus = isTrainingTruth ? 'final' : 'draft'
-  const reviewedMeasurements = reviewedSheet?.measurements ?? null
+  const reviewedMeasurements = reviewedSheetForSave?.measurements ?? null
   const reviewCompleteness = getReviewCompleteness(reviewedMeasurements)
   const isOfficial = isOfficialReview({
     reviewCompleteness,
@@ -45,13 +95,13 @@ export async function POST(req: Request) {
   })
 
   const reviewedGross =
-    reviewedSheet?.measurements?.grossScore ??
-    reviewedSheet?.grossScore ??
+    reviewedSheetForSave?.measurements?.grossScore ??
+    reviewedSheetForSave?.grossScore ??
     null
 
   const reviewedNet =
-    reviewedSheet?.measurements?.netScore ??
-    reviewedSheet?.netScore ??
+    reviewedSheetForSave?.measurements?.netScore ??
+    reviewedSheetForSave?.netScore ??
     null
 
   const { data: existing, error: existingError } = await db
@@ -74,7 +124,7 @@ export async function POST(req: Request) {
   const reviewedScoreSheetPayload = {
     buck_id: buckId,
     prediction_id: predictionId,
-    sheet_json: reviewedSheet,
+    sheet_json: reviewedSheetForSave,
     reviewed_gross: reviewedGross,
     reviewed_net: reviewedNet,
     review_status: reviewStatus,
@@ -129,7 +179,7 @@ export async function POST(req: Request) {
   // This is best-effort: failures are reported as warnings but do not fail the save.
   let graphPatchWarnings: string[] = []
   {
-    const m = reviewedSheet?.measurements ?? {}
+    const m = reviewedSheetForSave?.measurements ?? {}
     const graphWarnings: string[] = []
     await (async () => {
       try {
@@ -279,7 +329,7 @@ export async function POST(req: Request) {
   const trainingSample = buildTrainingSample({
     buckId,
     predictionId,
-    reviewedSheet,
+    reviewedSheet: reviewedSheetForSave,
     originalPrediction: prediction,
     reviewCompleteness,
     isOfficial,
@@ -307,7 +357,7 @@ export async function POST(req: Request) {
   }
 
   // WI-2: Record per-field correction events (non-blocking) when reviewed measurements differ from AI.
-  if (reviewedSheet?.measurements && prediction.measurements) {
+  if (reviewedSheetForSave?.measurements && prediction.measurements) {
     const { data: authUser } = await db.auth.getUser()
     recordMeasurementDiff({
       buckId,
@@ -315,7 +365,7 @@ export async function POST(req: Request) {
       userId: authUser?.user?.id ?? null,
       correctionSource: 'review_sheet',
       aiMeasurements: prediction.measurements as Record<string, number | null | undefined>,
-      userMeasurements: reviewedSheet.measurements as Record<string, number | null | undefined>,
+      userMeasurements: reviewedSheetForSave.measurements as Record<string, number | null | undefined>,
       confidenceTierBefore: (() => {
         const pct = prediction.confidence_percent ?? 0
         return pct >= 80 ? 'very_high' : pct >= 65 ? 'high' : pct >= 45 ? 'medium' : 'low'
