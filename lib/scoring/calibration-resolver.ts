@@ -3,6 +3,7 @@ import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
 import type { LandmarkDetection } from './landmark-detection'
 import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
 import type { ArucoDetectionResult } from './aruco-types'
+import { computeCalibrationFromEyeCircle } from './landmark-geometry'
 
 // Known whitetail anatomical references (inches)
 const ANATOMICAL_REFERENCES = {
@@ -14,6 +15,7 @@ export type CalibrationSource =
   | 'depth_map_lidar'
   | 'aruco_marker'
   | 'reference_object'
+  | 'eye_circle_anatomical'
   | 'anatomical_prior'
 
 export interface CalibrationResult {
@@ -110,7 +112,29 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 4: Anatomical priors from landmarks
+  // Priority 4: Eye iris circle (per-eye anatomical reference)
+  // — preferred over the inter-eye box prior because it works with a
+  //   single eye visible and the iris size is more stable across deer.
+  const eyeCircle = computeCalibrationFromEyeCircle(landmarks)
+  if (
+    eyeCircle &&
+    isFiniteNumber(eyeCircle.pixelsPerInch) &&
+    eyeCircle.pixelsPerInch > 0 &&
+    eyeCircle.confidence > 0.45
+  ) {
+    return {
+      pixelsPerInch: eyeCircle.pixelsPerInch,
+      source: 'eye_circle_anatomical',
+      confidence: eyeCircle.confidence,
+      method:
+        eyeCircle.eyeUsed === 'average'
+          ? `iris average (both eyes, ${eyeCircle.radiusPxUsed.toFixed(1)}px)`
+          : `iris (${eyeCircle.eyeUsed}, ${eyeCircle.radiusPxUsed.toFixed(1)}px${eyeCircle.isElliptical ? ', elliptical' : ''})`,
+      warnings: eyeCircle.warnings,
+    }
+  }
+
+  // Priority 5: Anatomical priors from landmarks (inter-eye / inter-pedicle)
   return resolveAnatomicalPrior(landmarks)
 }
 

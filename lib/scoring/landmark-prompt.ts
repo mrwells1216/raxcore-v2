@@ -11,7 +11,11 @@ TASK: Locate the following antler landmarks in this image. Return the PIXEL COOR
 LANDMARKS TO FIND:
 
 SKULL REFERENCES (for scale calibration):
-  - eye_left, eye_right: center of each visible eye socket
+  - eye_left, eye_right: center of the visible iris (the dark circular area, not the whole socket)
+      Also return: radiusPx (iris radius in pixels), radiusMajorPx (longer radius if elliptical
+      side profile, otherwise equal to radiusPx), isElliptical (true for side-profile views).
+      Measure the iris only — NOT the eyelid or sclera. If the eye is occluded, blurred, or
+      not clearly visible, set radiusPx: null. Prefer null over a guessed radius.
   - pedicle_left, pedicle_right: center of each antler base (where antler meets skull)
   - nose_tip: tip of the nose
   - nose_bridge_top: top of the nose bridge between the eyes

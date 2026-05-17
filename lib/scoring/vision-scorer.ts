@@ -1170,6 +1170,10 @@ const LandmarkPointSchema = z.object({
   confidence: z.number().min(0).max(1),
   visibility: z.enum(['clear', 'partially_visible', 'occluded', 'not_visible']),
   sourceAngle: z.enum(['front', 'left', 'right', 'unknown']),
+  // Eye circle fields — populated only for eye_left / eye_right
+  radiusPx: z.number().nullable().optional(),
+  radiusMajorPx: z.number().nullable().optional(),
+  isElliptical: z.boolean().optional(),
 })
 
 const LandmarkDetectionSchema = z.object({
@@ -1216,6 +1220,13 @@ export async function detectLandmarkPositions(
       `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
       `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
       `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
+      `\n` +
+      `EYE CIRCLE — for eye_left and eye_right, also return:\n` +
+      `  - radiusPx: radius in pixels of the visible iris (the dark circular area only — NOT the eyelid or sclera)\n` +
+      `  - radiusMajorPx: longer radius if the iris appears elliptical (side profile); equal to radiusPx for circular eyes\n` +
+      `  - isElliptical: true when the iris appears as an ellipse (side profile), false when circular (front view)\n` +
+      `  - If the eye is occluded, blurred, or not clearly visible, set radiusPx: null. Prefer null over a guessed radius.\n` +
+      `\n` +
       `Landmarks to locate: ${landmarkList}.`
 
     const { object } = await generateObject({
@@ -1240,6 +1251,9 @@ export async function detectLandmarkPositions(
         visibility: lm.visibility,
         sourceAngle: lm.sourceAngle,
         source: 'ai' as const,
+        radiusPx: lm.radiusPx ?? null,
+        radiusMajorPx: lm.radiusMajorPx ?? lm.radiusPx ?? null,
+        isElliptical: lm.isElliptical ?? false,
       }))
 
     const locatedCount = landmarks.filter(

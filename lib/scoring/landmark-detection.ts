@@ -38,6 +38,14 @@ export interface LandmarkDetection {
   sourceAngle: 'front' | 'left' | 'right' | 'unknown'
   /** 'ai' for initial detection, 'human' after user drag-to-correct */
   source: 'ai' | 'human'
+
+  // ── Eye circle fields (only populated for eye_left / eye_right) ──
+  /** Radius of the visible iris circle in pixels, null if not estimated */
+  radiusPx?: number | null
+  /** Longer radius when iris appears elliptical (side profile); same as radiusPx for circular eyes */
+  radiusMajorPx?: number | null
+  /** True when the iris appears elliptical (side profile angle) */
+  isElliptical?: boolean
 }
 
 export interface LandmarkDetectionResult {
