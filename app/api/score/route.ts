@@ -152,6 +152,20 @@ export async function POST(request: Request) {
   if (cropRegionsRaw) {
     try { cropRegions = JSON.parse(cropRegionsRaw) || {} } catch { /* optional */ }
   }
+  const pedicleCalibrationRaw = formData.get('pedicle_calibration') as string | null
+  let pedicleCalibration: import('@/lib/scoring/calibration-resolver').PedicleCalibrationInput & {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelDistance?: number
+  } | null = null
+  if (pedicleCalibrationRaw) {
+    try {
+      const parsed = JSON.parse(pedicleCalibrationRaw)
+      if (parsed && typeof parsed.pixelsPerInch === 'number' && typeof parsed.confidence === 'number') {
+        pedicleCalibration = parsed
+      }
+    } catch { /* optional */ }
+  }
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -659,6 +673,7 @@ export async function POST(request: Request) {
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
       arucoDetection: arucoResult,
+      pedicleCalibration: pedicleCalibration ?? undefined,
       traceId: requestId,
     })
 
@@ -897,6 +912,8 @@ export async function POST(request: Request) {
         cropBoxMetadata: anyCropApplied ? { perImage: cropMetadata, anyCropApplied: true } : null,
         // ArUco marker detection (printed reference)
         arucoDetection: arucoResult,
+        // User-placed pedicle calibration dots
+        pedicleCalibration: pedicleCalibration,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       imageDiagnosticsSummary: imageDiagnosticsSummaryRaw ? (() => {
@@ -910,6 +927,7 @@ export async function POST(request: Request) {
         ? { perImage: cropMetadata, anyCropApplied: true }
         : null,
       arucoDetectionMetadata: arucoResult,
+      pedicleCalibrationMetadata: pedicleCalibration,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -935,6 +953,14 @@ export async function POST(request: Request) {
           depthCalibration,
           referenceObject: null,
           arucoResult,
+          pedicleCalibration: pedicleCalibration
+            ? {
+                source: pedicleCalibration.source,
+                pixelsPerInch: pedicleCalibration.pixelsPerInch,
+                confidence: pedicleCalibration.confidence,
+                knownSpacingInches: pedicleCalibration.knownSpacingInches,
+              }
+            : null,
         })
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
@@ -1224,6 +1250,7 @@ export async function POST(request: Request) {
         ? { perImage: cropMetadata, anyCropApplied: true }
         : null,
       arucoDetection: arucoResult,
+      pedicleCalibration,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

@@ -14,9 +14,18 @@ const ANATOMICAL_REFERENCES = {
 export type CalibrationSource =
   | 'depth_map_lidar'
   | 'aruco_marker'
+  | 'user_placed_known'
+  | 'user_placed_anatomical'
   | 'reference_object'
   | 'eye_circle_anatomical'
   | 'anatomical_prior'
+
+export interface PedicleCalibrationInput {
+  source: 'user_placed_known' | 'user_placed_anatomical'
+  pixelsPerInch: number
+  confidence: number
+  knownSpacingInches: number | null
+}
 
 export interface CalibrationResult {
   pixelsPerInch: number
@@ -37,6 +46,7 @@ export interface ResolveCalibrationOptions {
   depthCalibration?: DepthCalibrationResult | null
   referenceObject?: ReferenceObjectInput | null
   arucoResult?: ArucoDetectionResult | null
+  pedicleCalibration?: PedicleCalibrationInput | null
 }
 
 /**
@@ -51,7 +61,7 @@ export interface ResolveCalibrationOptions {
 export function resolveCalibration(
   options: ResolveCalibrationOptions,
 ): CalibrationResult | null {
-  const { landmarks, depthCalibration, referenceObject, arucoResult } = options
+  const { landmarks, depthCalibration, referenceObject, arucoResult, pedicleCalibration } = options
 
   // Priority 1: LiDAR depth calibration
   if (
@@ -86,6 +96,26 @@ export function resolveCalibration(
       confidence: arucoResult.confidence,
       method: `${sizeLabel} (${arucoResult.method})`,
       warnings: arucoResult.warnings,
+    }
+  }
+
+  // Priority 2b: User-placed pedicle calibration dots
+  if (
+    pedicleCalibration &&
+    isFiniteNumber(pedicleCalibration.pixelsPerInch) &&
+    pedicleCalibration.pixelsPerInch > 0 &&
+    pedicleCalibration.confidence > 0.5
+  ) {
+    const spacingLabel =
+      pedicleCalibration.source === 'user_placed_known' && pedicleCalibration.knownSpacingInches
+        ? `${pedicleCalibration.knownSpacingInches}" measured`
+        : '4.5" anatomical average'
+    return {
+      pixelsPerInch: pedicleCalibration.pixelsPerInch,
+      source: pedicleCalibration.source,
+      confidence: pedicleCalibration.confidence,
+      method: `pedicle dots (${spacingLabel})`,
+      warnings: [],
     }
   }
 

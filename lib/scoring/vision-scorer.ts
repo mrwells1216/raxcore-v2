@@ -92,6 +92,14 @@ export interface VisionScoringInput {
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
+  pedicleCalibration?: {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelsPerInch: number
+    confidence: number
+    knownSpacingInches: number | null
+    source: 'user_placed_known' | 'user_placed_anatomical'
+  } | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -346,6 +354,20 @@ ${aruco.warnings.length > 0 ? `- Warnings: ${aruco.warnings.join('; ')}` : ''}
 `
       : ''
 
+  const ped = input.pedicleCalibration
+  const pedicleBlock =
+    ped && ped.leftDot && ped.rightDot
+      ? `
+PEDICLE CALIBRATION (user-confirmed dot placement)
+- The user dragged calibration dots to the left and right pedicle bases.
+- Left pedicle:  (${(ped.leftDot.x * 100).toFixed(1)}%, ${(ped.leftDot.y * 100).toFixed(1)}%) of the image
+- Right pedicle: (${(ped.rightDot.x * 100).toFixed(1)}%, ${(ped.rightDot.y * 100).toFixed(1)}%) of the image
+- Pedicle spacing: ${ped.knownSpacingInches ?? 4.5}" ${ped.knownSpacingInches ? '(user-measured)' : '(anatomical average)'}
+- Computed scale: ${ped.pixelsPerInch.toFixed(1)} px/in (confidence ${(ped.confidence * 100).toFixed(0)}%)
+- Use these positions as a confirmed scale reference AND as the exact anchor for main-beam measurements (burr starts here on each side).
+`
+      : ''
+
   const hat = input.referenceObject?.hat
   const hatReferenceBlock =
     hat?.present && hat.hatType
@@ -380,6 +402,7 @@ ${angleDescriptions}
 ${cropNote}
 ${precisionReferenceBlock}
 ${arucoBlock}
+${pedicleBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}
 

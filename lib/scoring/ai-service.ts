@@ -74,6 +74,14 @@ export interface ScoringInput {
   precisionReferenceProfile?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   arucoDetection?: import('./aruco-types').ArucoDetectionResult | null
+  pedicleCalibration?: {
+    leftDot?: { x: number; y: number }
+    rightDot?: { x: number; y: number }
+    pixelsPerInch: number
+    confidence: number
+    knownSpacingInches: number | null
+    source: 'user_placed_known' | 'user_placed_anatomical'
+  } | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -767,6 +775,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     precisionReference: input.precisionReferenceProfile,
     referenceObject: input.referenceObject ?? undefined,
     arucoDetection: input.arucoDetection ?? undefined,
+    pedicleCalibration: input.pedicleCalibration ?? undefined,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 

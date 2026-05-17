@@ -10,6 +10,7 @@ import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { AntlerCropBox, type CropRegion } from './antler-crop-box'
+import { CalibrationDots, type PedicleCalibrationResult } from './calibration-dots'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
@@ -61,6 +62,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const [bannerDismissed, setBannerDismissed] = useState(false)
   const [cropRegions, setCropRegions] = useState<Record<number, CropRegion | null>>({})
   const [cropStepSkipped, setCropStepSkipped] = useState(false)
+  const [pedicleCalibration, setPedicleCalibration] = useState<PedicleCalibrationResult | null>(null)
+  const [pedicleStepSkipped, setPedicleStepSkipped] = useState(false)
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -180,6 +183,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         return next
       })
       setCropStepSkipped(false)
+      setPedicleCalibration(null)
+      setPedicleStepSkipped(false)
       updateIntakeQuality(imgs)
       const cq = imgs.length > 0
         ? buildCaptureQualitySummary({
@@ -232,6 +237,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
     setSelectedImageAngles(angles.map(a => a as CaptureAngle))
     setCropRegions({})
     setCropStepSkipped(false)
+    setPedicleCalibration(null)
+    setPedicleStepSkipped(false)
     updateIntakeQuality(scanImages)
     const cq = buildCaptureQualitySummary({
       images: scanImages.map(img => ({ name: img.id })),
@@ -387,6 +394,11 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         cropRegionsByIndex[String(i)] = cropRegions[i] ?? null
       }
       apiFormData.append('crop_regions', JSON.stringify(cropRegionsByIndex))
+
+      // User-placed pedicle calibration dots (optional)
+      if (pedicleCalibration) {
+        apiFormData.append('pedicle_calibration', JSON.stringify(pedicleCalibration))
+      }
 
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
@@ -652,6 +664,61 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
               className="w-full text-[11px] font-mono tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors py-2"
             >
               Skip cropping — use full photos
+            </button>
+          </div>
+        </Section>
+      )}
+
+      {/* ── 5a-bis. Pedicle calibration dots (optional) ────────────────── */}
+      {gridImages.length > 0 && !pedicleStepSkipped && !pedicleCalibration && (() => {
+        const frontImg = gridImages.find(img => img.angleType === 'front') ?? gridImages[0]
+        if (!frontImg) return null
+        return (
+          <Section
+            label="Pedicle calibration"
+            sublabel="Optional — drag two dots to each antler base for confirmed scale"
+          >
+            <CalibrationDots
+              imageUrl={frontImg.url}
+              imageNaturalWidth={frontImg.width || 1920}
+              imageNaturalHeight={frontImg.height || 1080}
+              onConfirm={(r) => setPedicleCalibration(r)}
+              onSkip={() => setPedicleStepSkipped(true)}
+              label={`Photo · ${frontImg.angleType}`}
+            />
+          </Section>
+        )
+      })()}
+
+      {/* Confirmation card after pedicle calibration is committed */}
+      {pedicleCalibration && (
+        <Section label="Pedicle calibration applied">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Spacing</span>
+              <span className="font-mono text-amber-200">
+                {pedicleCalibration.knownSpacingInches != null
+                  ? `${pedicleCalibration.knownSpacingInches}"  (measured)`
+                  : '4.5"  (anatomical average)'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Scale</span>
+              <span className="font-mono text-amber-200">{pedicleCalibration.pixelsPerInch.toFixed(1)} px/in</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Confidence</span>
+              <span className="font-mono text-amber-200">{Math.round(pedicleCalibration.confidence * 100)}%</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setPedicleCalibration(null)
+                setPedicleStepSkipped(false)
+              }}
+              className="w-full text-[11px] font-mono tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors py-2"
+            >
+              Re-place dots
             </button>
           </div>
         </Section>
