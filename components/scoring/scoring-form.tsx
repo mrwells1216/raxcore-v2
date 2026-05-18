@@ -3,11 +3,10 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Eye, Calendar, AlertCircle, Printer, Ruler } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, MapPin, Camera, Calendar, AlertCircle, Printer, Ruler } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
@@ -131,12 +130,6 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   
   const watchRackType = form.watch('rack_type')
   const watchIrregularPoints = form.watch('irregular_points_present')
-  const watchReferenceObjectType = form.watch('reference_object_type')
-  const watchRingSize = form.watch('reference_object_ring_size')
-  const watchHatType = form.watch('reference_object_hat_type') as HatType | null | undefined
-  const ringDiameter = watchRingSize != null ? ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchRingSize) ?? -1) : null
-  
-  const watchPrecisionModeEnabled = form.watch('precision_mode_enabled')
   const watchReferenceType = form.watch('reference_type')
   const watchPrecisionRingSizeUS = form.watch('reference_ring_size_us')
   const watchPrecisionHatType = form.watch('reference_hat_type')
@@ -160,7 +153,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
     ? 'none'
     : watchReferenceType
   const referenceModeSummary = buildReferenceModeSummary({
-    precisionModeEnabled: watchPrecisionModeEnabled,
+    precisionModeEnabled: watchReferenceType !== 'none',
     referenceType: precisionRefType,
     referenceNotes: watchReferenceNotes,
     referenceSizeValue: watchReferenceSizeValue,
@@ -365,111 +358,21 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             )}
           />
 
-          {/* Capture device + Ears visible in 2-col */}
-          <div className="grid grid-cols-2 gap-2">
-            <FormField
-              control={form.control}
-              name="capture_device"
-              render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">Device</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Camera" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="ears_fully_visible"
-              render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">Ears Visible?</FormLabel>
-                  <FormControl>
-                    <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-secondary/30">
-                      <Eye className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span className="text-xs text-muted-foreground flex-1">Scale ref</span>
-                      <Switch checked={field.value} onCheckedChange={field.onChange} className="scale-90" />
-                    </div>
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-          </div>
-        </div>
-
-        <Separator className="my-3" />
-
-        {/* Section: Optional Details */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Optional</h3>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <FormField
-              control={form.control}
-              name="harvest_method"
-              render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">Method</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                    <FormControl>
-                      <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Harvest" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {HARVEST_METHODS.map((method) => <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="harvest_year"
-              render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <FormLabel className="text-xs">Year</FormLabel>
-                  <FormControl>
-                    <Input 
-                      type="number" 
-                      min={1900} 
-                      max={new Date().getFullYear()} 
-                      placeholder="2024" 
-                      value={field.value ?? ''} 
-                      onChange={(e) => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))} 
-                      className="h-10 text-sm" 
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-
+          {/* Capture device */}
           <FormField
             control={form.control}
-            name="notes"
+            name="capture_device"
             render={({ field }) => (
               <FormItem className="space-y-1">
-                <FormLabel className="text-xs">Notes</FormLabel>
-                <FormControl>
-                  <Textarea 
-                    placeholder="Unusual features, quality issues..." 
-                    className="min-h-[60px] resize-none text-sm" 
-                    {...field} 
-                  />
-                </FormControl>
+                <FormLabel className="text-xs">Device</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                  <FormControl>
+                    <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Camera" /></SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {CAPTURE_DEVICES.map((device) => <SelectItem key={device.value} value={device.value}>{device.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
                 <FormMessage />
               </FormItem>
             )}
@@ -478,109 +381,202 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
 
         <Separator className="my-3" />
 
-        {/* Section: Reference Object */}
-        <div className="space-y-4">
+        {/* Section: Reference Object — always visible, all 8 types */}
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Ruler className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">Reference Object</h3>
+            <Ruler className="h-3.5 w-3.5 text-muted-foreground" />
+            <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Reference Object</h3>
           </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="text-sm font-medium">What reference object is visible in the photo?</label>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {([
-                  ['none', 'No reference visible'],
-                  ['wedding_ring', 'Wedding band or ring'],
-                  ['hat', 'Hat'],
-                ] as const).map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => form.setValue('reference_object_type', val, { shouldDirty: true })}
-                    className={cn(
-                      'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px]',
-                      watchReferenceObjectType === val
-                        ? 'bg-primary/15 text-primary border-primary/30'
-                        : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Type</label>
+              <Select
+                value={watchReferenceType ?? 'none'}
+                onValueChange={(value) => {
+                  form.setValue('reference_type', value as any, { shouldDirty: true })
+                  if (value === 'aruco_marker' && !form.getValues('reference_size_value')) {
+                    form.setValue('reference_size_value', 2, { shouldDirty: true })
+                    form.setValue('reference_size_unit', 'in', { shouldDirty: true })
+                  }
+                }}
+              >
+                <SelectTrigger className="h-10 text-sm">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="ruler">Ruler</SelectItem>
+                  <SelectItem value="credit_card">Card</SelectItem>
+                  <SelectItem value="coin">Coin</SelectItem>
+                  <SelectItem value="aruco_marker">Marker</SelectItem>
+                  <SelectItem value="other_known_object">Other</SelectItem>
+                  <SelectItem value="wedding_ring">Wedding band / ring</SelectItem>
+                  <SelectItem value="hat">Hat (cap, beanie, Stetson)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              A reference object can help estimate scale when no ruler or tape is visible. Best results come from the object clearly visible near the antler.
-            </p>
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              Reference objects are estimated calibration aids only. A ruler or tape measure is still more reliable.
-            </p>
-
-            {watchReferenceObjectType === 'wedding_ring' && (
-              <div className="space-y-2 pt-1">
-                <label className="text-sm font-medium">US Ring Size</label>
-                <Input
-                  type="number"
-                  step={0.5}
-                  min={3}
-                  max={16}
-                  placeholder="e.g. 8, 9.5, 10"
-                  className="min-h-[48px]"
-                  value={watchRingSize ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? null : Number(e.target.value)
-                    form.setValue('reference_object_ring_size', val, { shouldDirty: true })
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Whole and half sizes supported (3–16)</p>
-                {watchRingSize != null && watchRingSize !== 0 && (normalizeRingSizeUS(watchRingSize) === null) && (
-                  <p className="text-xs text-destructive">Enter a US ring size between 3 and 16 (e.g. 8 or 9.5)</p>
-                )}
-                {ringDiameter !== null && (
-                  <p className="text-xs text-muted-foreground font-medium">≈ {ringDiameter} in inner diameter</p>
-                )}
+            {shouldShowReferenceSize && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">{referenceSizeLabel}</label>
+                <div className="flex gap-1">
+                  <Input
+                    type="number"
+                    min="0.1"
+                    step="0.01"
+                    inputMode="decimal"
+                    className="h-10 text-sm flex-1"
+                    value={watchReferenceSizeValue ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value ? Number(e.target.value) : undefined
+                      form.setValue('reference_size_value', value, { shouldDirty: true })
+                    }}
+                  />
+                  <Select
+                    value={watchReferenceSizeUnit ?? 'in'}
+                    onValueChange={(value) => form.setValue('reference_size_unit', value as any, { shouldDirty: true })}
+                  >
+                    <SelectTrigger className="h-10 w-14 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in">in</SelectItem>
+                      <SelectItem value="cm">cm</SelectItem>
+                      <SelectItem value="mm">mm</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 
-            {watchReferenceObjectType === 'hat' && (
-              <div className="space-y-2 pt-1">
-                <label className="text-sm font-medium">Hat type</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(Object.entries(HAT_DIMENSIONS) as Array<[HatType, typeof HAT_DIMENSIONS[HatType]]>).map(([val, info]) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => form.setValue('reference_object_hat_type', val, { shouldDirty: true })}
-                      className={cn(
-                        'px-3 py-2 rounded-xl text-sm font-medium border transition-all touch-manipulation min-h-[40px] text-left',
-                        watchHatType === val
-                          ? 'bg-primary/15 text-primary border-primary/30'
-                          : 'bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80'
-                      )}
-                    >
-                      {info.label}
-                    </button>
-                  ))}
+            {watchReferenceType === 'wedding_ring' && (
+              <div className="space-y-2 p-3 rounded-lg"
+                style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">US Ring Size</label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Whole and half sizes (3–16). Inner diameter used as scale reference.
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Hat brim width is used as a scale reference. Backwards baseball caps, beanies, and skull caps have no visible brim — these are lower confidence because only the crown dome is usable.
-                </p>
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Hat reference is an estimated calibration aid. Brim width varies between manufacturers. A ruler or tape measure is still more reliable.
-                </p>
-                {watchHatType && HAT_DIMENSIONS[watchHatType] && (
-                  <p className="text-xs text-muted-foreground font-medium">
-                    {HAT_DIMENSIONS[watchHatType].brim != null
-                      ? `Brim ≈ ${HAT_DIMENSIONS[watchHatType].brim}" wide`
-                      : `Crown ≈ ${HAT_DIMENSIONS[watchHatType].crown}" tall (less reliable than brim references)`}
+                <Input
+                  type="number"
+                  min="3"
+                  max="16"
+                  step="0.5"
+                  inputMode="decimal"
+                  placeholder="e.g. 8, 9.5, 10"
+                  className="min-h-[48px]"
+                  value={watchPrecisionRingSizeUS ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value ? Number(e.target.value) : null
+                    form.setValue('reference_ring_size_us', raw, { shouldDirty: true })
+                  }}
+                />
+                {watchPrecisionRingSizeUS != null && watchPrecisionRingSizeUS >= 3 && watchPrecisionRingSizeUS <= 16 && (
+                  <p className="text-[10px]" style={{ color: 'rgba(251,191,36,0.7)' }}>
+                    ≈ {ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchPrecisionRingSizeUS) ?? -1) ?? '—'}" inner diameter
                   </p>
                 )}
+                <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
+                  Estimated reference only. A ruler or tape measure is more reliable.
+                </p>
+              </div>
+            )}
+
+            {watchReferenceType === 'hat' && (
+              <div className="space-y-2 p-3 rounded-lg"
+                style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Hat Type</label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Hat brim width is used as a scale reference when clearly visible.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(Object.entries(HAT_DIMENSIONS) as Array<[HatType, typeof HAT_DIMENSIONS[HatType]]>).map(([val, info]) => {
+                    const isSelected = watchPrecisionHatType === val
+                    return (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => form.setValue('reference_hat_type', isSelected ? null : val, { shouldDirty: true })}
+                        className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-xl border transition-all touch-manipulation text-left"
+                        style={{
+                          background: isSelected ? 'rgba(139,90,43,0.12)' : 'transparent',
+                          border:     isSelected ? '1px solid rgba(139,90,43,0.35)' : '1px solid rgba(107,93,82,0.25)',
+                          color:      isSelected ? 'rgba(210,170,110,0.95)' : 'rgba(180,163,145,0.7)',
+                        }}
+                      >
+                        <span className="text-xs font-medium">{info.label}</span>
+                        {info.brim != null
+                          ? <span className="text-[9px] opacity-70">Brim ≈ {info.brim}"</span>
+                          : <span className="text-[9px] opacity-70">Crown only</span>
+                        }
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
+                  Estimated reference only. Brim widths vary by manufacturer (±0.25").
+                </p>
+              </div>
+            )}
+
+            {watchReferenceType === 'aruco_marker' && (
+              <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
+                <a href="/precision-marker" target="_blank" rel="noreferrer">
+                  <Printer className="h-3.5 w-3.5" />
+                  Print marker
+                </a>
+              </Button>
+            )}
+
+            {referenceModeSummary.referencePresent && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Placement</label>
+                <Select
+                  value={watchReferencePlacement ?? 'unknown'}
+                  onValueChange={(value) => form.setValue('reference_placement', value as any, { shouldDirty: true })}
+                >
+                  <SelectTrigger className="h-10 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="same_depth_plane">Same plane</SelectItem>
+                    <SelectItem value="near_antler_plane">Near rack</SelectItem>
+                    <SelectItem value="in_front_or_behind">Front/back</SelectItem>
+                    <SelectItem value="unknown">Unknown</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Notes</label>
+              <Textarea
+                placeholder="Card beside left beam..."
+                className="min-h-[40px] resize-none text-sm"
+                value={watchReferenceNotes ?? ''}
+                onChange={(e) => form.setValue('reference_notes', e.target.value, { shouldDirty: true })}
+              />
+            </div>
+
+            {referenceModeSummary.referencePresent && (
+              <div className="flex items-center gap-1.5 text-xs text-primary">
+                <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                <span className="font-medium">{referenceModeSummary.referenceType}</span>
               </div>
             )}
           </div>
         </div>
+
+        <Separator className="my-3" />
+
+        {/* Known Measurements */}
+        <PreScoringMeasurementsPanel
+          value={preScoringMeasurements}
+          onChange={setPreScoringMeasurements}
+        />
 
         <Separator />
 
@@ -725,216 +721,81 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
           </div>
         </Collapsible>
 
-        {/* Precision Mode */}
-        <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Ruler className="h-3.5 w-3.5 text-muted-foreground" />
-              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Precision</h3>
-            </div>
-            <Switch
-              checked={!!watchPrecisionModeEnabled}
-              onCheckedChange={(checked) => form.setValue('precision_mode_enabled', checked, { shouldDirty: true })}
-              className="scale-90"
-            />
-          </div>
+        <Separator className="my-3" />
 
-          {watchPrecisionModeEnabled && (
-            <div className="space-y-2 pt-1 border-t border-border/40">
+        {/* Section: Optional Details (collapsible) */}
+        <Collapsible>
+          <div className="space-y-2">
+            <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
+              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide">Optional Details</h3>
+              <svg className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 pt-1">
               <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Type</label>
-                  <Select
-                    value={watchReferenceType ?? 'none'}
-                    onValueChange={(value) => {
-                      form.setValue('reference_type', value as any, { shouldDirty: true })
-                      if (value === 'aruco_marker' && !form.getValues('reference_size_value')) {
-                        form.setValue('reference_size_value', 2, { shouldDirty: true })
-                        form.setValue('reference_size_unit', 'in', { shouldDirty: true })
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-10 text-sm">
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="ruler">Ruler</SelectItem>
-                      <SelectItem value="credit_card">Card</SelectItem>
-                      <SelectItem value="coin">Coin</SelectItem>
-                      <SelectItem value="aruco_marker">Marker</SelectItem>
-                      <SelectItem value="other_known_object">Other</SelectItem>
-                      <SelectItem value="wedding_ring">Wedding band / ring</SelectItem>
-                      <SelectItem value="hat">Hat (cap, beanie, Stetson)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {shouldShowReferenceSize && (
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">{referenceSizeLabel}</label>
-                    <div className="flex gap-1">
-                      <Input
-                        type="number"
-                        min="0.1"
-                        step="0.01"
-                        inputMode="decimal"
-                        className="h-10 text-sm flex-1"
-                        value={watchReferenceSizeValue ?? ''}
-                        onChange={(e) => {
-                          const value = e.target.value ? Number(e.target.value) : undefined
-                          form.setValue('reference_size_value', value, { shouldDirty: true })
-                        }}
-                      />
-                      <Select
-                        value={watchReferenceSizeUnit ?? 'in'}
-                        onValueChange={(value) => form.setValue('reference_size_unit', value as any, { shouldDirty: true })}
-                      >
-                        <SelectTrigger className="h-10 w-14 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
+                <FormField
+                  control={form.control}
+                  name="harvest_method"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1">
+                      <FormLabel className="text-xs">Method</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                        <FormControl>
+                          <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Harvest" /></SelectTrigger>
+                        </FormControl>
                         <SelectContent>
-                          <SelectItem value="in">in</SelectItem>
-                          <SelectItem value="cm">cm</SelectItem>
-                          <SelectItem value="mm">mm</SelectItem>
+                          {HARVEST_METHODS.map((method) => <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Ring size — only when wedding_ring selected in precision mode */}
-              {watchReferenceType === 'wedding_ring' && (
-                <div className="space-y-2 p-3 rounded-lg"
-                  style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">US Ring Size</label>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Whole and half sizes (3–16). Inner diameter used as scale reference.
-                    </p>
-                  </div>
-                  <Input
-                    type="number"
-                    min="3"
-                    max="16"
-                    step="0.5"
-                    inputMode="decimal"
-                    placeholder="e.g. 8, 9.5, 10"
-                    className="min-h-[48px]"
-                    value={watchPrecisionRingSizeUS ?? ''}
-                    onChange={(e) => {
-                      const raw = e.target.value ? Number(e.target.value) : null
-                      form.setValue('reference_ring_size_us', raw, { shouldDirty: true })
-                    }}
-                  />
-                  {watchPrecisionRingSizeUS != null && watchPrecisionRingSizeUS >= 3 && watchPrecisionRingSizeUS <= 16 && (
-                    <p className="text-[10px]" style={{ color: 'rgba(251,191,36,0.7)' }}>
-                      ≈ {ringSizeToInnerDiameterInches(normalizeRingSizeUS(watchPrecisionRingSizeUS) ?? -1) ?? '—'}" inner diameter
-                    </p>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                  <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
-                    Estimated reference only. A ruler or tape measure is more reliable.
-                  </p>
-                </div>
-              )}
-
-              {/* Hat type — only when hat selected in precision mode */}
-              {watchReferenceType === 'hat' && (
-                <div className="space-y-2 p-3 rounded-lg"
-                  style={{ background: 'rgba(107,93,82,0.06)', border: '1px solid rgba(107,93,82,0.15)' }}>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground">Hat Type</label>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Hat brim width is used as a scale reference when clearly visible.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {(Object.entries(HAT_DIMENSIONS) as Array<[HatType, typeof HAT_DIMENSIONS[HatType]]>).map(([val, info]) => {
-                      const isSelected = watchPrecisionHatType === val
-                      return (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => form.setValue('reference_hat_type', isSelected ? null : val, { shouldDirty: true })}
-                          className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-xl border transition-all touch-manipulation text-left"
-                          style={{
-                            background: isSelected ? 'rgba(139,90,43,0.12)' : 'transparent',
-                            border:     isSelected ? '1px solid rgba(139,90,43,0.35)' : '1px solid rgba(107,93,82,0.25)',
-                            color:      isSelected ? 'rgba(210,170,110,0.95)' : 'rgba(180,163,145,0.7)',
-                          }}
-                        >
-                          <span className="text-xs font-medium">{info.label}</span>
-                          {info.brim != null
-                            ? <span className="text-[9px] opacity-70">Brim ≈ {info.brim}"</span>
-                            : <span className="text-[9px] opacity-70">Crown only</span>
-                          }
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <p className="text-[10px]" style={{ color: 'rgba(139,90,43,0.75)' }}>
-                    Estimated reference only. Brim widths vary by manufacturer (±0.25").
-                  </p>
-                </div>
-              )}
-
-              {watchReferenceType === 'aruco_marker' && (
-                <Button asChild variant="outline" size="sm" className="w-full h-8 text-xs">
-                  <a href="/precision-marker" target="_blank" rel="noreferrer">
-                    <Printer className="h-3.5 w-3.5" />
-                    Print marker
-                  </a>
-                </Button>
-              )}
-
-              {referenceModeSummary.referencePresent && (
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Placement</label>
-                  <Select
-                    value={watchReferencePlacement ?? 'unknown'}
-                    onValueChange={(value) => form.setValue('reference_placement', value as any, { shouldDirty: true })}
-                  >
-                    <SelectTrigger className="h-10 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="same_depth_plane">Same plane</SelectItem>
-                      <SelectItem value="near_antler_plane">Near rack</SelectItem>
-                      <SelectItem value="in_front_or_behind">Front/back</SelectItem>
-                      <SelectItem value="unknown">Unknown</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Reference notes */}
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Notes</label>
-                <Textarea
-                  placeholder="Card beside left beam..."
-                  className="min-h-[40px] resize-none text-sm"
-                  value={watchReferenceNotes ?? ''}
-                  onChange={(e) => form.setValue('reference_notes', e.target.value, { shouldDirty: true })}
+                />
+                <FormField
+                  control={form.control}
+                  name="harvest_year"
+                  render={({ field }) => (
+                    <FormItem className="space-y-1">
+                      <FormLabel className="text-xs">Year</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1900}
+                          max={new Date().getFullYear()}
+                          placeholder="2024"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+                          className="h-10 text-sm"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem className="space-y-1">
+                    <FormLabel className="text-xs">Notes</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Unusual features, quality issues..."
+                        className="min-h-[60px] resize-none text-sm"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
 
-              {/* Status indicator */}
-              {referenceModeSummary.referencePresent && (
-                <div className="flex items-center gap-1.5 text-xs text-primary">
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  <span className="font-medium">{referenceModeSummary.referenceType}</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Known Measurements */}
-        <PreScoringMeasurementsPanel
-          value={preScoringMeasurements}
-          onChange={setPreScoringMeasurements}
-        />
 
         {/* Image Diagnostics Summary */}
         {imageDiagnosticsSummary && (

@@ -326,20 +326,20 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         recommendationReason: captureQuality.recommendationReason,
       }))
 
-      if (data.precision_mode_enabled) {
+      if (data.reference_type && data.reference_type !== 'none') {
         const precisionRefType = (data.reference_type === 'wedding_ring' || data.reference_type === 'hat')
           ? 'none' as const
           : data.reference_type
         const referenceModeSummary = buildReferenceModeSummary({
-          precisionModeEnabled: data.precision_mode_enabled,
+          precisionModeEnabled: true,
           referenceType: precisionRefType,
           referenceNotes: data.reference_notes,
           referenceSizeValue: data.reference_size_value,
           referenceSizeUnit: data.reference_size_unit,
           referencePlacement: data.reference_placement,
         })
-        apiFormData.append('precision_mode_enabled', String(data.precision_mode_enabled))
-        apiFormData.append('reference_type', data.reference_type ?? 'none')
+        apiFormData.append('precision_mode_enabled', 'true')
+        apiFormData.append('reference_type', data.reference_type)
         if (data.reference_notes) apiFormData.append('reference_notes', data.reference_notes)
         if (data.reference_size_value !== undefined) {
           apiFormData.append('reference_size_value', String(data.reference_size_value))
