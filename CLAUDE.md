@@ -129,6 +129,9 @@ If a feature looks impressive but does not improve measurement truth, do not shi
 ### 3.14. Point count dual sliders ✓
 Replaced 8-14pt chip grid with two `PointCountSlider` components (total 4-30; main frame 6-16, shown only when total >= 6; auto-corrects if main frame > total). New `total_points` field threads through ScoringFormData, wizard FormData, ScoringInput, VisionScoringInput, and the vision prompt. Files: new `components/scoring/point-count-slider.tsx`; modified `scoring-form.tsx`, `lib/types.ts`, `scoring-wizard.tsx`, `app/api/score/route.ts`, `lib/scoring/ai-service.ts`, `lib/scoring/vision-scorer.ts`.
 
+### 3.15. Pre-AI manual measurements panel ✓
+Optional collapsible "Known Measurements" section in the scoring form lets users enter tape-measured B&C fields (main beams, G1–G4, H1–H4, inside spread) before submission. Non-null values are serialized to JSON in the wizard, parsed in route.ts, passed to `scoreBuck` → `VisionScoringInput`, and injected into the vision prompt as "USER-PROVIDED MEASUREMENTS (treat as ground truth) — DO NOT contradict them." Values are also stored in a new `user_measurements_metadata` JSONB column on `predictions`. Plausibility warnings shown inline; amber highlight on entered fields. Files: new `components/scoring/pre-scoring-measurements.tsx`, new `supabase/migrations/20260518_user_measurements_metadata.sql`; modified `lib/types.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/api/score/route.ts`, `lib/storage/service.ts`, `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
+
 ---
 
 ## 4. What is NOT built yet (the pending plan queue)
