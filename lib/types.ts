@@ -438,6 +438,12 @@ export interface GroundTruthFormData {
 // Ground truth data for training
 export interface GroundTruthData {
   officialScore?: number
+  officialNet?: number
+  scoreSource?: ScoreSource
+  scorerName?: string
+  scoringOrganization?: string
+  harvestYear?: number
+  notes?: string
   mainBeamLeft?: number
   mainBeamRight?: number
   insideSpread?: number

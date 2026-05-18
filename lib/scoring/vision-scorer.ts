@@ -81,6 +81,19 @@ export interface VisionImageInput {
   hasCropBox?: boolean
 }
 
+export interface PreAiScoringContext {
+  selectedImageAngles?: string[] | null
+  intakeQuality?: Record<string, unknown> | null
+  captureQualitySummary?: Record<string, unknown> | null
+  imageDiagnostics?: unknown[] | null
+  imageDiagnosticsSummary?: Record<string, unknown> | null
+  referenceModeSummary?: Record<string, unknown> | null
+  detectionSummary?: Record<string, unknown> | null
+  cropBoxMetadata?: Record<string, unknown> | null
+  userNotes?: string | null
+  abnormalPointContext?: Record<string, unknown> | null
+}
+
 export interface VisionScoringInput {
   images: VisionImageInput[]
   state?: string | null
@@ -91,6 +104,7 @@ export interface VisionScoringInput {
   mainFramePoints?: number
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  preAiScoringContext?: PreAiScoringContext | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
 }
@@ -292,6 +306,63 @@ export type VisionOutput = z.infer<typeof VisionOutputSchema>
 /**
  * Build a detailed prompt for the vision model
  */
+function compactPromptJson(value: unknown): string {
+  if (value === null || value === undefined) return 'none'
+  try {
+    const text = JSON.stringify(value)
+    return text.length > 1400 ? `${text.slice(0, 1400)}...` : text
+  } catch {
+    return String(value)
+  }
+}
+
+function buildPreAiContextBlock(context?: PreAiScoringContext | null): string {
+  if (!context) return ''
+
+  const lines: string[] = []
+  if (context.selectedImageAngles?.length) {
+    lines.push(`- UI-resolved image angles: ${context.selectedImageAngles.join(', ')}`)
+  }
+  if (context.intakeQuality) {
+    lines.push(`- Intake quality assessment: ${compactPromptJson(context.intakeQuality)}`)
+  }
+  if (context.captureQualitySummary) {
+    lines.push(`- Capture coverage summary: ${compactPromptJson(context.captureQualitySummary)}`)
+  }
+  if (context.imageDiagnosticsSummary) {
+    lines.push(`- Image diagnostics summary: ${compactPromptJson(context.imageDiagnosticsSummary)}`)
+  }
+  if (context.imageDiagnostics?.length) {
+    lines.push(`- Per-image diagnostics: ${compactPromptJson(context.imageDiagnostics)}`)
+  }
+  if (context.referenceModeSummary) {
+    lines.push(`- Reference-mode summary: ${compactPromptJson(context.referenceModeSummary)}`)
+  }
+  if (context.detectionSummary) {
+    lines.push(`- Pre-AI rack detection summary: ${compactPromptJson(context.detectionSummary)}`)
+  }
+  if (context.cropBoxMetadata && Object.keys(context.cropBoxMetadata).length > 0) {
+    lines.push(`- Antler crop metadata: ${compactPromptJson(context.cropBoxMetadata)}`)
+  }
+  if (context.abnormalPointContext) {
+    lines.push(`- User abnormal/non-typical point notes: ${compactPromptJson(context.abnormalPointContext)}`)
+  }
+  if (context.userNotes?.trim()) {
+    lines.push(`- User notes: ${context.userNotes.trim().slice(0, 800)}`)
+  }
+
+  if (lines.length === 0) return ''
+
+  return `
+PRE-AI SCORING CONTEXT
+Use these user-entered, UI-derived, and detection-derived signals as evidence while scoring.
+They should guide confidence, angle selection, quality penalties, reference-object handling,
+and non-typical/abnormal-point interpretation, but visual evidence from the images still wins
+when there is a direct contradiction.
+${lines.join('\n')}
+`
+}
+
 function buildVisionPrompt(input: VisionScoringInput): string {
   const angleDescriptions = input.images.map((img, i) =>
     `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})${img.hasCropBox ? ' [CROPPED]' : ''}`
@@ -346,6 +417,8 @@ ${hat.brimWidthInches
 `
       : ''
 
+  const preAiContextBlock = buildPreAiContextBlock(input.preAiScoringContext)
+
   return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
@@ -364,6 +437,7 @@ ${cropNote}
 ${precisionReferenceBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}
+${preAiContextBlock}
 
 ═══════════════════════════════════════════════════════════════
 MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS

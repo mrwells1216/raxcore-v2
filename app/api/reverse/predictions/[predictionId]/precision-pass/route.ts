@@ -11,6 +11,7 @@ const IS_DEV = process.env.NODE_ENV === 'development' ||
   process.env.VERCEL_ENV === 'development'
 // Dev bypass user ID for anonymous precision passes in development
 const DEV_ANON_USER_ID = 'dev-anonymous-user'
+const GUEST_PRECISION_USER_ID = 'guest-precision-pass'
 
 /**
  * POST /api/reverse/predictions/[predictionId]/precision-pass
@@ -25,14 +26,9 @@ export async function POST(
   const supabase = await createClient()
   const { data } = await supabase.auth.getUser()
   const user = data?.user
-  
-  // In development, allow anonymous access; in production, require auth
-  if (!user && !IS_DEV) {
-    console.error('[precision-pass] Unauthorized: no user and not in dev mode')
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
 
-  const requesterId = user?.id ?? DEV_ANON_USER_ID
+  const requesterId = user?.id ?? (IS_DEV ? DEV_ANON_USER_ID : GUEST_PRECISION_USER_ID)
+  const allowGuestBuck = !user
 
   // Parse optional body — manualOverrides may be included when user has corrected fields
   let manualOverrides: Record<string, unknown> | undefined
@@ -51,6 +47,7 @@ export async function POST(
       requesterId,
       isDev: IS_DEV,
       hasUser: !!user,
+      allowGuestBuck,
       hasManualOverrides: !!manualOverrides,
       overrideFields: manualOverrides ? Object.keys(manualOverrides) : [],
     })
@@ -58,6 +55,7 @@ export async function POST(
     const { run, jobId } = await startPrecisionPass({
       predictionId,
       requestedByUserId: requesterId,
+      allowGuestBuck,
       manualOverrides,
     })
     
@@ -127,7 +125,10 @@ export async function POST(
       error: message,
       stack,
     })
-    const status = message === 'Forbidden' ? 403 : 500
-    return NextResponse.json({ error: message }, { status })
+    const status = message === 'Forbidden' ? (user ? 403 : 401) : 500
+    const error = status === 401
+      ? 'Unauthorized: sign in to run precision pass for this saved buck.'
+      : message
+    return NextResponse.json({ error }, { status })
   }
 }

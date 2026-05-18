@@ -34,6 +34,7 @@ export interface CreateBuckParams {
   nickname?: string
   harvestDate?: string
   location?: string
+  mainFramePoints?: number | null
 }
 
 export interface BuckRecord {
@@ -124,6 +125,29 @@ export async function createBuck(params: CreateBuckParams): Promise<BuckRecord> 
   if (error) {
     console.error('[createBuck] Insert failed:', error.message)
     throw new Error(`Failed to create buck: ${error.message}`)
+  }
+
+  const optionalBuckFields: Record<string, unknown> = {}
+  if (params.nickname) optionalBuckFields.nickname = params.nickname
+  if (params.location) optionalBuckFields.location = params.location
+  if (params.harvestDate) optionalBuckFields.harvest_date = params.harvestDate
+  if (params.mainFramePoints != null) optionalBuckFields.main_frame_points = params.mainFramePoints
+
+  if (Object.keys(optionalBuckFields).length > 0) {
+    const { data: updated, error: updateError } = await supabase
+      .from('bucks')
+      .update(optionalBuckFields)
+      .eq('id', data.id)
+      .select()
+      .single()
+
+    if (!updateError && updated) {
+      return updated
+    }
+
+    if (updateError && !isOptionalTableError(updateError)) {
+      console.warn('[createBuck] Optional metadata update skipped:', updateError.message)
+    }
   }
   
   return data
@@ -484,20 +508,81 @@ function safeNumeric(value: unknown): number | null {
 
 export async function createPrediction(params: CreatePredictionParams): Promise<PredictionRecord> {
   const supabase = await createClient()
-  
-  // Normalize all numeric fields to handle string values from heuristic fallback
-  const pred = params.result.prediction
-  const meas = pred?.measurements
-  const normalizedConfidence = normalizeConfidence(pred?.confidence_percent)
-  const scoreRangeLow = safeNumeric(pred?.score_range_low)
-  const scoreRangeHigh = safeNumeric(pred?.score_range_high)
+
+  const result = params.result as unknown as Record<string, unknown>
+  const nestedPrediction =
+    result.prediction && typeof result.prediction === 'object'
+      ? (result.prediction as Record<string, unknown>)
+      : null
+  const pred = nestedPrediction ?? result
+  const scoreRange =
+    result.scoreRange && typeof result.scoreRange === 'object'
+      ? (result.scoreRange as Record<string, unknown>)
+      : pred.score_range && typeof pred.score_range === 'object'
+        ? (pred.score_range as Record<string, unknown>)
+        : null
+  const meas =
+    pred.measurements && typeof pred.measurements === 'object'
+      ? (pred.measurements as Record<string, unknown>)
+      : result.measurements && typeof result.measurements === 'object'
+        ? (result.measurements as Record<string, unknown>)
+        : null
+
+  const predictedGross =
+    safeNumeric(pred.predicted_gross) ??
+    safeNumeric(pred.predictedGross) ??
+    safeNumeric(result.estimatedScore) ??
+    safeNumeric(result.predictedGross)
+  const predictedNet =
+    safeNumeric(pred.predicted_net) ??
+    safeNumeric(pred.predictedNet) ??
+    safeNumeric(result.netScore) ??
+    safeNumeric(result.predictedNet)
+  const confidencePercent =
+    safeNumeric(pred.confidence_percent) ??
+    safeNumeric(pred.confidencePercent) ??
+    safeNumeric(result.confidencePercent)
+  const normalizedConfidence = normalizeConfidence(pred.confidence ?? result.confidence ?? confidencePercent)
+  const scoreRangeLow =
+    safeNumeric(pred.score_range_low) ??
+    safeNumeric(pred.error_band_low) ??
+    safeNumeric(result.errorBandLow) ??
+    safeNumeric(scoreRange?.low)
+  const scoreRangeHigh =
+    safeNumeric(pred.score_range_high) ??
+    safeNumeric(pred.error_band_high) ??
+    safeNumeric(result.errorBandHigh) ??
+    safeNumeric(scoreRange?.high)
+  const landmarks =
+    pred.landmarks && typeof pred.landmarks === 'object'
+      ? pred.landmarks
+      : result.landmarks && typeof result.landmarks === 'object'
+        ? result.landmarks
+        : null
+  const stateCalibration =
+    pred.state_calibration && typeof pred.state_calibration === 'object'
+      ? pred.state_calibration
+      : result.stateCalibration && typeof result.stateCalibration === 'object'
+        ? result.stateCalibration
+        : null
 
   const { data, error } = await supabase
     .from('predictions')
     .insert({
       buck_id: params.buckId,
       model_version_id: params.modelVersionId || null,
-      estimated_score: safeNumeric(pred?.predicted_gross),
+      predicted_gross: predictedGross,
+      predicted_net: predictedNet,
+      confidence_percent: confidencePercent,
+      error_band_low: scoreRangeLow,
+      error_band_high: scoreRangeHigh,
+      measurements: meas,
+      landmarks,
+      state_calibration: stateCalibration,
+      processing_time_ms: safeNumeric(pred.processing_time_ms) ?? safeNumeric(result.processingTimeMs),
+      images_used: safeNumeric(pred.images_used) ?? safeNumeric(result.imagesUsed),
+      angle_diversity_score: safeNumeric(pred.angle_diversity_score) ?? safeNumeric(result.angleDiversityScore),
+      estimated_score: predictedGross,
       score_range_low: scoreRangeLow,
       score_range_high: scoreRangeHigh,
       confidence: normalizedConfidence,
@@ -576,11 +661,17 @@ export async function upsertGroundTruth(
   buckId: string, 
   data: GroundTruthData
 ): Promise<GroundTruthRecord> {
-  const supabase = await createClient()
+  const supabase = await getServiceSupabase()
   
   const record = {
     buck_id: buckId,
     official_score: data.officialScore ?? null,
+    official_gross: data.officialScore ?? null,
+    official_net: data.officialNet ?? null,
+    score_source: data.scoreSource ?? null,
+    scorer_name: data.scorerName ?? null,
+    scoring_organization: data.scoringOrganization ?? null,
+    harvest_year: data.harvestYear ?? null,
     main_beam_left: data.mainBeamLeft ?? null,
     main_beam_right: data.mainBeamRight ?? null,
     inside_spread: data.insideSpread ?? null,
@@ -604,6 +695,7 @@ export async function upsertGroundTruth(
     h4_right: data.h4Right ?? null,
     scoring_method: data.scoringMethod ?? null,
     scorer_notes: data.scorerNotes ?? null,
+    notes: data.notes ?? data.scorerNotes ?? null,
     updated_at: new Date().toISOString()
   }
 
@@ -662,9 +754,21 @@ export interface TrainingExampleRecord {
 
 export interface CreateTrainingExampleParams {
   buckId?: string
+  predictionId?: string
+  groundTruthId?: string
   imageUrls: string[]
   groundTruthScore: number
+  groundTruthNet?: number
   predictedScore?: number
+  predictedNet?: number | null
+  predictedRangeLow?: number | null
+  predictedRangeHigh?: number | null
+  state?: string | null
+  rackType?: string | null
+  sourceType?: string | null
+  imageCount?: number | null
+  confidenceLabel?: 'low' | 'medium' | 'high' | null
+  fallbackUsed?: boolean | null
   measurements?: {
     mainBeamLeft?: number
     mainBeamRight?: number
@@ -686,7 +790,7 @@ export async function createTrainingExample(
   const supabase = await getServiceSupabase()
   
   const errorAmount = params.predictedScore != null 
-    ? params.predictedScore - params.groundTruthScore 
+    ? params.groundTruthScore - params.predictedScore
     : null
 
   // Core payload — only columns that exist in the base schema
@@ -707,6 +811,8 @@ export async function createTrainingExample(
     source: params.source || 'user_submission',
     notes: params.notes || null,
   }
+  if (params.predictionId) corePayload.prediction_id = params.predictionId
+  if (params.groundTruthId) corePayload.ground_truth_id = params.groundTruthId
 
   if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
     console.log('[training] createTrainingExample payload', {
@@ -719,11 +825,24 @@ export async function createTrainingExample(
     })
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('training_examples')
     .insert(corePayload)
     .select()
     .single()
+
+  if (error && isOptionalTableError(error) && (corePayload.prediction_id || corePayload.ground_truth_id)) {
+    const fallbackPayload = { ...corePayload }
+    delete fallbackPayload.prediction_id
+    delete fallbackPayload.ground_truth_id
+    const retry = await supabase
+      .from('training_examples')
+      .insert(fallbackPayload)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) {
     console.error('[training] createTrainingExample failed', {
@@ -734,6 +853,31 @@ export async function createTrainingExample(
       code: error.code,
     })
     throw new Error(`Failed to create training example: ${error.message}`)
+  }
+
+  const optionalPayload: Record<string, unknown> = {
+    prediction_id: params.predictionId ?? null,
+    state: params.state ?? null,
+    rack_type: params.rackType ?? null,
+    source_type: params.sourceType ?? null,
+    image_count: params.imageCount ?? params.imageUrls.length,
+    confidence_label: params.confidenceLabel ?? null,
+    fallback_used: params.fallbackUsed ?? false,
+    predicted_gross: params.predictedScore ?? null,
+    predicted_net: params.predictedNet ?? null,
+    predicted_range_low: params.predictedRangeLow ?? null,
+    predicted_range_high: params.predictedRangeHigh ?? null,
+    actual_gross: params.groundTruthScore,
+    actual_net: params.groundTruthNet ?? null,
+  }
+
+  const { error: optionalError } = await supabase
+    .from('training_examples')
+    .update(optionalPayload)
+    .eq('id', data.id)
+
+  if (optionalError && !isOptionalTableError(optionalError)) {
+    console.warn('[training] optional enriched training fields skipped:', optionalError.message)
   }
 
   return data

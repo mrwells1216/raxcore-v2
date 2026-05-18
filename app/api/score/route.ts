@@ -56,6 +56,7 @@ import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
 import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
+import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -65,6 +66,15 @@ function generateRequestId(): string {
 // Guard: is a number finite and positive?
 function finite(v: unknown): v is number {
   return typeof v === 'number' && isFinite(v) && v > 0
+}
+
+function parseJsonValue<T>(raw: string | null): T | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
 }
 
 // Extract client identifier from request
@@ -143,7 +153,22 @@ export async function POST(request: Request) {
   }
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
-  const userId = formData.get('user_id') as string | null
+  const submittedUserId = formData.get('user_id') as string | null
+  let authenticatedUserId: string | null = null
+  try {
+    const authSupabase = await createSupabaseServerClient()
+    const { data: authData } = await authSupabase.auth.getUser()
+    authenticatedUserId = authData.user?.id ?? null
+  } catch (authErr) {
+    console.warn('[score] auth lookup failed, falling back to submitted user id:', authErr)
+  }
+  if (submittedUserId && authenticatedUserId && submittedUserId !== authenticatedUserId) {
+    console.warn('[score] submitted user_id did not match authenticated user; using authenticated user', {
+      submittedUserId,
+      authenticatedUserId,
+    })
+  }
+  const userId = authenticatedUserId ?? submittedUserId
     
     // Phase 54: Abnormal/Irregular Points
     const irregularPointsPresent = formData.get('irregular_points_present') as YesNoUnsure | null
@@ -312,6 +337,10 @@ export async function POST(request: Request) {
         : sourceType || undefined,
     earsFullyVisible: earsFullyVisible,
     notes: notes || undefined,
+    nickname: nickname || undefined,
+    location: location || undefined,
+    harvestDate: harvestDate || undefined,
+    mainFramePoints: mainFramePoints,
     // Phase 54: Abnormal/Irregular Points
     irregularPointsPresent: irregularPointsPresent || undefined,
     nonTypicalTraitsPresent: nonTypicalTraitsPresent || undefined,
@@ -559,6 +588,38 @@ export async function POST(request: Request) {
       // ignore parse error
     }
 
+    const selectedImageAngles = parseJsonValue<string[]>(selectedImageAnglesRaw)
+    const imageDiagnostics = parseJsonValue<unknown[]>(imageDiagnosticsRaw)
+    const preAiScoringContext = {
+      selectedImageAngles,
+      intakeQuality: intakeQuality as Record<string, unknown> | null,
+      captureQualitySummary: captureQualitySummary as Record<string, unknown> | null,
+      imageDiagnostics,
+      imageDiagnosticsSummary: imageDiagnosticsSummary as Record<string, unknown> | null,
+      referenceModeSummary: referenceModeSummary as Record<string, unknown> | null,
+      detectionSummary: detectionSummary
+        ? {
+            accepted: detectionSummary.accepted,
+            overallSubjectType: detectionSummary.overallSubjectType,
+            overallConfidence: detectionSummary.overallConfidence,
+            acceptedImageCount: detectionSummary.images.filter(i => i.accepted).length,
+            bestImageByPurpose: detectionSummary.bestImageByPurpose,
+            rejectionReasons: detectionSummary.rejectionReasons,
+          }
+        : null,
+      cropBoxMetadata: Object.keys(cropMetadata).length > 0
+        ? (cropMetadata as Record<string, unknown>)
+        : null,
+      userNotes: notes,
+      abnormalPointContext: {
+        irregularPointsPresent,
+        nonTypicalTraitsPresent,
+        estimatedIrregularPointsCount,
+        abnormalPointNotes,
+        abnormalPointTags,
+      },
+    }
+
     const precisionReferenceProfile = buildPrecisionReferenceProfile({
       precisionModeEnabled: precisionModeEnabledRaw === 'true',
       referenceType: (referenceTypeRaw as Parameters<typeof buildPrecisionReferenceProfile>[0]['referenceType']) ?? 'none',
@@ -580,6 +641,7 @@ export async function POST(request: Request) {
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
+      preAiScoringContext,
       traceId: requestId,
     })
 
@@ -814,6 +876,7 @@ export async function POST(request: Request) {
         detection: detectionSummary ?? undefined,
         bestImageByPurpose: detectionSummary?.bestImageByPurpose ?? undefined,
         measurementGraph: detectionSummary?.graph ?? undefined,
+        preAiScoringContext,
       },
       intakeQuality: intakeQuality as Record<string, unknown> | null,
       cropBoxMetadata: Object.keys(cropMetadata).length > 0

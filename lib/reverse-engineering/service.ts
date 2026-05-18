@@ -135,6 +135,8 @@ const DEV_ANON_USER_ID = 'dev-anonymous-user'
 export async function startPrecisionPass(params: {
   predictionId: string
   requestedByUserId: string
+  /** Allow a precision pass on an unowned guest scoring session. */
+  allowGuestBuck?: boolean
   /** Optional manual overrides — fields corrected by the user before re-running. */
   manualOverrides?: Record<string, unknown> | null
   /** Part 6: scoreComparison from the original scoring run, if available */
@@ -166,7 +168,10 @@ export async function startPrecisionPass(params: {
   
   const buckData = (pred as Record<string, unknown>).bucks as Record<string, unknown>
   const isDevBypass = IS_DEV && params.requestedByUserId === DEV_ANON_USER_ID
-  const isOwner = buckData?.user_id === params.requestedByUserId
+  const buckUserId = typeof buckData?.user_id === 'string' ? buckData.user_id : null
+  const isOwner = buckUserId === params.requestedByUserId
+  const isGuestBuck = buckUserId === null
+  const isGuestAllowed = Boolean(params.allowGuestBuck && isGuestBuck)
   
   console.log('[precision-pass] Permission check:', {
     NODE_ENV: process.env.NODE_ENV,
@@ -174,18 +179,21 @@ export async function startPrecisionPass(params: {
     IS_DEV,
     isDevBypass,
     isOwner,
+    isGuestBuck,
+    isGuestAllowed,
     requesterId: params.requestedByUserId,
-    buckUserId: buckData?.user_id,
+    buckUserId,
   })
   
   // In development with dev-anonymous-user, bypass ownership check
-  // In production, require ownership
-  if (!isOwner && !isDevBypass) {
+  // In production, require ownership except for unowned guest scoring sessions.
+  if (!isOwner && !isDevBypass && !isGuestAllowed) {
     console.error('[precision-pass] Forbidden: ownership mismatch', {
-      buckUserId: buckData?.user_id,
+      buckUserId,
       requesterId: params.requestedByUserId,
       isDev: IS_DEV,
       isDevBypass,
+      isGuestBuck,
     })
     throw new Error('Forbidden')
   }

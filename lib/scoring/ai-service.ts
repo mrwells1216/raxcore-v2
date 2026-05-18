@@ -24,6 +24,7 @@ import {
   visionOutputToMeasurements, 
   visionOutputToLandmarks,
   visionOutputToReferenceQualityData,
+  type PreAiScoringContext,
   type VisionScoringResult 
 } from './vision-scorer'
 // Phase 54: Weighted multi-reference consensus engine
@@ -73,6 +74,7 @@ export interface ScoringInput {
   calibrationProfile?: CalibrationProfile | null
   precisionReferenceProfile?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
+  preAiScoringContext?: PreAiScoringContext | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
 }
@@ -765,6 +767,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     mainFramePoints: input.mainFramePoints,
     precisionReference: input.precisionReferenceProfile,
     referenceObject: input.referenceObject ?? undefined,
+    preAiScoringContext: input.preAiScoringContext ?? null,
     traceId: input.traceId,  // Phase 39: propagate trace ID
   })
 

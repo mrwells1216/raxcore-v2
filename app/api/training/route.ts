@@ -8,12 +8,39 @@ import {
 } from '@/lib/storage/service'
 import type { GroundTruthData } from '@/lib/types'
 
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function confidenceLabel(value: unknown): 'low' | 'medium' | 'high' | null {
+  if (value === 'low' || value === 'medium' || value === 'high') return value
+  const n = toNumber(value)
+  if (n === null) return null
+  const percent = n <= 1 ? n * 100 : n
+  if (percent >= 75) return 'high'
+  if (percent >= 50) return 'medium'
+  return 'low'
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const {
       buck_id,
+      prediction_id,
+      official_gross,
+      official_net,
       official_score,
+      score_source,
+      scorer_name,
+      scoring_organization,
+      harvest_year,
+      notes,
       main_beam_left,
       main_beam_right,
       inside_spread,
@@ -39,6 +66,14 @@ export async function POST(request: Request) {
       scorer_notes,
     } = body
 
+    const submittedGross = toNumber(official_score) ?? toNumber(official_gross)
+    const submittedNet = toNumber(official_net)
+    const submittedNotes = typeof scorer_notes === 'string'
+      ? scorer_notes
+      : typeof notes === 'string'
+        ? notes
+        : undefined
+
     if (!buck_id) {
       return NextResponse.json({ error: 'Buck ID is required' }, { status: 400 })
     }
@@ -54,7 +89,13 @@ export async function POST(request: Request) {
 
     // Build ground truth data
     const groundTruthData: GroundTruthData = {
-      officialScore: official_score ?? undefined,
+      officialScore: submittedGross ?? undefined,
+      officialNet: submittedNet ?? undefined,
+      scoreSource: score_source ?? undefined,
+      scorerName: scorer_name ?? undefined,
+      scoringOrganization: scoring_organization ?? undefined,
+      harvestYear: toNumber(harvest_year) ?? undefined,
+      notes: typeof notes === 'string' ? notes : undefined,
       mainBeamLeft: main_beam_left ?? undefined,
       mainBeamRight: main_beam_right ?? undefined,
       insideSpread: inside_spread ?? undefined,
@@ -77,7 +118,7 @@ export async function POST(request: Request) {
       h4Left: h4_left ?? undefined,
       h4Right: h4_right ?? undefined,
       scoringMethod: scoring_method ?? undefined,
-      scorerNotes: scorer_notes ?? undefined,
+      scorerNotes: submittedNotes,
     }
 
     // Upsert ground truth record
@@ -85,43 +126,78 @@ export async function POST(request: Request) {
 
     // If we have both a prediction and an official score, create a training example
     let trainingExample = null
-    if (prediction && official_score !== null && official_score !== undefined) {
+    if (prediction && submittedGross !== null) {
       // Get buck images
       const images = await getBuckImages(buck_id)
       const imageUrls = images.map(img => img.image_url).filter((u): u is string => u != null)
+      const predictionRecord = prediction as unknown as Record<string, unknown>
+      const rawAi = predictionRecord.raw_ai_response && typeof predictionRecord.raw_ai_response === 'object'
+        ? predictionRecord.raw_ai_response as Record<string, unknown>
+        : null
+      const predictedGross =
+        toNumber(prediction.predicted_gross) ??
+        toNumber(prediction.estimated_score) ??
+        toNumber(rawAi?.predictedGross) ??
+        toNumber(rawAi?.estimatedScore)
+      const predictedNet =
+        toNumber(prediction.predicted_net) ??
+        toNumber(rawAi?.predictedNet) ??
+        toNumber(rawAi?.netScore)
+      const predictedRangeLow =
+        toNumber(prediction.score_range_low) ??
+        toNumber(rawAi?.errorBandLow)
+      const predictedRangeHigh =
+        toNumber(prediction.score_range_high) ??
+        toNumber(rawAi?.errorBandHigh)
+      const imageCount =
+        toNumber(prediction.images_used) ??
+        (Array.isArray(imageUrls) ? imageUrls.length : null)
 
       // Build a compact metadata snapshot so we can reconstruct the prediction
       // context later for correction-profile analysis, without requiring new schema columns.
       const predictionSnapshot = {
-        prediction_id: prediction.id ?? null,
-        predicted_gross: prediction.predicted_gross ?? prediction.estimated_score ?? null,
-        predicted_net: prediction.predicted_net ?? null,
-        confidence_percent: prediction.confidence_percent ?? null,
-        confidence_label: prediction.confidence_label ?? null,
-        scoring_method: prediction.scoring_method ?? null,
-        fallback_used: prediction.fallback_used ?? false,
-        images_used: prediction.images_used ?? null,
+        prediction_id: prediction_id ?? prediction.id ?? null,
+        predicted_gross: predictedGross,
+        predicted_net: predictedNet,
+        confidence_percent: toNumber(prediction.confidence_percent) ?? toNumber(rawAi?.confidencePercent),
+        confidence_label: confidenceLabel(prediction.confidence_label ?? prediction.confidence ?? rawAi?.confidencePercent),
+        scoring_method: prediction.scoring_method ?? rawAi?.scoringMethod ?? null,
+        fallback_used: prediction.fallback_used ?? predictionRecord.used_fallback ?? rawAi?.fallbackMetadata != null,
+        images_used: imageCount,
+        score_source: score_source ?? null,
         error_gross:
-          prediction.predicted_gross != null && official_score != null
-            ? Number((prediction.predicted_gross - official_score).toFixed(2))
+          predictedGross != null
+            ? Number((submittedGross - predictedGross).toFixed(2))
             : null,
         error_net:
-          prediction.predicted_net != null && official_score != null
-            ? Number((prediction.predicted_net - official_score).toFixed(2))
+          predictedNet != null && submittedNet != null
+            ? Number((submittedNet - predictedNet).toFixed(2))
             : null,
         submitted_at: new Date().toISOString(),
       }
 
       const enrichedNotes = [
-        scorer_notes || 'Submitted through training flow',
+        submittedNotes || 'Submitted through training flow',
         `[meta] ${JSON.stringify(predictionSnapshot)}`,
       ].join('\n')
 
       trainingExample = await createTrainingExample({
         buckId: buck_id,
+        predictionId: prediction_id ?? prediction.id ?? undefined,
+        groundTruthId: groundTruth.id,
         imageUrls,
-        groundTruthScore: official_score,
-        predictedScore: prediction.predicted_gross ?? prediction.estimated_score ?? undefined,
+        groundTruthScore: submittedGross,
+        groundTruthNet: submittedNet ?? undefined,
+        predictedScore: predictedGross ?? undefined,
+        predictedNet,
+        predictedRangeLow,
+        predictedRangeHigh,
+        state: buck.state ?? null,
+        rackType: buck.rack_type ?? null,
+        sourceType: buck.source_type ?? null,
+        imageCount,
+        confidenceLabel: predictionSnapshot.confidence_label,
+        fallbackUsed: Boolean(predictionSnapshot.fallback_used),
         measurements: {
           mainBeamLeft: main_beam_left ?? undefined,
           mainBeamRight: main_beam_right ?? undefined,

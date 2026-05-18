@@ -129,6 +129,7 @@ export function PrecisionPassCard({
     try {
       const res = await fetch(`/api/reverse/predictions/${predictionId}/precision-pass`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(manualOverrides && Object.keys(manualOverrides).length > 0
