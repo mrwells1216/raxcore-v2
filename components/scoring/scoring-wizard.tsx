@@ -371,6 +371,15 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         apiFormData.append('reference_object', JSON.stringify(data.reference_object))
       }
 
+      if (data.pre_scoring_measurements) {
+        const nonNull = Object.fromEntries(
+          Object.entries(data.pre_scoring_measurements).filter(([, v]) => v != null)
+        )
+        if (Object.keys(nonNull).length > 0) {
+          apiFormData.append('pre_scoring_measurements', JSON.stringify(nonNull))
+        }
+      }
+
       // Antler crop regions — null where the user skipped that image
       const cropRegionsPayload: Record<string, CropRegion | null> = {}
       for (let index = 0; index < images.length; index++) {

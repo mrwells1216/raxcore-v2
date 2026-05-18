@@ -14,9 +14,10 @@ import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
-import type { AbnormalPointTag } from '@/lib/types'
+import type { AbnormalPointTag, PreScoringMeasurements } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
 import { PointCountSlider } from './point-count-slider'
+import { PreScoringMeasurementsPanel } from './pre-scoring-measurements'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { buildRingReferenceInput, ringSizeToInnerDiameterInches, normalizeRingSizeUS } from '@/lib/scoring/ring-reference'
 import { buildHatReferenceInput, HAT_DIMENSIONS } from '@/lib/scoring/hat-reference'
@@ -95,6 +96,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
   const submitBtnRef = useRef<HTMLButtonElement>(null)
   const [imageDiagnostics, setImageDiagnostics] = useState<ImageDiagnostics[]>([])
   const [imageDiagnosticsSummary, setImageDiagnosticsSummary] = useState<ImageDiagnosticsSummary | null>(null)
+  const [preScoringMeasurements, setPreScoringMeasurements] = useState<PreScoringMeasurements>({})
   const form = useForm<ScoringFormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -215,7 +217,13 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
         } : null,
       },
     }
-    onSubmit(enrichedData)
+    const nonNullPreScoring = Object.fromEntries(
+      Object.entries(preScoringMeasurements).filter(([, v]) => v != null)
+    ) as PreScoringMeasurements
+    onSubmit({
+      ...enrichedData,
+      pre_scoring_measurements: Object.keys(nonNullPreScoring).length > 0 ? nonNullPreScoring : null,
+    })
   }
 
   return (
@@ -921,6 +929,12 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             </div>
           )}
         </div>
+
+        {/* Known Measurements */}
+        <PreScoringMeasurementsPanel
+          value={preScoringMeasurements}
+          onChange={setPreScoringMeasurements}
+        />
 
         {/* Image Diagnostics Summary */}
         {imageDiagnosticsSummary && (
