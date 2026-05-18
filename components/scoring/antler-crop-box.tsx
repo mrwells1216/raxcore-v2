@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react'
 
 export interface CropRegion {
   x: number
@@ -21,16 +20,15 @@ interface AntlerCropBoxProps {
 }
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type ExpandDirection = 'up' | 'down' | 'left' | 'right'
 
 type DragMode =
   | { kind: 'none' }
   | { kind: 'move'; startX: number; startY: number; origin: CropRegion }
   | { kind: 'resize'; handle: HandleId; origin: CropRegion; startX: number; startY: number }
+  | { kind: 'pinch'; initialDist: number; origin: CropRegion; centerX: number; centerY: number }
 
 const DEFAULT_REGION: CropRegion = { x: 0.15, y: 0.15, width: 0.7, height: 0.7 }
 const MIN_DIMENSION = 0.1
-const EXPAND_STEP = 0.025
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
@@ -43,48 +41,6 @@ function clampRegion(r: CropRegion): CropRegion {
   const y = clamp(Number.isFinite(r.y) ? r.y : DEFAULT_REGION.y, 0, 1 - height)
 
   return { x, y, width, height }
-}
-
-function expandRegionEdge(region: CropRegion, direction: ExpandDirection, step = EXPAND_STEP): CropRegion {
-  const r = clampRegion(region)
-
-  if (direction === 'up') {
-    const newY = Math.max(0, r.y - step)
-    const delta = r.y - newY
-    return clampRegion({
-      x: r.x,
-      y: newY,
-      width: r.width,
-      height: r.height + delta,
-    })
-  }
-
-  if (direction === 'down') {
-    return clampRegion({
-      x: r.x,
-      y: r.y,
-      width: r.width,
-      height: Math.min(1 - r.y, r.height + step),
-    })
-  }
-
-  if (direction === 'left') {
-    const newX = Math.max(0, r.x - step)
-    const delta = r.x - newX
-    return clampRegion({
-      x: newX,
-      y: r.y,
-      width: r.width + delta,
-      height: r.height,
-    })
-  }
-
-  return clampRegion({
-    x: r.x,
-    y: r.y,
-    width: Math.min(1 - r.x, r.width + step),
-    height: r.height,
-  })
 }
 
 export function AntlerCropBox({
@@ -100,25 +56,12 @@ export function AntlerCropBox({
   const dragRef = useRef<DragMode>({ kind: 'none' })
   const latestRegionRef = useRef<CropRegion>(clampRegion(region ?? DEFAULT_REGION))
   const changeRafRef = useRef<number | null>(null)
-  const repeatDelayRef = useRef<number | null>(null)
-  const repeatIntervalRef = useRef<number | null>(null)
+  const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map())
 
   const [draftRegion, setDraftRegion] = useState<CropRegion>(() => clampRegion(region ?? DEFAULT_REGION))
   const [isDragging, setIsDragging] = useState(false)
 
   const activeRegion = draftRegion
-
-  const clearRepeatTimers = useCallback(() => {
-    if (repeatDelayRef.current !== null) {
-      window.clearTimeout(repeatDelayRef.current)
-      repeatDelayRef.current = null
-    }
-
-    if (repeatIntervalRef.current !== null) {
-      window.clearInterval(repeatIntervalRef.current)
-      repeatIntervalRef.current = null
-    }
-  }, [])
 
   const emitChange = useCallback(
     (nextRegion: CropRegion, immediate = false) => {
@@ -168,9 +111,8 @@ export function AntlerCropBox({
         window.cancelAnimationFrame(changeRafRef.current)
         changeRafRef.current = null
       }
-      clearRepeatTimers()
     }
-  }, [clearRepeatTimers])
+  }, [])
 
   const getRelativePoint = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current
@@ -189,7 +131,29 @@ export function AntlerCropBox({
       const mode = dragRef.current
       if (mode.kind === 'none') return
 
+      if (activePointersRef.current.has(e.pointerId)) {
+        activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      }
+
       e.preventDefault()
+
+      if (mode.kind === 'pinch') {
+        const pts = Array.from(activePointersRef.current.values()) as Array<{ x: number; y: number }>
+        if (pts.length < 2) return
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        const currentDist = Math.hypot(dx, dy)
+        const scale = currentDist / Math.max(1, mode.initialDist)
+        const newWidth = mode.origin.width * scale
+        const newHeight = mode.origin.height * scale
+        emitChange({
+          x: mode.centerX - newWidth / 2,
+          y: mode.centerY - newHeight / 2,
+          width: newWidth,
+          height: newHeight,
+        })
+        return
+      }
 
       const p = getRelativePoint(e.clientX, e.clientY)
 
@@ -234,17 +198,24 @@ export function AntlerCropBox({
     [emitChange, getRelativePoint],
   )
 
-  const endDrag = useCallback(() => {
+  const releaseListeners = useCallback(() => {
+    window.removeEventListener('pointermove', handlePointerMove)
+    window.removeEventListener('pointerup', handlePointerUp)
+    window.removeEventListener('pointercancel', handlePointerUp)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handlePointerMove])
+
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  function handlePointerUp(e: { pointerId: number }) {
+    activePointersRef.current.delete(e.pointerId)
+    if (activePointersRef.current.size > 0) return
     if (dragRef.current.kind !== 'none') {
       dragRef.current = { kind: 'none' }
       setIsDragging(false)
       emitChange(latestRegionRef.current, true)
     }
-
-    window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
-  }, [emitChange, handlePointerMove])
+    releaseListeners()
+  }
 
   const startDrag = useCallback(
     (mode: DragMode) => {
@@ -252,15 +223,19 @@ export function AntlerCropBox({
       setIsDragging(true)
 
       window.addEventListener('pointermove', handlePointerMove, { passive: false })
-      window.addEventListener('pointerup', endDrag)
-      window.addEventListener('pointercancel', endDrag)
+      window.addEventListener('pointerup', handlePointerUp)
+      window.addEventListener('pointercancel', handlePointerUp)
     },
-    [endDrag, handlePointerMove],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handlePointerMove],
   )
 
   useEffect(() => {
-    return () => endDrag()
-  }, [endDrag])
+    return () => {
+      releaseListeners()
+      activePointersRef.current.clear()
+    }
+  }, [releaseListeners])
 
   const handleBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (skipped) return
@@ -271,6 +246,22 @@ export function AntlerCropBox({
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
       // Pointer capture can fail in rare browser states. Window listeners still handle movement.
+    }
+
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (activePointersRef.current.size >= 2) {
+      const pts = Array.from(activePointersRef.current.values()) as Array<{ x: number; y: number }>
+      const initialDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      const origin = latestRegionRef.current
+      startDrag({
+        kind: 'pinch',
+        initialDist: Math.max(1, initialDist),
+        origin,
+        centerX: origin.x + origin.width / 2,
+        centerY: origin.y + origin.height / 2,
+      })
+      return
     }
 
     const p = getRelativePoint(e.clientX, e.clientY)
@@ -295,6 +286,8 @@ export function AntlerCropBox({
       // Pointer capture can fail in rare browser states. Window listeners still handle movement.
     }
 
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
     const p = getRelativePoint(e.clientX, e.clientY)
 
     startDrag({
@@ -306,38 +299,40 @@ export function AntlerCropBox({
     })
   }
 
-  const expandOnce = useCallback(
-    (direction: ExpandDirection) => {
-      emitChange(expandRegionEdge(latestRegionRef.current, direction), true)
-    },
-    [emitChange],
-  )
-
-  const handleExpandPointerDown = (direction: ExpandDirection) => (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (skipped) return
-
-    e.preventDefault()
-    clearRepeatTimers()
-    expandOnce(direction)
-
-    repeatDelayRef.current = window.setTimeout(() => {
-      repeatDelayRef.current = null
-      repeatIntervalRef.current = window.setInterval(() => {
-        expandOnce(direction)
-      }, 90)
-    }, 320)
-  }
-
-  const stopExpandRepeat = useCallback(() => {
-    clearRepeatTimers()
-  }, [clearRepeatTimers])
-
   const resetRegion = useCallback(() => {
     emitChange(DEFAULT_REGION, true)
   }, [emitChange])
 
+  // Edge slider helpers — each controls one edge directly (expand AND contract).
+  const setTopEdge = (newTop: number) => {
+    const r = latestRegionRef.current
+    const bottom = r.y + r.height
+    const y = clamp(newTop, 0, bottom - MIN_DIMENSION)
+    emitChange({ x: r.x, y, width: r.width, height: bottom - y })
+  }
+  const setBottomEdge = (newBottom: number) => {
+    const r = latestRegionRef.current
+    const height = clamp(newBottom - r.y, MIN_DIMENSION, 1 - r.y)
+    emitChange({ x: r.x, y: r.y, width: r.width, height })
+  }
+  const setLeftEdge = (newLeft: number) => {
+    const r = latestRegionRef.current
+    const right = r.x + r.width
+    const x = clamp(newLeft, 0, right - MIN_DIMENSION)
+    emitChange({ x, y: r.y, width: right - x, height: r.height })
+  }
+  const setRightEdge = (newRight: number) => {
+    const r = latestRegionRef.current
+    const width = clamp(newRight - r.x, MIN_DIMENSION, 1 - r.x)
+    emitChange({ x: r.x, y: r.y, width, height: r.height })
+  }
+
   const widthPct = Math.round(activeRegion.width * 100)
   const heightPct = Math.round(activeRegion.height * 100)
+  const topPct = Math.round(activeRegion.y * 100)
+  const bottomPct = Math.round((activeRegion.y + activeRegion.height) * 100)
+  const leftPct = Math.round(activeRegion.x * 100)
+  const rightPct = Math.round((activeRegion.x + activeRegion.width) * 100)
 
   return (
     <div className="space-y-2">
@@ -417,7 +412,7 @@ export function AntlerCropBox({
               }}
               onPointerDown={handleBodyPointerDown}
               role="slider"
-              aria-label="Antler focus crop box. Drag to move."
+              aria-label="Antler focus crop box. Drag to move. Pinch with two fingers to resize."
               aria-valuetext={`${widthPct} percent wide by ${heightPct} percent tall`}
             >
               <div
@@ -435,7 +430,7 @@ export function AntlerCropBox({
                   border: '1px solid rgba(212,168,75,0.45)',
                 }}
               >
-                Drag
+                Drag / Pinch
               </div>
 
               {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as HandleId[]).map((h) => (
@@ -451,10 +446,10 @@ export function AntlerCropBox({
           <div className="mb-2 flex items-center justify-between gap-2">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground">
-                Expand crop
+                Fine-tune edges
               </p>
               <p className="text-[10px] text-muted-foreground">
-                Arrows expand that edge only - they do not move the box.
+                Slide each edge to expand or contract that side.
               </p>
             </div>
 
@@ -467,55 +462,39 @@ export function AntlerCropBox({
             </button>
           </div>
 
-          <div className="mx-auto grid w-[138px] grid-cols-3 gap-1">
-            <span />
-            <ExpandButton
-              label="Expand up"
-              onPointerDown={handleExpandPointerDown('up')}
-              onPointerUp={stopExpandRepeat}
-              onPointerCancel={stopExpandRepeat}
-              onPointerLeave={stopExpandRepeat}
-            >
-              <ArrowUp className="h-4 w-4" aria-hidden />
-            </ExpandButton>
-            <span />
-
-            <ExpandButton
-              label="Expand left"
-              onPointerDown={handleExpandPointerDown('left')}
-              onPointerUp={stopExpandRepeat}
-              onPointerCancel={stopExpandRepeat}
-              onPointerLeave={stopExpandRepeat}
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-            </ExpandButton>
-            <div
-              className="flex h-11 items-center justify-center rounded border border-border/50 text-[9px] font-mono uppercase text-muted-foreground"
-              aria-hidden
-            >
-              Box
-            </div>
-            <ExpandButton
-              label="Expand right"
-              onPointerDown={handleExpandPointerDown('right')}
-              onPointerUp={stopExpandRepeat}
-              onPointerCancel={stopExpandRepeat}
-              onPointerLeave={stopExpandRepeat}
-            >
-              <ArrowRight className="h-4 w-4" aria-hidden />
-            </ExpandButton>
-
-            <span />
-            <ExpandButton
-              label="Expand down"
-              onPointerDown={handleExpandPointerDown('down')}
-              onPointerUp={stopExpandRepeat}
-              onPointerCancel={stopExpandRepeat}
-              onPointerLeave={stopExpandRepeat}
-            >
-              <ArrowDown className="h-4 w-4" aria-hidden />
-            </ExpandButton>
-            <span />
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+            <EdgeSlider
+              label="Top"
+              value={activeRegion.y}
+              min={0}
+              max={Math.max(0, activeRegion.y + activeRegion.height - MIN_DIMENSION)}
+              percent={topPct}
+              onChange={setTopEdge}
+            />
+            <EdgeSlider
+              label="Bottom"
+              value={activeRegion.y + activeRegion.height}
+              min={Math.min(1, activeRegion.y + MIN_DIMENSION)}
+              max={1}
+              percent={bottomPct}
+              onChange={setBottomEdge}
+            />
+            <EdgeSlider
+              label="Left"
+              value={activeRegion.x}
+              min={0}
+              max={Math.max(0, activeRegion.x + activeRegion.width - MIN_DIMENSION)}
+              percent={leftPct}
+              onChange={setLeftEdge}
+            />
+            <EdgeSlider
+              label="Right"
+              value={activeRegion.x + activeRegion.width}
+              min={Math.min(1, activeRegion.x + MIN_DIMENSION)}
+              max={1}
+              percent={rightPct}
+              onChange={setRightEdge}
+            />
           </div>
         </div>
       )}
@@ -524,7 +503,7 @@ export function AntlerCropBox({
         <p className="text-muted-foreground">
           {skipped
             ? 'Skipped - original photo will be sent to scoring.'
-            : 'Drag inside the amber box to move it. Use handles or arrows to expand the crop.'}
+            : 'Drag the amber box to move it. Pinch with two fingers to resize, or use the edge sliders.'}
         </p>
         {!skipped && (
           <button
@@ -540,34 +519,38 @@ export function AntlerCropBox({
   )
 }
 
-function ExpandButton({
+function EdgeSlider({
   label,
-  children,
-  onPointerDown,
-  onPointerUp,
-  onPointerCancel,
-  onPointerLeave,
+  value,
+  min,
+  max,
+  percent,
+  onChange,
 }: {
   label: string
-  children: React.ReactNode
-  onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
-  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void
-  onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => void
-  onPointerLeave: (e: React.PointerEvent<HTMLButtonElement>) => void
+  value: number
+  min: number
+  max: number
+  percent: number
+  onChange: (v: number) => void
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      onPointerLeave={onPointerLeave}
-      className="flex h-11 touch-manipulation select-none items-center justify-center rounded border border-[var(--bronze-dark)] bg-black/30 text-base font-black text-[var(--bronze-light)] transition active:scale-95 hover:bg-black/45"
-      style={{ touchAction: 'none' }}
-    >
-      {children}
-    </button>
+    <label className="flex flex-col gap-1">
+      <span className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <span>{label}</span>
+        <span className="tabular-nums text-foreground/70">{percent}%</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={0.001}
+        value={Math.min(Math.max(value, min), max)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(parseFloat(e.target.value))}
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-black/40 accent-[var(--bronze-light)]"
+        style={{ touchAction: 'none' }}
+      />
+    </label>
   )
 }
 

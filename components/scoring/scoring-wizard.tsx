@@ -271,7 +271,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       if (data.source_type) apiFormData.append('source_type', data.source_type)
       if (data.capture_device) apiFormData.append('capture_device', data.capture_device)
       if (data.harvest_year !== undefined) apiFormData.append('harvest_year', String(data.harvest_year))
-      if (data.main_frame_points !== undefined) apiFormData.append('main_frame_points', String(data.main_frame_points))
+      if (data.total_points != null) apiFormData.append('total_points', String(data.total_points))
+      if (data.main_frame_points != null) apiFormData.append('main_frame_points', String(data.main_frame_points))
       if (data.ears_fully_visible !== undefined) {
         apiFormData.append('ears_fully_visible', String(data.ears_fully_visible))
       }
@@ -325,20 +326,20 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         recommendationReason: captureQuality.recommendationReason,
       }))
 
-      if (data.precision_mode_enabled) {
+      if (data.reference_type && data.reference_type !== 'none') {
         const precisionRefType = (data.reference_type === 'wedding_ring' || data.reference_type === 'hat')
           ? 'none' as const
           : data.reference_type
         const referenceModeSummary = buildReferenceModeSummary({
-          precisionModeEnabled: data.precision_mode_enabled,
+          precisionModeEnabled: true,
           referenceType: precisionRefType,
           referenceNotes: data.reference_notes,
           referenceSizeValue: data.reference_size_value,
           referenceSizeUnit: data.reference_size_unit,
           referencePlacement: data.reference_placement,
         })
-        apiFormData.append('precision_mode_enabled', String(data.precision_mode_enabled))
-        apiFormData.append('reference_type', data.reference_type ?? 'none')
+        apiFormData.append('precision_mode_enabled', 'true')
+        apiFormData.append('reference_type', data.reference_type)
         if (data.reference_notes) apiFormData.append('reference_notes', data.reference_notes)
         if (data.reference_size_value !== undefined) {
           apiFormData.append('reference_size_value', String(data.reference_size_value))
@@ -368,6 +369,15 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       // Ring reference (optional)
       if (data.reference_object) {
         apiFormData.append('reference_object', JSON.stringify(data.reference_object))
+      }
+
+      if (data.pre_scoring_measurements) {
+        const nonNull = Object.fromEntries(
+          Object.entries(data.pre_scoring_measurements).filter(([, v]) => v != null)
+        )
+        if (Object.keys(nonNull).length > 0) {
+          apiFormData.append('pre_scoring_measurements', JSON.stringify(nonNull))
+        }
       }
 
       // Antler crop regions — null where the user skipped that image

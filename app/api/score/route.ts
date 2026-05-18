@@ -56,6 +56,7 @@ import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
 import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
+import type { PreScoringMeasurements } from '@/lib/types'
 
 // Generate a unique request ID
 function generateRequestId(): string {
@@ -114,7 +115,9 @@ export async function POST(request: Request) {
     const captureDevice = formData.get('capture_device') as CaptureDevice | null
     const earsFullyVisible = formData.get('ears_fully_visible') === 'true'
     const harvestYearRaw = formData.get('harvest_year') as string | null
+    const totalPointsRaw = formData.get('total_points') as string | null
     const mainFrameRaw = formData.get('main_frame_points') as string | null
+    const preScoringMeasurementsRaw = formData.get('pre_scoring_measurements') as string | null
     const notes = formData.get('notes') as string | null
     const nickname = formData.get('nickname') as string | null
     const location = formData.get('location') as string | null
@@ -180,7 +183,12 @@ export async function POST(request: Request) {
     }
 
     const harvestYear = harvestYearRaw ? Number(harvestYearRaw) : null
+    const totalPoints = totalPointsRaw ? Number(totalPointsRaw) : null
     const mainFramePoints = mainFrameRaw ? Number(mainFrameRaw) : null
+    let preScoringMeasurements: PreScoringMeasurements | null = null
+    try {
+      if (preScoringMeasurementsRaw) preScoringMeasurements = JSON.parse(preScoringMeasurementsRaw)
+    } catch { /* ignore */ }
 
     // Collect images from form data — data URLs are held separately and uploaded
     // to Supabase Storage after the buck is created so we have a real https:// URL
@@ -578,6 +586,8 @@ export async function POST(request: Request) {
       captureDevice: captureDevice || undefined,
       harvestYear: Number.isFinite(harvestYear) ? harvestYear ?? undefined : undefined,
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
+      totalPoints: Number.isFinite(totalPoints) ? totalPoints ?? undefined : undefined,
+      preScoringMeasurements: preScoringMeasurements ?? undefined,
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
       traceId: requestId,
@@ -825,7 +835,8 @@ export async function POST(request: Request) {
         } catch {
           return null
         }
-      })() : null
+      })() : null,
+      userMeasurementsMetadata: preScoringMeasurements ?? null,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)

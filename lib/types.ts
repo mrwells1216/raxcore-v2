@@ -373,6 +373,28 @@ export interface Profile {
   updated_at: string
 }
 
+export interface PreScoringMeasurements {
+  main_beam_left?: number | null
+  main_beam_right?: number | null
+  g1_left?: number | null
+  g1_right?: number | null
+  g2_left?: number | null
+  g2_right?: number | null
+  g3_left?: number | null
+  g3_right?: number | null
+  g4_left?: number | null
+  g4_right?: number | null
+  h1_left?: number | null
+  h1_right?: number | null
+  h2_left?: number | null
+  h2_right?: number | null
+  h3_left?: number | null
+  h3_right?: number | null
+  h4_left?: number | null
+  h4_right?: number | null
+  inside_spread?: number | null
+}
+
 // Form types
 export interface ScoringFormData {
   state?: string | null
@@ -382,7 +404,8 @@ export interface ScoringFormData {
   capture_device?: CaptureDevice
   ears_fully_visible?: boolean
   harvest_year?: number
-  main_frame_points?: number
+  total_points?: number | null
+  main_frame_points?: number | null
   notes?: string
   // Phase 54: Abnormal/Irregular Points
   irregular_points_present?: YesNoUnsure
@@ -423,6 +446,8 @@ export interface ScoringFormData {
   // Precision mode ring/hat fields
   reference_ring_size_us?: number | null
   reference_hat_type?: 'baseball_cap' | 'baseball_cap_backwards' | 'beanie' | 'skull_cap' | 'stetson' | 'wide_brim' | null
+  // Pre-AI manual measurements (optional ground truth anchors)
+  pre_scoring_measurements?: PreScoringMeasurements | null
 }
 
 export interface GroundTruthFormData {

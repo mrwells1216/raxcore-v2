@@ -89,6 +89,8 @@ export interface VisionScoringInput {
   sourceType?: string
   captureDevice?: string
   mainFramePoints?: number
+  totalPoints?: number
+  preScoringMeasurements?: import('@/lib/types').PreScoringMeasurements | null
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
@@ -346,6 +348,38 @@ ${hat.brimWidthInches
 `
       : ''
 
+  const MEASUREMENT_LABELS: Record<string, string> = {
+    main_beam_left: 'Main beam left',
+    main_beam_right: 'Main beam right',
+    g1_left: 'G1 left', g1_right: 'G1 right',
+    g2_left: 'G2 left', g2_right: 'G2 right',
+    g3_left: 'G3 left', g3_right: 'G3 right',
+    g4_left: 'G4 left', g4_right: 'G4 right',
+    h1_left: 'H1 left', h1_right: 'H1 right',
+    h2_left: 'H2 left', h2_right: 'H2 right',
+    h3_left: 'H3 left', h3_right: 'H3 right',
+    h4_left: 'H4 left', h4_right: 'H4 right',
+    inside_spread: 'Inside spread',
+  }
+  const preMeasurements = input.preScoringMeasurements
+  const preMeasurementLines = preMeasurements
+    ? Object.entries(preMeasurements)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => `  ${MEASUREMENT_LABELS[k] ?? k}: ${v}"`)
+    : []
+  const preMeasurementBlock = preMeasurementLines.length > 0
+    ? `
+USER-PROVIDED MEASUREMENTS (treat as ground truth)
+The user measured these fields with a tape before submitting.
+These are verified physical measurements. DO NOT contradict them.
+Use them as fixed anchors when estimating all unmeasured fields.
+
+${preMeasurementLines.join('\n')}
+
+Estimate all unmeasured fields based on these confirmed anchors.
+`
+    : ''
+
   return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
 
 TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
@@ -356,11 +390,13 @@ CONTEXT:
 - User says ears fully visible: ${input.earsFullyVisible ? 'Yes' : 'Unknown/No'}
 - Source type: ${input.sourceType || 'Unknown'}
 - Capture device: ${input.captureDevice || 'Unknown'}
+- User-indicated total points: ${input.totalPoints || 'Not provided'}
 - User-suggested main frame points: ${input.mainFramePoints || 'Not provided'}
 
 IMAGES PROVIDED:
 ${angleDescriptions}
 ${cropNote}
+${preMeasurementBlock}
 ${precisionReferenceBlock}
 ${ringReferenceBlock}
 ${hatReferenceBlock}
