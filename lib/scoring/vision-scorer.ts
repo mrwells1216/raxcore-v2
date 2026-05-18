@@ -89,6 +89,7 @@ export interface VisionScoringInput {
   sourceType?: string
   captureDevice?: string
   mainFramePoints?: number
+  totalPoints?: number
   precisionReference?: PrecisionReferenceProfile | null
   referenceObject?: import('@/lib/scoring/reference-object-types').ScoringReferenceObjectInput | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
@@ -356,6 +357,7 @@ CONTEXT:
 - User says ears fully visible: ${input.earsFullyVisible ? 'Yes' : 'Unknown/No'}
 - Source type: ${input.sourceType || 'Unknown'}
 - Capture device: ${input.captureDevice || 'Unknown'}
+- User-indicated total points: ${input.totalPoints || 'Not provided'}
 - User-suggested main frame points: ${input.mainFramePoints || 'Not provided'}
 
 IMAGES PROVIDED:

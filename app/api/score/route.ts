@@ -114,6 +114,7 @@ export async function POST(request: Request) {
     const captureDevice = formData.get('capture_device') as CaptureDevice | null
     const earsFullyVisible = formData.get('ears_fully_visible') === 'true'
     const harvestYearRaw = formData.get('harvest_year') as string | null
+    const totalPointsRaw = formData.get('total_points') as string | null
     const mainFrameRaw = formData.get('main_frame_points') as string | null
     const notes = formData.get('notes') as string | null
     const nickname = formData.get('nickname') as string | null
@@ -180,6 +181,7 @@ export async function POST(request: Request) {
     }
 
     const harvestYear = harvestYearRaw ? Number(harvestYearRaw) : null
+    const totalPoints = totalPointsRaw ? Number(totalPointsRaw) : null
     const mainFramePoints = mainFrameRaw ? Number(mainFrameRaw) : null
 
     // Collect images from form data — data URLs are held separately and uploaded
@@ -578,6 +580,7 @@ export async function POST(request: Request) {
       captureDevice: captureDevice || undefined,
       harvestYear: Number.isFinite(harvestYear) ? harvestYear ?? undefined : undefined,
       mainFramePoints: Number.isFinite(mainFramePoints) ? mainFramePoints ?? undefined : undefined,
+      totalPoints: Number.isFinite(totalPoints) ? totalPoints ?? undefined : undefined,
       precisionReferenceProfile,
       referenceObject: referenceObject ?? undefined,
       traceId: requestId,
