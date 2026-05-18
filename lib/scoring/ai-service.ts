@@ -69,6 +69,8 @@ export interface ScoringInput {
   captureDevice?: CaptureDevice | string
   harvestYear?: number
   mainFramePoints?: number
+  totalPoints?: number
+  preScoringMeasurements?: import('@/lib/types').PreScoringMeasurements
   // Phase 20: Optional explicit calibration profile for model comparison
   // If not provided, uses the active calibration profile
   calibrationProfile?: CalibrationProfile | null
@@ -765,6 +767,8 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     sourceType: input.sourceType,
     captureDevice: input.captureDevice,
     mainFramePoints: input.mainFramePoints,
+    totalPoints: input.totalPoints,
+    preScoringMeasurements: input.preScoringMeasurements,
     precisionReference: input.precisionReferenceProfile,
     referenceObject: input.referenceObject ?? undefined,
     preAiScoringContext: input.preAiScoringContext ?? null,

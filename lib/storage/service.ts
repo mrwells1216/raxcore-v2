@@ -477,6 +477,7 @@ export interface CreatePredictionParams {
   rawResponse?: Record<string, unknown>
   intakeQuality?: Record<string, unknown> | null
   cropBoxMetadata?: Record<string, unknown> | null
+  userMeasurementsMetadata?: Record<string, unknown> | null
 }
 
 // Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
@@ -597,6 +598,7 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       raw_ai_response: params.rawResponse || null,
       intake_quality: params.intakeQuality || null,
       crop_box_metadata: params.cropBoxMetadata ?? null,
+      user_measurements_metadata: params.userMeasurementsMetadata ?? null,
     })
     .select()
     .single()

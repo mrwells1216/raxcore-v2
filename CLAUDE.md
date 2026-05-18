@@ -123,6 +123,18 @@ If a feature looks impressive but does not improve measurement truth, do not shi
 ### 3.12. Render-time Zustand safety ✓
 `useMeasureStore.getState()` only in event handlers and effect cleanups. Never at render time.
 
+### 3.13. Crop box pinch-to-resize + bidirectional edge sliders ✓
+`components/scoring/antler-crop-box.tsx` — removed expand-only arrow pad; added two-finger pinch-to-resize and four per-edge range sliders (Top/Bottom/Left/Right) that each control that edge bidirectionally. activePointersRef tracks pointer IDs for pinch detection. RAF-throttled onChange preserved.
+
+### 3.14. Point count dual sliders ✓
+Replaced 8-14pt chip grid with two `PointCountSlider` components (total 4-30; main frame 6-16, shown only when total >= 6; auto-corrects if main frame > total). New `total_points` field threads through ScoringFormData, wizard FormData, ScoringInput, VisionScoringInput, and the vision prompt. Files: new `components/scoring/point-count-slider.tsx`; modified `scoring-form.tsx`, `lib/types.ts`, `scoring-wizard.tsx`, `app/api/score/route.ts`, `lib/scoring/ai-service.ts`, `lib/scoring/vision-scorer.ts`.
+
+### 3.16. Precision mode always visible + form reorganize ✓
+Merged the toggle-gated Precision Mode card (8 reference types: none/ruler/card/coin/aruco/other/ring/hat) with the old limited ring/hat-only Reference Object section into one always-visible "Reference Object" section. Removed the `precision_mode_enabled` toggle from the UI; `scoring-wizard.tsx` now sends reference fields whenever `reference_type !== 'none'` (passes `precision_mode_enabled: 'true'` to the API so the existing API contract is unchanged). Removed the Ears Visible toggle (landmark detection handles it automatically). Made Optional Details (method/year/notes) a collapsible section moved after Irregular Points. New section order: Rack Info → Image Context → Reference Object → Known Measurements → Irregular Points → Optional Details. Files: `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
+
+### 3.15. Pre-AI manual measurements panel ✓
+Optional collapsible "Known Measurements" section in the scoring form lets users enter tape-measured B&C fields (main beams, G1–G4, H1–H4, inside spread) before submission. Non-null values are serialized to JSON in the wizard, parsed in route.ts, passed to `scoreBuck` → `VisionScoringInput`, and injected into the vision prompt as "USER-PROVIDED MEASUREMENTS (treat as ground truth) — DO NOT contradict them." Values are also stored in a new `user_measurements_metadata` JSONB column on `predictions`. Plausibility warnings shown inline; amber highlight on entered fields. Files: new `components/scoring/pre-scoring-measurements.tsx`, new `supabase/migrations/20260518_user_measurements_metadata.sql`; modified `lib/types.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/api/score/route.ts`, `lib/storage/service.ts`, `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
+
 ---
 
 ## 4. What is NOT built yet (the pending plan queue)
@@ -199,6 +211,9 @@ The moat. Expand `app/admin/training-import` from free-form JSON paste to full B
 - Never start a new v0 project. Edit this repo in place.
 - Always commit to `main`. Never create feature branches.
 - After every work item: `pnpm exec tsc --noEmit && pnpm build`.
+
+### CLAUDE.md maintenance
+- After every work item, update Section 3 ("What is shipped") to reflect what was built. Add a new subsection numbered sequentially (3.13, 3.14, …) with: feature name, one-line summary, list of files changed, and any calibration-hierarchy or accuracy notes. Section 3 is the source of truth for what actually exists in the repo and must stay current with every commit to `main`.
 
 ### Files that must not be casually changed
 - `lib/capture/scan-session.ts`
