@@ -271,7 +271,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       if (data.source_type) apiFormData.append('source_type', data.source_type)
       if (data.capture_device) apiFormData.append('capture_device', data.capture_device)
       if (data.harvest_year !== undefined) apiFormData.append('harvest_year', String(data.harvest_year))
-      if (data.main_frame_points !== undefined) apiFormData.append('main_frame_points', String(data.main_frame_points))
+      if (data.total_points != null) apiFormData.append('total_points', String(data.total_points))
+      if (data.main_frame_points != null) apiFormData.append('main_frame_points', String(data.main_frame_points))
       if (data.ears_fully_visible !== undefined) {
         apiFormData.append('ears_fully_visible', String(data.ears_fully_visible))
       }

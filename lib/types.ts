@@ -382,7 +382,8 @@ export interface ScoringFormData {
   capture_device?: CaptureDevice
   ears_fully_visible?: boolean
   harvest_year?: number
-  main_frame_points?: number
+  total_points?: number | null
+  main_frame_points?: number | null
   notes?: string
   // Phase 54: Abnormal/Irregular Points
   irregular_points_present?: YesNoUnsure

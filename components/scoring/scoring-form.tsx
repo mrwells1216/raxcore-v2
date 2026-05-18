@@ -13,9 +13,10 @@ import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, MAIN_FRAME_OPTIONS, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
+import { RACK_TYPES, HARVEST_METHODS, SOURCE_TYPES, CAPTURE_DEVICES, ABNORMAL_POINT_TAGS, YES_NO_UNSURE_OPTIONS } from '@/lib/constants'
 import type { AbnormalPointTag } from '@/lib/types'
 import type { ScoringFormData } from '@/lib/types'
+import { PointCountSlider } from './point-count-slider'
 import { buildReferenceModeSummary } from '@/lib/scoring/reference-mode'
 import { buildRingReferenceInput, ringSizeToInnerDiameterInches, normalizeRingSizeUS } from '@/lib/scoring/ring-reference'
 import { buildHatReferenceInput, HAT_DIMENSIONS } from '@/lib/scoring/hat-reference'
@@ -42,7 +43,8 @@ const formSchema = z.object({
   capture_device: z.enum(['iphone', 'android', 'digital_camera', 'photo_of_photo', 'vintage_photo', 'unknown']).optional(),
   ears_fully_visible: z.boolean().optional(),
   harvest_year: z.coerce.number().min(1900).max(new Date().getFullYear()).optional(),
-  main_frame_points: z.coerce.number().min(1).max(30).optional(),
+  total_points: z.coerce.number().min(4).max(30).optional().nullable(),
+  main_frame_points: z.coerce.number().min(6).max(16).optional().nullable(),
   notes: z.string().optional(),
   // Phase 54: Abnormal/Irregular Points
   irregular_points_present: z.enum(['yes', 'no', 'unsure']).optional(),
@@ -106,7 +108,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
       capture_device: 'unknown',
       ears_fully_visible: true,
       harvest_year: undefined,
-      main_frame_points: undefined,
+      total_points: null,
+      main_frame_points: null,
       notes: '',
       irregular_points_present: undefined,
       non_typical_traits_present: undefined,
@@ -224,56 +227,62 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             <MapPin className="h-4 w-4 text-primary" />
             <h3 className="text-sm font-semibold text-foreground">Rack Information</h3>
           </div>
-          <div>
+          <div className="space-y-4">
             <FormField
               control={form.control}
-              name="main_frame_points"
+              name="total_points"
               render={({ field }) => (
-                <FormItem className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <FormLabel className="text-xs">Frame Points</FormLabel>
-                    {field.value && (
-                      <span className="text-xs font-bold tabular-nums px-2 py-0.5 rounded-full"
-                        style={{
-                          background: 'rgba(251,191,36,0.12)',
-                          color: 'rgba(251,191,36,0.9)',
-                          border: '1px solid rgba(251,191,36,0.25)',
-                        }}>
-                        {field.value}-point
-                      </span>
-                    )}
-                  </div>
+                <FormItem className="space-y-0">
                   <FormControl>
-                    <div className="flex flex-wrap gap-2">
-                      {MAIN_FRAME_OPTIONS.map((pts) => {
-                        const isSelected = field.value === pts
-                        return (
-                          <button
-                            key={pts}
-                            type="button"
-                            onClick={() => field.onChange(field.value === pts ? undefined : pts)}
-                            className="flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl border transition-all touch-manipulation min-w-[52px]"
-                            style={{
-                              background:   isSelected ? 'rgba(251,191,36,0.12)' : 'transparent',
-                              border:       isSelected ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(107,93,82,0.3)',
-                              color:        isSelected ? 'rgba(251,191,36,0.95)' : 'rgba(180,163,145,0.75)',
-                            }}
-                          >
-                            <span className="text-sm font-bold tabular-nums leading-none">{pts}</span>
-                            <span className="text-[9px] uppercase tracking-wide leading-none opacity-70">pt</span>
-                          </button>
-                        )
-                      })}
-                    </div>
+                    <PointCountSlider
+                      label="Total Points (optional)"
+                      value={field.value ?? null}
+                      min={4}
+                      max={30}
+                      displayValue={(v) => `${v} points total`}
+                      helperText="All scoreable points on both antlers — helps AI identify tine structure"
+                      onChange={(val) => {
+                        field.onChange(val)
+                        const mf = form.getValues('main_frame_points')
+                        if (val != null && mf != null && mf > val) {
+                          form.setValue('main_frame_points', val)
+                        }
+                      }}
+                    />
                   </FormControl>
-                  <FormDescription className="text-[11px]">
-                    {field.value
-                      ? `${field.value}-point main frame selected — helps AI identify tine structure`
-                      : 'Tap to select total point count (helps AI identify tine structure)'}
-                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
+            />
+
+            <FormField
+              control={form.control}
+              name="main_frame_points"
+              render={({ field }) => {
+                const total = form.watch('total_points')
+                if (total == null || total < 6) return <></>
+                return (
+                  <FormItem className="space-y-0">
+                    <FormControl>
+                      <PointCountSlider
+                        label="Main Frame Points (optional)"
+                        value={field.value ?? null}
+                        min={6}
+                        max={Math.min(16, total)}
+                        displayValue={(v) => `${v}-point main frame`}
+                        helperText="Typical tines only, excluding abnormal points"
+                        onChange={(val) => {
+                          field.onChange(val)
+                          if (val != null && total != null && val > total) {
+                            form.setValue('total_points', val)
+                          }
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )
+              }}
             />
           </div>
 
