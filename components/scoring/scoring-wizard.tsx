@@ -507,7 +507,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
 
   // ── Main flow ───────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-2xl mx-auto pb-32 space-y-3">
+    <div className="max-w-2xl mx-auto pb-8 space-y-3">
 
       {/* ── 1. Mode selector ────────────────────────────────────────────── */}
       <Section>
@@ -747,75 +747,60 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
         )}
       </div>
 
-      {/* ── 7. Sticky bottom CTA ────────────────────────────────────────── */}
-      <div
-        className="fixed bottom-0 inset-x-0 z-40 md:z-40"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div
-          className="border-t"
-          style={{
-            background: 'linear-gradient(0deg, #1c1814 0%, #161412 100%)',
-            borderColor: 'var(--bronze-dark)',
-            boxShadow: '0 -1px 0 rgba(212,168,75,0.08), 0 -8px 24px rgba(0,0,0,0.55)',
+      {/* ── 7. Bottom CTA ───────────────────────────────────────────────── */}
+      <div>
+        <button
+          type="button"
+          disabled={!canSubmit || isAnalyzing}
+          onClick={() => {
+            if (detailsOpen) {
+              scoringFormRef.current?.triggerSubmit()
+            } else {
+              handleAnalyze({
+                state: '',
+                rack_type: 'typical',
+                capture_device: 'unknown',
+                ears_fully_visible: true,
+                precision_mode_enabled: false,
+                reference_type: 'none',
+                reference_notes: '',
+                reference_size_value: undefined,
+                reference_size_unit: 'in',
+                reference_placement: 'unknown',
+                abnormal_point_tags: [],
+              } as ScoringFormData)
+            }
+          }}
+          className="w-full flex items-center justify-center gap-2.5 min-h-[52px] rounded text-sm font-black tracking-widest uppercase transition-all duration-150 touch-manipulation active:scale-[0.98]"
+          style={canSubmit && !isAnalyzing ? {
+            background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 55%, var(--bronze-dark) 100%)',
+            color: '#161412',
+            boxShadow: '0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 3px 14px rgba(0,0,0,0.55)',
+          } : {
+            background: '#252118',
+            color: 'var(--muted-foreground)',
+            cursor: 'not-allowed',
+            boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.40)',
           }}
         >
-          {/* On mobile add space for bottom nav (56px) */}
-          <div className="max-w-2xl mx-auto px-4 py-3 md:pb-3 pb-[4.75rem]">
-            <button
-              type="button"
-              disabled={!canSubmit || isAnalyzing}
-              onClick={() => {
-                if (detailsOpen) {
-                  scoringFormRef.current?.triggerSubmit()
-                } else {
-                  handleAnalyze({
-                    state: '',
-                    rack_type: 'typical',
-                    capture_device: 'unknown',
-                    ears_fully_visible: true,
-                    precision_mode_enabled: false,
-                    reference_type: 'none',
-                    reference_notes: '',
-                    reference_size_value: undefined,
-                    reference_size_unit: 'in',
-                    reference_placement: 'unknown',
-                    abnormal_point_tags: [],
-                  } as ScoringFormData)
-                }
-              }}
-              className="w-full flex items-center justify-center gap-2.5 min-h-[52px] rounded text-sm font-black tracking-widest uppercase transition-all duration-150 touch-manipulation active:scale-[0.98]"
-              style={canSubmit && !isAnalyzing ? {
-                background: 'linear-gradient(180deg, var(--bronze-light) 0%, var(--bronze-mid) 55%, var(--bronze-dark) 100%)',
-                color: '#161412',
-                boxShadow: '0 1px 0 rgba(255,230,150,0.22) inset, 0 -1px 0 rgba(0,0,0,0.35) inset, 0 3px 14px rgba(0,0,0,0.55)',
-              } : {
-                background: '#252118',
-                color: 'var(--muted-foreground)',
-                cursor: 'not-allowed',
-                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.40)',
-              }}
-            >
-              {isAnalyzing ? (
-                <><Loader2 className="h-4 w-4 animate-spin" />Analyzing...</>
-              ) : (
-                <>
-                  <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" aria-hidden>
-                    <path d="M8 13 L6.5 9 L4 7.5 L3 5 L4.5 3 L6 5 L6.5 2.5 L5.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M8 13 L9.5 9 L12 7.5 L13 5 L11.5 3 L10 5 L9.5 2.5 L10.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  AI Score
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
-            {!canSubmit && gridImages.length === 0 && (
-              <p className="text-center text-[11px] font-mono text-muted-foreground mt-2">
-                Add at least one photo to continue
-              </p>
-            )}
-          </div>
-        </div>
+          {isAnalyzing ? (
+            <><Loader2 className="h-4 w-4 animate-spin" />Analyzing...</>
+          ) : (
+            <>
+              <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" aria-hidden>
+                <path d="M8 13 L6.5 9 L4 7.5 L3 5 L4.5 3 L6 5 L6.5 2.5 L5.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M8 13 L9.5 9 L12 7.5 L13 5 L11.5 3 L10 5 L9.5 2.5 L10.5 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              AI Score
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </button>
+        {!canSubmit && gridImages.length === 0 && (
+          <p className="text-center text-[11px] font-mono text-muted-foreground mt-2">
+            Add at least one photo to continue
+          </p>
+        )}
       </div>
     </div>
   )
