@@ -200,6 +200,9 @@ The moat. Expand `app/admin/training-import` from free-form JSON paste to full B
 - Always commit to `main`. Never create feature branches.
 - After every work item: `pnpm exec tsc --noEmit && pnpm build`.
 
+### CLAUDE.md maintenance
+- After every work item, update Section 3 ("What is shipped") to reflect what was built. Add a new subsection numbered sequentially (3.13, 3.14, …) with: feature name, one-line summary, list of files changed, and any calibration-hierarchy or accuracy notes. Section 3 is the source of truth for what actually exists in the repo and must stay current with every commit to `main`.
+
 ### Files that must not be casually changed
 - `lib/capture/scan-session.ts`
 - `lib/scoring/resolve-image-roles.ts`
