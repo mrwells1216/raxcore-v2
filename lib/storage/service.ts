@@ -424,9 +424,59 @@ export async function addBuckImages(
   return data
 }
 
+/**
+ * Update predictions.per_image_consensus after landmark detection has run.
+ * The prediction row is inserted before landmark detection completes, so this
+ * is a follow-up patch. Best-effort: failures log and never throw.
+ */
+export async function updatePredictionPerImageConsensus(
+  predictionId: string,
+  perImageConsensus: unknown,
+): Promise<void> {
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('predictions')
+    .update({ per_image_consensus: perImageConsensus })
+    .eq('id', predictionId)
+  if (error) {
+    console.warn('[updatePredictionPerImageConsensus] update failed (non-blocking):', {
+      predictionId,
+      error: error.message,
+    })
+  }
+}
+
+/**
+ * Persist per-image landmark detections into buck_images.landmarks_detected.
+ * Best-effort: logs a warning and continues if a row fails to update so the
+ * scoring response is never blocked by storage hiccups.
+ */
+export async function updateBuckImageLandmarks(
+  buckId: string,
+  perImage: Array<{ displayOrder: number; landmarksDetected: unknown | null }>,
+): Promise<void> {
+  if (!perImage.length) return
+  const supabase = await createClient()
+
+  for (const row of perImage) {
+    const { error } = await supabase
+      .from('buck_images')
+      .update({ landmarks_detected: row.landmarksDetected })
+      .eq('buck_id', buckId)
+      .eq('display_order', row.displayOrder)
+    if (error) {
+      console.warn('[updateBuckImageLandmarks] update failed (non-blocking):', {
+        buckId,
+        displayOrder: row.displayOrder,
+        error: error.message,
+      })
+    }
+  }
+}
+
 export async function getBuckImages(buckId: string): Promise<BuckImageRecord[]> {
   const supabase = await createClient()
-  
+
   const { data, error } = await supabase
     .from('buck_images')
     .select('*')
@@ -478,6 +528,7 @@ export interface CreatePredictionParams {
   intakeQuality?: Record<string, unknown> | null
   cropBoxMetadata?: Record<string, unknown> | null
   userMeasurementsMetadata?: Record<string, unknown> | null
+  perImageConsensus?: Record<string, unknown> | null
 }
 
 // Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
@@ -599,6 +650,7 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       intake_quality: params.intakeQuality || null,
       crop_box_metadata: params.cropBoxMetadata ?? null,
       user_measurements_metadata: params.userMeasurementsMetadata ?? null,
+      per_image_consensus: params.perImageConsensus ?? null,
     })
     .select()
     .single()

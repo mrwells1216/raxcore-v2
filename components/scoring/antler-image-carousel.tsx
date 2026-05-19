@@ -17,6 +17,11 @@ interface AntlerImageCarouselProps {
   images: string[]
   /** Optional className for the container */
   className?: string
+  /**
+   * Called when the carousel moves to a new image. Lets a parent component
+   * (e.g. the landmark overlay) filter its annotations to the visible image.
+   */
+  onImageChange?: (index: number) => void
 }
 
 /**
@@ -24,7 +29,7 @@ interface AntlerImageCarouselProps {
  * - Single image: displays as a large standalone image (no carousel controls)
  * - Multiple images: horizontal carousel with swipe, arrows, and position indicators
  */
-export function AntlerImageCarousel({ images, className }: AntlerImageCarouselProps) {
+export function AntlerImageCarousel({ images, className, onImageChange }: AntlerImageCarouselProps) {
   const [api, setApi] = useState<CarouselApi>()
   const [current, setCurrent] = useState(0)
   const [count, setCount] = useState(0)
@@ -37,9 +42,17 @@ export function AntlerImageCarousel({ images, className }: AntlerImageCarouselPr
     setCurrent(api.selectedScrollSnap())
 
     api.on('select', () => {
-      setCurrent(api.selectedScrollSnap())
+      const idx = api.selectedScrollSnap()
+      setCurrent(idx)
+      onImageChange?.(idx)
     })
-  }, [api])
+  }, [api, onImageChange])
+
+  // Fire onImageChange for the initial position too (single-image case still
+  // benefits from this, e.g. landmark overlay can show that image's dots).
+  useEffect(() => {
+    onImageChange?.(current)
+  }, [current, onImageChange])
 
   const scrollPrev = useCallback(() => {
     api?.scrollPrev()

@@ -4,6 +4,9 @@ export type AntlerLandmarkId =
   | 'eye_left' | 'eye_right'
   | 'pedicle_left' | 'pedicle_right'
   | 'nose_tip' | 'nose_bridge_top'
+  // Ear references — ear_base_* is skull-fixed, ear_tip_* is mobile
+  | 'ear_base_left' | 'ear_base_right'
+  | 'ear_tip_left'  | 'ear_tip_right'
   // Beam landmarks
   | 'burr_left' | 'burr_right'
   | 'beam_tip_left' | 'beam_tip_right'
@@ -50,6 +53,28 @@ export interface LandmarkDetectionResult {
   requestedCount: number
 }
 
+/**
+ * Result of running landmark detection on a single image.
+ * Used by detectLandmarkPositionsPerImage to keep per-image observations
+ * unambiguous (no risk of the model mixing up which image is which).
+ */
+export interface PerImageLandmarkResult {
+  imageIndex: number
+  imageUrl: string
+  angleType: 'front' | 'left' | 'right' | 'unknown'
+  landmarks: LandmarkDetection[]
+  imageWidth: number
+  imageHeight: number
+  modelUsed: string
+  detectionTimestamp: string
+  locatedCount: number
+  requestedCount: number
+  /** When the per-image call failed but the run continued. */
+  failed?: boolean
+  /** Free-text reason when failed === true. */
+  failureReason?: string
+}
+
 export const LANDMARK_ZONE_COLORS: Record<string, string> = {
   skull:         '#9ca3af',
   beam:          '#3b82f6',
@@ -59,7 +84,7 @@ export const LANDMARK_ZONE_COLORS: Record<string, string> = {
 }
 
 export function getLandmarkZone(id: AntlerLandmarkId): keyof typeof LANDMARK_ZONE_COLORS {
-  if (id.startsWith('eye_') || id.startsWith('pedicle_') || id.startsWith('nose_')) return 'skull'
+  if (id.startsWith('eye_') || id.startsWith('pedicle_') || id.startsWith('nose_') || id.startsWith('ear_')) return 'skull'
   if (id.startsWith('burr_') || id.startsWith('beam_')) return 'beam'
   if (id.startsWith('g')) return 'tine'
   if (id.startsWith('h')) return 'circumference'

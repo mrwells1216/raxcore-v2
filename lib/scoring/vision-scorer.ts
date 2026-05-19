@@ -8,7 +8,7 @@ import { generateObject } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 import type { Measurements, LandmarksDetected, AngleType, FallbackMetadataInfo, RuntimeMetadataInfo } from '@/lib/types'
-import type { AntlerLandmarkId, LandmarkDetection, LandmarkDetectionResult } from './landmark-detection'
+import type { AntlerLandmarkId, LandmarkDetection, LandmarkDetectionResult, PerImageLandmarkResult } from './landmark-detection'
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
 import { 
   validateImages, 
@@ -1287,6 +1287,7 @@ const LandmarkDetectionSchema = z.object({
 
 const LANDMARK_IDS: AntlerLandmarkId[] = [
   'eye_left', 'eye_right', 'pedicle_left', 'pedicle_right', 'nose_tip', 'nose_bridge_top',
+  'ear_base_left', 'ear_base_right', 'ear_tip_left', 'ear_tip_right',
   'burr_left', 'burr_right', 'beam_tip_left', 'beam_tip_right',
   'spread_anchor_left', 'spread_anchor_right',
   'g1_base_left', 'g1_tip_left', 'g2_base_left', 'g2_tip_left',
@@ -1300,38 +1301,65 @@ const LANDMARK_IDS: AntlerLandmarkId[] = [
 ]
 
 /**
- * Use GPT-4o to detect pixel (x, y) coordinates for all antler landmarks.
- * Best-effort — returns null on any failure. Never throws.
+ * Run landmark detection on a SINGLE image. The model never sees more than one
+ * image at a time, so every landmark in the response is unambiguously tagged
+ * with the supplied imageIndex and angleType — no risk of the model conflating
+ * which image a coordinate came from.
+ *
+ * Best-effort — returns a failed result on any error so the caller can keep
+ * processing other images. Never throws.
  */
-export async function detectLandmarkPositions(
-  imageUrls: string[],
-): Promise<LandmarkDetectionResult | null> {
-  if (!imageUrls || imageUrls.length === 0) return null
+async function detectLandmarksForOneImage(args: {
+  imageUrl: string
+  imageIndex: number
+  angleType: 'front' | 'left' | 'right' | 'unknown'
+}): Promise<PerImageLandmarkResult> {
+  const { imageUrl, imageIndex, angleType } = args
+
+  const fail = (reason: string): PerImageLandmarkResult => ({
+    imageIndex,
+    imageUrl,
+    angleType,
+    landmarks: [],
+    imageWidth: 0,
+    imageHeight: 0,
+    modelUsed: 'gpt-4o',
+    detectionTimestamp: new Date().toISOString(),
+    locatedCount: 0,
+    requestedCount: LANDMARK_IDS.length,
+    failed: true,
+    failureReason: reason,
+  })
 
   const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) return fail('OPENAI_API_KEY not configured')
+
+  const landmarkList = LANDMARK_IDS.join(', ')
+  const angleHint =
+    angleType === 'unknown'
+      ? `The angle of this image is unspecified. Infer it from the deer's head orientation.`
+      : `This image is the ${angleType} view of the deer.`
+
+  const prompt =
+    `You are a deer antler measurement expert. Locate each antler landmark in the provided image precisely.\n` +
+    `${angleHint}\n` +
+    `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
+    `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
+    `Set sourceAngle to '${angleType}' for every landmark (the image is a single ${angleType} view).\n` +
+    `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
+    `Landmarks to locate: ${landmarkList}.`
 
   try {
-    const imageContent = imageUrls.slice(0, 3).map((url) => ({
-      type: 'image' as const,
-      image: url,
-    }))
-
-    const landmarkList = LANDMARK_IDS.join(', ')
-    const prompt =
-      `You are a deer antler measurement expert. For the provided image(s), locate each antler landmark precisely.\n` +
-      `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
-      `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
-      `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
-      `Landmarks to locate: ${landmarkList}.`
-
     const { object } = await generateObject({
       model: openai('gpt-4o'),
       schema: LandmarkDetectionSchema,
       messages: [
         {
           role: 'user',
-          content: [...imageContent, { type: 'text', text: prompt }],
+          content: [
+            { type: 'image' as const, image: imageUrl },
+            { type: 'text', text: prompt },
+          ],
         },
       ],
       maxRetries: 0,
@@ -1345,7 +1373,9 @@ export async function detectLandmarkPositions(
         py: lm.py,
         confidence: lm.confidence,
         visibility: lm.visibility,
-        sourceAngle: lm.sourceAngle,
+        // Trust the model's angle if it agrees, otherwise override with the
+        // angle the caller declared — single-image calls remove the ambiguity.
+        sourceAngle: angleType === 'unknown' ? lm.sourceAngle : angleType,
         source: 'ai' as const,
       }))
 
@@ -1354,6 +1384,9 @@ export async function detectLandmarkPositions(
     ).length
 
     return {
+      imageIndex,
+      imageUrl,
+      angleType,
       landmarks,
       imageWidth: object.imageWidth,
       imageHeight: object.imageHeight,
@@ -1362,7 +1395,67 @@ export async function detectLandmarkPositions(
       locatedCount,
       requestedCount: LANDMARK_IDS.length,
     }
-  } catch {
-    return null
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown error'
+    return fail(msg)
+  }
+}
+
+/**
+ * Detect antler landmarks for every supplied image in parallel.
+ *
+ * Each image gets its own GPT-4o call so the model cannot mix up which image a
+ * landmark came from. Returns one PerImageLandmarkResult per input URL (failed
+ * entries marked with failed === true rather than thrown).
+ *
+ * angleTypes must align positionally with imageUrls; pass 'unknown' for any
+ * slot whose angle was not declared.
+ */
+export async function detectLandmarkPositionsPerImage(
+  imageUrls: string[],
+  angleTypes?: Array<'front' | 'left' | 'right' | 'unknown'>,
+): Promise<PerImageLandmarkResult[]> {
+  if (!imageUrls || imageUrls.length === 0) return []
+
+  const tasks = imageUrls.map((imageUrl, imageIndex) =>
+    detectLandmarksForOneImage({
+      imageUrl,
+      imageIndex,
+      angleType: angleTypes?.[imageIndex] ?? 'unknown',
+    }),
+  )
+
+  return Promise.all(tasks)
+}
+
+/**
+ * Backwards-compatible single-result wrapper. Runs the per-image detector and
+ * flattens the per-image arrays into the legacy LandmarksDetectionResult shape.
+ * Returns null only when ALL per-image calls failed, matching the old contract.
+ */
+export async function detectLandmarkPositions(
+  imageUrls: string[],
+  angleTypes?: Array<'front' | 'left' | 'right' | 'unknown'>,
+): Promise<LandmarkDetectionResult | null> {
+  const perImage = await detectLandmarkPositionsPerImage(imageUrls, angleTypes)
+  const usable = perImage.filter(r => !r.failed)
+  if (usable.length === 0) return null
+
+  // Pick the image with the most located landmarks as the canonical source for
+  // imageWidth/imageHeight — older callers expect a single canvas size.
+  const best = [...usable].sort((a, b) => b.locatedCount - a.locatedCount)[0]
+  const allLandmarks: LandmarkDetection[] = usable.flatMap(r => r.landmarks)
+  const locatedCount = allLandmarks.filter(
+    (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
+  ).length
+
+  return {
+    landmarks: allLandmarks,
+    imageWidth: best.imageWidth,
+    imageHeight: best.imageHeight,
+    modelUsed: 'gpt-4o',
+    detectionTimestamp: new Date().toISOString(),
+    locatedCount,
+    requestedCount: LANDMARK_IDS.length,
   }
 }
