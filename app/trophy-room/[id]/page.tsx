@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { getTrophyEntry } from '@/lib/trophy-room/service'
+import { getTrophyEntryWithMeasurements } from '@/lib/trophy-room/service'
 import { TrophyDetailClient } from '@/components/trophy-room/trophy-detail-client'
 
 export default async function TrophyDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +13,7 @@ export default async function TrophyDetailPage({ params }: { params: Promise<{ i
   const { data: { user } } = await db.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const entry = await getTrophyEntry(id, user.id)
+  const { entry, measurements } = await getTrophyEntryWithMeasurements(id, user.id)
   if (!entry) redirect('/trophy-room')
 
   return (
@@ -22,7 +22,7 @@ export default async function TrophyDetailPage({ params }: { params: Promise<{ i
         <ArrowLeft className="h-4 w-4" />
         Back to Trophy Room
       </Link>
-      <TrophyDetailClient entry={entry} />
+      <TrophyDetailClient entry={entry} measurements={measurements} />
     </div>
   )
 }

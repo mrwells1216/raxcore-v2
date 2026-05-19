@@ -536,6 +536,19 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     }
   }
 
+  const carouselContainerRef = useRef<HTMLDivElement>(null)
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+  useEffect(() => {
+    const el = carouselContainerRef.current
+    if (!el) return
+    const obs = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      setContainerSize({ width, height })
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
   // Extract image URLs - handle both string[] (API response) and BuckImage[] (type def)
   const imageUrls: string[] = Array.isArray(result.images)
     ? (result.images as (string | { public_url?: string | null; image_url?: string | null })[])
@@ -547,7 +560,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     <div className="max-w-2xl mx-auto space-y-4">
       {/* Antler Image Carousel - at the very top */}
       {imageUrls.length > 0 && (
-        <div className="relative">
+        <div className="relative" ref={carouselContainerRef}>
           <AntlerImageCarousel images={imageUrls} />
           {result.landmarkDetections && result.landmarkDetections.locatedCount > 0 && (
             <Button
@@ -563,17 +576,15 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </span>
             </Button>
           )}
-          {showLandmarks && result.landmarkDetections && (
-            <div className="absolute inset-0 pointer-events-none">
-              <LandmarkOverlay
-                landmarks={result.landmarkDetections.landmarks as any}
-                measurements={result.landmarkScore?.measurements ?? []}
-                imageWidth={result.landmarkDetections.imageWidth}
-                imageHeight={result.landmarkDetections.imageHeight}
-                containerWidth={result.landmarkDetections.imageWidth}
-                containerHeight={result.landmarkDetections.imageHeight}
-              />
-            </div>
+          {showLandmarks && result.landmarkDetections && containerSize.width > 0 && (
+            <LandmarkOverlay
+              landmarks={result.landmarkDetections.landmarks as any}
+              measurements={result.landmarkScore?.measurements ?? []}
+              imageWidth={result.landmarkDetections.imageWidth}
+              imageHeight={result.landmarkDetections.imageHeight}
+              containerWidth={containerSize.width}
+              containerHeight={containerSize.height}
+            />
           )}
         </div>
       )}

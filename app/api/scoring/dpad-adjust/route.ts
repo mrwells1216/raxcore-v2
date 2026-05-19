@@ -282,7 +282,7 @@ async function handleConfirm(
   // Get the current prediction
   const { data: prediction, error: predictionError } = await supabase
     .from('predictions')
-    .select('id, predicted_gross, measurements, raw_ai_response')
+    .select('id, predicted_gross, confidence_percent, measurements, raw_ai_response')
     .eq('id', predictionId)
     .single()
 
@@ -379,6 +379,15 @@ async function handleConfirm(
       }
     })
 
+  // Derive confidence tier from stored confidence_percent for training analytics
+  const confPct = (prediction as any).confidence_percent as number | null | undefined
+  const confidenceTierBefore =
+    confPct == null ? null :
+    confPct >= 85 ? 'very_high' :
+    confPct >= 75 ? 'high' :
+    confPct >= 60 ? 'medium' :
+    confPct >= 45 ? 'low' : 'very_low'
+
   // Also write to correction_events for unified flywheel tracking (non-blocking)
   recordCorrectionEvent({
     buckId,
@@ -388,6 +397,7 @@ async function handleConfirm(
     fieldKey: adjustment.measurementKey,
     aiValue: recalcResult.originalValue ?? null,
     userValue: recalcResult.newValue ?? null,
+    confidenceTierBefore,
   }).catch(err => console.warn('[dpad-adjust] correction_events insert failed (non-blocking)', err))
 
   return NextResponse.json({

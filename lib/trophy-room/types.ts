@@ -21,6 +21,37 @@ export interface TrophyRoomEntry {
   updated_at: string
 }
 
+export interface TrophyMeasurements {
+  inside_spread: number | null
+  main_beam_left: number | null
+  main_beam_right: number | null
+  g1_left: number | null
+  g1_right: number | null
+  g2_left: number | null
+  g2_right: number | null
+  g3_left: number | null
+  g3_right: number | null
+  g4_left: number | null
+  g4_right: number | null
+  g5_left: number | null
+  g5_right: number | null
+  h1_left: number | null
+  h1_right: number | null
+  h2_left: number | null
+  h2_right: number | null
+  h3_left: number | null
+  h3_right: number | null
+  h4_left: number | null
+  h4_right: number | null
+  abnormal_points: number | null
+  deductions: number | null
+}
+
+export interface TrophyRoomEntryWithMeasurements {
+  entry: TrophyRoomEntry
+  measurements: TrophyMeasurements | null
+}
+
 export interface TrophyEligibility {
   eligible: boolean
   reason: string
