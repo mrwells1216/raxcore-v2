@@ -13,7 +13,9 @@ import {
   createPrediction,
   updateBuckStatus,
   getActiveModelVersion,
-  getBuckImages
+  getBuckImages,
+  updateBuckImageLandmarks,
+  updatePredictionPerImageConsensus,
 } from '@/lib/storage/service'
 import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
 import type { CropRegion } from '@/components/scoring/antler-crop-box'
@@ -52,8 +54,9 @@ import { collectGraphEvidence } from '@/lib/scoring/graph-evidence'
 import { buildScoreComparison, type ScoreComparison, type ActiveScoreSource } from '@/lib/scoring/score-comparison'
 import { extractDepthFromHEIC, extractExifCalibration } from '@/lib/calibration/depth-extractor'
 import { computeDepthCalibration, type DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
-import { detectLandmarkPositions } from '@/lib/scoring/vision-scorer'
-import type { LandmarkDetectionResult } from '@/lib/scoring/landmark-detection'
+import { detectLandmarkPositions, detectLandmarkPositionsPerImage } from '@/lib/scoring/vision-scorer'
+import { computePerImageConsensus } from '@/lib/scoring/per-image-consensus'
+import type { LandmarkDetectionResult, PerImageLandmarkResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'
@@ -914,28 +917,90 @@ export async function POST(request: Request) {
       detail: graphPersistence.detail ?? null,
     })
 
-    // P2: Landmark pixel detection — best-effort, never blocks response
+    // P2: Per-image landmark detection — best-effort, never blocks response.
+    // Each image gets its own GPT-4o call so per-reference outlier detection
+    // and angle-aware distortion penalties have unambiguous per-image inputs.
     let landmarkDetectionResult: LandmarkDetectionResult | null = null
     let landmarkScoreResult: LandmarkScoreResult | null = null
+    let perImageLandmarks: PerImageLandmarkResult[] = []
+    let perImageConsensus: ReturnType<typeof computePerImageConsensus> | null = null
     try {
-      landmarkDetectionResult = await detectLandmarkPositions(storedImageUrls)
-      if (landmarkDetectionResult) {
-        const calibration = resolveCalibration(
-          landmarkDetectionResult.landmarks,
-          depthCalibration,
-          null,
-        )
+      const angleTypes = resolvedImages.map((img) => {
+        const a = img.angleType
+        return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
+      }) as Array<'front' | 'left' | 'right' | 'unknown'>
+
+      perImageLandmarks = await detectLandmarkPositionsPerImage(storedImageUrls, angleTypes)
+      const usable = perImageLandmarks.filter((r) => !r.failed)
+
+      if (usable.length > 0) {
+        // Flatten for legacy callers (calibration resolver, landmark score)
+        const allLandmarks = usable.flatMap((r) => r.landmarks)
+        const best = [...usable].sort((a, b) => b.locatedCount - a.locatedCount)[0]
+        landmarkDetectionResult = {
+          landmarks: allLandmarks,
+          imageWidth: best.imageWidth,
+          imageHeight: best.imageHeight,
+          modelUsed: 'gpt-4o',
+          detectionTimestamp: new Date().toISOString(),
+          locatedCount: allLandmarks.filter(
+            (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
+          ).length,
+          requestedCount: best.requestedCount,
+        }
+
+        perImageConsensus = computePerImageConsensus(perImageLandmarks)
+
+        // Patch the just-inserted prediction row with the per-image consensus
+        // blob. Prediction was created before landmark detection ran, so this
+        // is an additive update. Best-effort.
+        try {
+          await updatePredictionPerImageConsensus(
+            prediction.id,
+            perImageConsensus as unknown,
+          )
+        } catch (consErr) {
+          console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
+        }
+
+        const calibration = resolveCalibration(allLandmarks, depthCalibration, null)
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
-            landmarkDetectionResult.landmarks,
+            allLandmarks,
             calibration.pixelsPerInch,
             { calibrationSource: calibration.source, calibrationConfidence: calibration.confidence },
           )
+        }
+
+        // Persist per-image landmarks into buck_images.landmarks_detected so
+        // future reads (history, trophy room, accuracy dashboard) get the
+        // angle-tagged training data. Best-effort.
+        try {
+          await updateBuckImageLandmarks(
+            buck.id,
+            perImageLandmarks.map((r) => ({
+              displayOrder: r.imageIndex,
+              landmarksDetected: r.failed
+                ? null
+                : {
+                    landmarks: r.landmarks,
+                    imageWidth: r.imageWidth,
+                    imageHeight: r.imageHeight,
+                    angleType: r.angleType,
+                    locatedCount: r.locatedCount,
+                    detectionTimestamp: r.detectionTimestamp,
+                  },
+            })),
+          )
+        } catch (persistErr) {
+          console.warn('[score] per-image landmark persistence failed (non-blocking):', persistErr)
         }
       }
     } catch (lmErr) {
       console.warn('[score] landmark detection failed (non-blocking):', lmErr)
     }
+    // Silence unused-import lint when the legacy single-call path is never used.
+    void detectLandmarkPositions
 
     // Graph-native score comparison — always fires, best-effort, never blocks response.
     let scoreComparison: ScoreComparison | null = null
@@ -1206,9 +1271,23 @@ export async function POST(request: Request) {
             imageWidth: landmarkDetectionResult.imageWidth,
             imageHeight: landmarkDetectionResult.imageHeight,
             locatedCount: landmarkDetectionResult.locatedCount,
+            // Per-image landmark sets — UI carousel renders only the current
+            // image's dots, and the score-results panel uses the per-image
+            // consensus breakdown for outlier badges.
+            perImage: perImageLandmarks.map((r) => ({
+              imageIndex: r.imageIndex,
+              imageUrl: r.imageUrl,
+              angleType: r.angleType,
+              imageWidth: r.imageWidth,
+              imageHeight: r.imageHeight,
+              landmarks: r.landmarks,
+              locatedCount: r.locatedCount,
+              failed: r.failed ?? false,
+            })),
           }
         : null,
       landmarkScore: landmarkScoreResult ?? null,
+      perImageConsensus: perImageConsensus ?? null,
     })
   } catch (error) {
     // Phase 24: Enhanced error handling with user-safe messages

@@ -31,6 +31,8 @@ import { BCScoreSheet } from './bc-score-sheet'
 import { ScoreSheetEditor } from './score-sheet-editor'
 import { AntlerImageCarousel } from './antler-image-carousel'
 import { LandmarkOverlay } from './landmark-overlay'
+import { PerImageConsensusCard } from './per-image-consensus-card'
+import type { PerImageConsensusResult } from '@/lib/types'
 import type { LandmarkMeasurement } from '@/lib/scoring/landmark-geometry'
 import { TrophyEligibilityCta } from '@/components/trophy-room/trophy-eligibility-cta'
 import { SCORING_DISCLAIMER } from '@/lib/constants'
@@ -538,6 +540,7 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
 
   const carouselContainerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
   useEffect(() => {
     const el = carouselContainerRef.current
     if (!el) return
@@ -556,12 +559,38 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         .filter(Boolean)
     : []
 
+  // Per-image landmark slice for the currently visible carousel image. Falls
+  // back to the aggregate landmark set so single-call legacy responses still
+  // render dots.
+  const perImageLandmarkSets = (result as any).landmarkDetections?.perImage as
+    | Array<{
+        imageIndex: number
+        angleType: 'front' | 'left' | 'right' | 'unknown'
+        imageWidth: number
+        imageHeight: number
+        landmarks: unknown[]
+        locatedCount: number
+        failed?: boolean
+      }>
+    | undefined
+  const currentPerImage = perImageLandmarkSets?.find(p => p.imageIndex === currentImageIndex)
+  const overlayLandmarks = currentPerImage && !currentPerImage.failed
+    ? (currentPerImage.landmarks as any)
+    : ((result as any).landmarkDetections?.landmarks ?? [])
+  const overlayImageWidth = currentPerImage && currentPerImage.imageWidth > 0
+    ? currentPerImage.imageWidth
+    : ((result as any).landmarkDetections?.imageWidth ?? 0)
+  const overlayImageHeight = currentPerImage && currentPerImage.imageHeight > 0
+    ? currentPerImage.imageHeight
+    : ((result as any).landmarkDetections?.imageHeight ?? 0)
+  const perImageConsensus = (result as any).perImageConsensus as PerImageConsensusResult | null | undefined
+
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       {/* Antler Image Carousel - at the very top */}
       {imageUrls.length > 0 && (
         <div className="relative" ref={carouselContainerRef}>
-          <AntlerImageCarousel images={imageUrls} />
+          <AntlerImageCarousel images={imageUrls} onImageChange={setCurrentImageIndex} />
           {result.landmarkDetections && result.landmarkDetections.locatedCount > 0 && (
             <Button
               size="sm"
@@ -576,17 +605,21 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </span>
             </Button>
           )}
-          {showLandmarks && result.landmarkDetections && containerSize.width > 0 && (
+          {showLandmarks && result.landmarkDetections && containerSize.width > 0 && overlayImageWidth > 0 && overlayImageHeight > 0 && (
             <LandmarkOverlay
-              landmarks={result.landmarkDetections.landmarks as any}
+              landmarks={overlayLandmarks}
               measurements={result.landmarkScore?.measurements ?? []}
-              imageWidth={result.landmarkDetections.imageWidth}
-              imageHeight={result.landmarkDetections.imageHeight}
+              imageWidth={overlayImageWidth}
+              imageHeight={overlayImageHeight}
               containerWidth={containerSize.width}
               containerHeight={containerSize.height}
             />
           )}
         </div>
+      )}
+
+      {perImageConsensus && (
+        <PerImageConsensusCard consensus={perImageConsensus} />
       )}
 
       {/* Hero Score Card */}

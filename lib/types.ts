@@ -301,6 +301,63 @@ export interface Prediction {
   confidenceBand?: Record<string, unknown> | null
   confidenceReasons?: unknown[] | null
   rawConfidence?: number | null
+  /**
+   * Per-image anatomical reference breakdown captured by detectLandmarkPositionsPerImage.
+   * Each reference (eye_box, pedicle_spacing, etc.) gets one row per image so the UI
+   * can show "Image 1 front: 178.1" · Image 2 left: 181.0" · Image 3 right: 195.4" ⚠"
+   * and so the consensus engine can do median + MAD outlier rejection across images.
+   */
+  per_image_consensus?: PerImageConsensusResult | null
+}
+
+/**
+ * A single anatomical reference observed in one image.
+ * outlier === true means median+MAD rejected this estimate.
+ * excludedReason populated when the reference was demoted (e.g. ear-tip with perked ears,
+ * eye-box on a side-angle photo).
+ */
+export interface PerImageReferenceObservation {
+  imageIndex: number
+  angleType: 'front' | 'left' | 'right' | 'unknown'
+  label: string
+  visible: boolean
+  scalingFactor: number
+  estimatedGross: number
+  quality: number
+  distortion: number
+  weight: number
+  outlier?: boolean
+  excludedReason?: string
+}
+
+/**
+ * Per-reference fusion result after combining estimates across N images.
+ * spread is the stddev of surviving (non-outlier, non-excluded) per-image estimates.
+ */
+export interface PerReferenceFusion {
+  label: string
+  observations: PerImageReferenceObservation[]
+  fusedEstimate: number | null
+  fusedWeight: number
+  spread: number
+  agreementTier: 'high' | 'medium' | 'low' | 'fallback'
+}
+
+export interface PerImageConsensusResult {
+  /** Per-image, per-reference breakdown for UI and learning. */
+  perReference: PerReferenceFusion[]
+  /** Ear-position state for each image. */
+  earPositions: Array<{
+    imageIndex: number
+    angleType: 'front' | 'left' | 'right' | 'unknown'
+    state: 'forward' | 'perked' | 'sideways' | 'unknown'
+    ratio: number | null
+    reason: string
+  }>
+  /** Number of images that contributed at least one usable reference. */
+  contributingImageCount: number
+  /** Generation timestamp for cache invalidation. */
+  computedAt: string
 }
 
 export interface StateCalibration {
