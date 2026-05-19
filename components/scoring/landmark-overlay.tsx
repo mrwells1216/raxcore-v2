@@ -51,8 +51,29 @@ export function LandmarkOverlay({
     text: string
   } | null>(null)
 
-  const scaleX = containerWidth / imageWidth
-  const scaleY = containerHeight / imageHeight
+  // Compute where the image actually appears within the container,
+  // accounting for CSS object-contain letterbox/pillarbox margins.
+  const containerAspect = containerWidth > 0 && containerHeight > 0
+    ? containerWidth / containerHeight
+    : 1
+  const imageAspect = imageWidth > 0 && imageHeight > 0
+    ? imageWidth / imageHeight
+    : 1
+
+  let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number
+  if (imageAspect > containerAspect) {
+    drawWidth = containerWidth
+    drawHeight = containerWidth / imageAspect
+    offsetX = 0
+    offsetY = (containerHeight - drawHeight) / 2
+  } else {
+    drawHeight = containerHeight
+    drawWidth = containerHeight * imageAspect
+    offsetX = (containerWidth - drawWidth) / 2
+    offsetY = 0
+  }
+  const scaleX = drawWidth / imageWidth
+  const scaleY = drawHeight / imageHeight
 
   // Sync landmarks if parent updates them
   useEffect(() => {
@@ -83,8 +104,8 @@ export function LandmarkOverlay({
       const color = LANDMARK_ZONE_COLORS[zone] ?? '#ffffff'
 
       ctx.beginPath()
-      ctx.moveTo(from.px * scaleX, from.py * scaleY)
-      ctx.lineTo(to.px * scaleX, to.py * scaleY)
+      ctx.moveTo(from.px * scaleX + offsetX, from.py * scaleY + offsetY)
+      ctx.lineTo(to.px * scaleX + offsetX, to.py * scaleY + offsetY)
       ctx.strokeStyle = color
       ctx.globalAlpha = 0.6
       ctx.lineWidth = LINE_WIDTH
@@ -101,8 +122,8 @@ export function LandmarkOverlay({
       const zone = getLandmarkZone(lm.id)
       const color = LANDMARK_ZONE_COLORS[zone] ?? '#ffffff'
       const opacity = 0.3 + 0.7 * lm.confidence
-      const cx = lm.px * scaleX
-      const cy = lm.py * scaleY
+      const cx = lm.px * scaleX + offsetX
+      const cy = lm.py * scaleY + offsetY
 
       ctx.globalAlpha = opacity
       ctx.beginPath()
@@ -131,8 +152,8 @@ export function LandmarkOverlay({
   const getLandmarkAtPos = (x: number, y: number): AntlerLandmarkId | null => {
     for (const lm of localLandmarks) {
       if (lm.px == null || lm.py == null || lm.visibility === 'not_visible') continue
-      const cx = lm.px * scaleX
-      const cy = lm.py * scaleY
+      const cx = lm.px * scaleX + offsetX
+      const cy = lm.py * scaleY + offsetY
       if (Math.hypot(x - cx, y - cy) <= CIRCLE_RADIUS + 4) return lm.id
     }
     return null
@@ -147,7 +168,7 @@ export function LandmarkOverlay({
       setLocalLandmarks((prev) =>
         prev.map((lm) =>
           lm.id === dragging
-            ? { ...lm, px: Math.round(x / scaleX), py: Math.round(y / scaleY), source: 'human' }
+            ? { ...lm, px: Math.round((x - offsetX) / scaleX), py: Math.round((y - offsetY) / scaleY), source: 'human' }
             : lm,
         ),
       )
@@ -192,7 +213,7 @@ export function LandmarkOverlay({
   }
 
   return (
-    <div style={{ position: 'relative', width: containerWidth, height: containerHeight }}>
+    <div style={{ position: 'absolute', inset: 0 }}>
       <canvas
         ref={canvasRef}
         width={containerWidth}

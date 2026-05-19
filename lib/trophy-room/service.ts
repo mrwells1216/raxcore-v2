@@ -1,6 +1,6 @@
 import 'server-only'
 import { getServiceSupabase } from '@/lib/supabase/admin'
-import type { TrophyRoomEntry, TrophyScoringSystem } from './types'
+import type { TrophyRoomEntry, TrophyScoringSystem, TrophyRoomEntryWithMeasurements } from './types'
 
 export interface CreateTrophyEntryInput {
   userId: string
@@ -90,6 +90,26 @@ export async function updateTrophyEntry(
     .maybeSingle()
   if (error) throw new Error(`Failed to update trophy entry: ${error.message}`)
   return (data as TrophyRoomEntry) ?? null
+}
+
+export async function getTrophyEntryWithMeasurements(
+  id: string,
+  userId: string,
+): Promise<TrophyRoomEntryWithMeasurements> {
+  const entry = await getTrophyEntry(id, userId)
+  if (!entry) return { entry: null as unknown as TrophyRoomEntry, measurements: null }
+  if (!entry.prediction_id) return { entry, measurements: null }
+
+  const db = await getServiceSupabase()
+  const { data } = await db
+    .from('predictions')
+    .select('measurements')
+    .eq('id', entry.prediction_id)
+    .maybeSingle()
+
+  const raw = data?.measurements
+  const measurements = raw && typeof raw === 'object' ? (raw as TrophyRoomEntryWithMeasurements['measurements']) : null
+  return { entry, measurements }
 }
 
 export async function softDeleteTrophyEntry(id: string, userId: string): Promise<boolean> {

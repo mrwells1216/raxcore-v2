@@ -109,6 +109,8 @@ export interface VisionScoringInput {
   preAiScoringContext?: PreAiScoringContext | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
+  /** Known field biases from correction_events — injected into prompt so AI can pre-compensate */
+  fieldBiases?: Record<string, number>
 }
 
 // ============================================================================
@@ -540,7 +542,21 @@ SCORING CALCULATION:
 Be conservative — slightly under rather than over. Account for perspective
 distortion, occlusion, and image quality in your confidence level.
 
-Provide your analysis as structured JSON matching the required schema.`
+${(() => {
+  const biases = input.fieldBiases
+  if (!biases || Object.keys(biases).length === 0) return ''
+  const lines = Object.entries(biases)
+    .map(([field, delta]) =>
+      `  - ${field}: historically estimated ${delta > 0 ? 'LOW' : 'HIGH'} by ~${Math.abs(delta).toFixed(1)}" — lean ${delta > 0 ? 'higher' : 'lower'}`
+    )
+    .join('\n')
+  return `\n═══════════════════════════════════════════════════════════════
+KNOWN MEASUREMENT BIASES (learned from user corrections)
+═══════════════════════════════════════════════════════════════
+Statistically significant biases from user corrections (≥10 samples each). Pre-compensate:
+${lines}
+`
+})()}Provide your analysis as structured JSON matching the required schema.`
 }
 
 /**

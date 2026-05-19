@@ -758,6 +758,10 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const angleDiversity = calculateAngleDiversity(angles)
   const stateCalibration = getStateCalibration(input.state ?? 'unknown')
 
+  // Load field biases early so they can be injected into the vision prompt
+  // (also used later in stage 2.5 for post-hoc measurement correction)
+  const preloadedFieldBiases = await loadFieldBiases().catch(() => ({} as Record<string, number>))
+
   // Try vision scoring first (with Phase 24 runtime hardening)
   const visionResult = await scoreWithVision({
     images: input.images,
@@ -773,6 +777,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     referenceObject: input.referenceObject ?? undefined,
     preAiScoringContext: input.preAiScoringContext ?? null,
     traceId: input.traceId,  // Phase 39: propagate trace ID
+    fieldBiases: Object.keys(preloadedFieldBiases).length > 0 ? preloadedFieldBiases : undefined,
   })
 
   if (visionResult.success) {
