@@ -1,51 +1,93 @@
 import 'server-only'
 
-export function buildLandmarkDetectionPrompt(
-  imageWidth: number,
-  imageHeight: number,
-): string {
-  return `You are an expert whitetail deer antler anatomist.
+/**
+ * Build the per-image landmark detection prompt.
+ *
+ * Principle: the LLM identifies and locates; geometry computes inches; score
+ * is derived downstream. The model is explicitly forbidden from estimating
+ * inches or scores so its job stays bounded to spatial localization.
+ *
+ * @param imageWidth   pixel width of the source image (for coordinate context)
+ * @param imageHeight  pixel height of the source image
+ * @param angleType    declared viewing angle, lets the model anchor sourceAngle
+ *                     instead of guessing
+ * @param landmarkList comma-separated list of every requested landmark id
+ */
+export function buildLandmarkDetectionPrompt(args: {
+  imageWidth: number
+  imageHeight: number
+  angleType: 'front' | 'left' | 'right' | 'unknown'
+  landmarkList: string
+}): string {
+  const { imageWidth, imageHeight, angleType, landmarkList } = args
 
-TASK: Locate the following antler landmarks in this image. Return the PIXEL COORDINATES (x, y) where each landmark appears. The image is ${imageWidth}×${imageHeight} pixels. Pixel (0,0) is the top-left corner.
+  const angleAnchor =
+    angleType === 'unknown'
+      ? `The viewing angle is unspecified. Infer it from the deer's head orientation and set sourceAngle accordingly.`
+      : `This image is the ${angleType.toUpperCase()} view. Set sourceAngle = "${angleType}" on every landmark.`
 
-LANDMARKS TO FIND:
-
-SKULL REFERENCES (for scale calibration):
-  - eye_left, eye_right: center of each visible eye socket
-  - pedicle_left, pedicle_right: center of each antler base (where antler meets skull)
-  - nose_tip: tip of the nose
-  - nose_bridge_top: top of the nose bridge between the eyes
-
-BEAM ENDPOINTS:
-  - burr_left, burr_right: base of each main beam at the burr
-  - beam_tip_left, beam_tip_right: distal tip of each main beam
-
-SPREAD:
-  - spread_anchor_left, spread_anchor_right: widest points of the inside spread
-
-TINES (base where tine meets beam, tip at the end — per side):
-  - g1_base_left, g1_tip_left through g5_base_left, g5_tip_left
-  - g1_base_right, g1_tip_right through g5_base_right, g5_tip_right
-  Note: G1 = brow tine (closest to burr), G2 = next up, etc.
-  If a tine does not exist, mark it not_visible with null coordinates.
-
-CIRCUMFERENCE POSITIONS (center of the beam cross-section measurement):
-  - h1_center_left/right: smallest circumference between burr and G1
-  - h2_center_left/right: smallest circumference between G1 and G2
-  - h3_center_left/right: smallest circumference between G2 and G3
-  - h4_center_left/right: smallest circumference between G3 and beam tip (or G4)
-
-RULES:
-- Return pixel coordinates as integers.
-- If a landmark is NOT visible in this image (occluded, out of frame, or does not exist), return px: null, py: null.
-- Confidence: 0.0 to 1.0. Be honest — partially occluded = lower confidence, clearly visible = higher.
-- visibility must be one of: 'clear', 'partially_visible', 'occluded', 'not_visible'
-- For tines that do not exist on this rack, use visibility: 'not_visible', confidence: 0.95 (you are confident it's absent).
-- DO NOT hallucinate positions. If you are uncertain, say so with low confidence.
-- Circumference center points are approximations — place them at the narrowest visible point of the beam between the relevant tines.
-
-Return as a JSON array of objects with shape:
-{ "id": string, "px": number|null, "py": number|null, "confidence": number, "visibility": string }
-
-Return the JSON array only, no other text.`
+  return [
+    `ROLE`,
+    `You are a whitetail-deer-antler measurement landmark detector. Your job is to`,
+    `LOCATE and IDENTIFY landmarks. You do NOT estimate scores. You do NOT estimate`,
+    `inches. You do NOT comment on rack quality. Downstream geometry computes`,
+    `inches from your pixel coordinates; do not anticipate or infer that.`,
+    ``,
+    `INPUT CONTRACT`,
+    imageWidth > 0 && imageHeight > 0
+      ? `Image dimensions: ${imageWidth} x ${imageHeight} pixels. Coordinate origin (0, 0) is the top-left corner. X increases right, Y increases down.`
+      : `Coordinate origin (0, 0) is the top-left corner. X increases right, Y increases down. Report the actual image's pixel dimensions in the imageWidth and imageHeight fields.`,
+    `${angleAnchor}`,
+    ``,
+    `OUTPUT CONTRACT`,
+    `Return one entry per landmark in the JSON array. Coordinates are PIXEL`,
+    `coordinates as floating-point numbers with one decimal place — subpixel`,
+    `precision matters for downstream measurements. Do NOT round to integers.`,
+    ``,
+    `Per-landmark fields:`,
+    `  id          — exact landmark id from the list below`,
+    `  px, py      — pixel coordinates (float, one decimal). null if not_visible.`,
+    `  confidence  — 0.0 to 1.0. Be honest. Partial occlusion -> < 0.6.`,
+    `  visibility  — one of: "clear" | "partially_visible" | "occluded" | "not_visible"`,
+    `  sourceAngle — set per the angle anchor above`,
+    ``,
+    `Also include the image's actual dimensions as imageWidth and imageHeight.`,
+    ``,
+    `LANDMARK PLACEMENT RULES`,
+    `- Eye centers: pupil center, not the outer eyelid corner.`,
+    `- Pedicle centers: centroid of the circular base where the antler joins the`,
+    `  skull. NOT the rim. NOT the burr.`,
+    `- Burr: the bony ring just above the pedicle (where the polished antler`,
+    `  begins). Distinct from pedicle.`,
+    `- Beam tip: the literal distal end of the main beam, not anywhere along it.`,
+    `- Tine base: where the tine first becomes distinguishable from the main beam,`,
+    `  not where the tine "visually starts".`,
+    `- Tine tip: the literal point at the tip of the tine.`,
+    `- Ear base (skull-fixed): where the ear attaches to the skull, NOT the`,
+    `  outermost edge of the ear flap.`,
+    `- Spread anchors: the widest points of the inside spread, on the inside`,
+    `  surfaces of the main beams.`,
+    `- Circumference centers (h1..h4): the narrowest visible point of the beam`,
+    `  between the relevant tines.`,
+    ``,
+    `MISSING / OCCLUDED LANDMARKS`,
+    `- If a tine does not exist on this rack: visibility = "not_visible",`,
+    `  px = null, py = null, confidence = 0.95 (you are confident it is absent).`,
+    `- If a landmark exists but is off-frame, blurred, or fully obscured by`,
+    `  another body part: visibility = "not_visible" or "occluded", px = null,`,
+    `  py = null. DO NOT GUESS positions for invisible landmarks.`,
+    ``,
+    `SELF-CHECK (perform before returning)`,
+    `1. Are the two pedicle centers approximately symmetric about the visible`,
+    `   skull midline? If they are not, you have probably misidentified one.`,
+    `   Recheck before returning.`,
+    `2. Is each burr near its corresponding pedicle (not on the opposite side)?`,
+    `3. For every tine you marked visible, is the tip clearly above/forward of`,
+    `   the corresponding base? If not, you may have swapped them.`,
+    `4. If this image does NOT show a whitetail deer with antlers, return an`,
+    `   empty landmarks array — do not invent points.`,
+    ``,
+    `LANDMARKS TO LOCATE`,
+    landmarkList,
+  ].join('\n')
 }
