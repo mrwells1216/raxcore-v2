@@ -134,12 +134,20 @@ export const CONFIDENCE_THRESHOLDS = {
   LOW: 25,
 } as const
 
+// Published whitetail adult-buck anatomical means (in inches). Sources cross-
+// referenced from Boone & Crockett scoring literature and biological surveys.
+// Update with caution — these are the ground truth that every anatomical-prior
+// calibration depends on. Per-reference notes:
+//   - "front-projected" values are what a front-facing camera sees, not the true
+//     3D length. The snout is heavily foreshortened from the front.
+//   - "skull-fixed" means the landmark moves with the skull (ear bases, pedicles),
+//     which is what we want for calibration; ear tips are mobile and unreliable.
 export const ANATOMICAL_REFERENCES = {
-  // ── Ear references (kept as secondary/bonus — not primary)
-  EAR_BASE_TO_TIP: 6.25,
+  // ── Ear references (skull-fixed bases are usable; tips are mobile/unreliable)
+  EAR_BASE_TO_TIP: 6.25,       // base to tip when ears are forward
   EAR_TIP_TO_TIP_ALERT: 16.0,
   EAR_TIP_TO_TIP_RELAXED: 14.0,
-  EAR_BASE_SPACING: 7.5,       // center-to-center of ear bases (front view)
+  EAR_BASE_SPACING: 5.5,       // center-to-center of skull-fixed ear bases (front view)
 
   // ── Top-tier: eye box dimensions
   EYE_TO_EYE: 4.3,             // center-to-center of pupils (front view)
@@ -153,10 +161,18 @@ export const ANATOMICAL_REFERENCES = {
   EYE_TO_PEDICLE: 2.1,         // distance from eye center to nearest pedicle base
 
   // ── Top-tier: skull / forehead width
+  // NOTE: there is no dedicated "orbital_ridge_left/right" landmark, so consumers
+  // that want skull-width calibration MUST NOT reuse pedicle endpoints with this
+  // value — that just produces an inconsistent px/in derived from the same pixel
+  // distance as PEDICLE_SPACING (see per-image-consensus.ts).
   SKULL_FOREHEAD_WIDTH: 5.2,   // forehead width between orbital ridges (front view)
 
   // ── Secondary: nose bridge and muzzle
-  NOSE_BRIDGE_LENGTH: 2.8,     // bridge of nose from brow to tip
+  // The visible front-view nasal-bone bridge from brow to nose tip projects to
+  // about 2.8" because the snout is foreshortened toward the camera. The true
+  // 3D snout length is closer to 5.5-6.5". This value is therefore ONLY usable
+  // on a true front-facing photo as a cross-check, never as primary calibration.
+  NOSE_BRIDGE_LENGTH: 2.8,     // FRONT-PROJECTED bridge length (not true 3D)
   MUZZLE_WIDTH: 2.6,           // muzzle width at widest point (front view)
 } as const
 
