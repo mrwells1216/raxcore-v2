@@ -180,8 +180,24 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
   const netScore = p?.predicted_net ?? result.netScore ?? null
 
   // Error band: prefer DB fields, fall back to scoreRange object
-  const rangeLow = p?.error_band_low ?? result.scoreRange?.low ?? null
-  const rangeHigh = p?.error_band_high ?? result.scoreRange?.high ?? null
+  let rangeLow = p?.error_band_low ?? result.scoreRange?.low ?? null
+  let rangeHigh = p?.error_band_high ?? result.scoreRange?.high ?? null
+
+  // Invariant: the displayed range must always contain the point estimate.
+  // Older prediction rows persisted before the server-side clamp can have
+  // error_band_low/high values that exclude predicted_gross when the consensus
+  // and legacy estimators disagreed. Defense-in-depth: widen here so the UI
+  // never shows a CI that doesn't contain its own point estimate.
+  if (
+    typeof grossScore === 'number' &&
+    typeof rangeLow === 'number' &&
+    typeof rangeHigh === 'number'
+  ) {
+    if (grossScore < rangeLow || grossScore > rangeHigh) {
+      rangeLow = Math.min(rangeLow, grossScore)
+      rangeHigh = Math.max(rangeHigh, grossScore)
+    }
+  }
 
   // Confidence: prefer DB field, fall back to top-level, then 0
   const rawConf = p?.confidence_percent ?? result.confidencePercent ?? 0
@@ -1032,9 +1048,18 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
               </div>
               <div>
                 Precision:{' '}
-                {precisionPassOverride?.grossScore ??
-                  (result?.latestPrecisionPassRun as { best_summary?: { predicted_gross?: number } } | null)?.best_summary?.predicted_gross ??
-                  '-'}
+                {(() => {
+                  const precisionGross =
+                    precisionPassOverride?.grossScore ??
+                    (result?.latestPrecisionPassRun as { best_summary?: { predicted_gross?: number } } | null)?.best_summary?.predicted_gross ??
+                    null
+                  if (typeof precisionGross === 'number') return precisionGross
+                  return (
+                    <span className="text-muted-foreground italic">
+                      not run
+                    </span>
+                  )
+                })()}
               </div>
               <div>
                 Calibrated:{' '}
