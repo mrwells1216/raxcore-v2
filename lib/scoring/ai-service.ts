@@ -607,6 +607,21 @@ function calculateErrorBands(predictedGross: number, confidence: number) {
   return { low: Math.max(0, predictedGross - errorAmount), high: predictedGross + errorAmount }
 }
 
+// Range invariant: a CI that excludes its own point estimate is a contract
+// violation (CLAUDE.md §6.9). Apply at every emission site before low/high
+// are rounded or persisted.
+export function enforceRangeContainsPoint(
+  rangeLow: number,
+  rangeHigh: number,
+  pointEstimate: number,
+): { low: number; high: number } {
+  if (!Number.isFinite(pointEstimate)) return { low: rangeLow, high: rangeHigh }
+  return {
+    low: Math.min(rangeLow, pointEstimate),
+    high: Math.max(rangeHigh, pointEstimate),
+  }
+}
+
 function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibration, confidence: number): Measurements {
   const angles = input.images.map(img => img.angleType)
   const hasFront = angles.includes('front')
@@ -1644,8 +1659,11 @@ function buildHeuristicScoringOutput(
   const { low: baseLow, high: baseHigh } = calculateErrorBands(gross, confidencePercent)
   const bandMid = (baseLow + baseHigh) / 2
   const halfBand = ((baseHigh - baseLow) / 2) * viewBandFactor
-  const low  = Math.max(0, bandMid - halfBand)
-  const high = bandMid + halfBand
+  const rawLow  = Math.max(0, bandMid - halfBand)
+  const rawHigh = bandMid + halfBand
+  // When baseLow clamps to 0 (small gross values), bandMid drifts away from
+  // gross and the widened band can exclude it. Force containment (§6.9).
+  const { low, high } = enforceRangeContainsPoint(rawLow, rawHigh, gross)
 
   // ── Dev log — one structured line per fallback run ────────────────────────
   if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
