@@ -607,6 +607,21 @@ function calculateErrorBands(predictedGross: number, confidence: number) {
   return { low: Math.max(0, predictedGross - errorAmount), high: predictedGross + errorAmount }
 }
 
+// Range invariant: a CI that excludes its own point estimate is a contract
+// violation (CLAUDE.md §6.9). Apply at every emission site before low/high
+// are rounded or persisted.
+export function enforceRangeContainsPoint(
+  rangeLow: number,
+  rangeHigh: number,
+  pointEstimate: number,
+): { low: number; high: number } {
+  if (!Number.isFinite(pointEstimate)) return { low: rangeLow, high: rangeHigh }
+  return {
+    low: Math.min(rangeLow, pointEstimate),
+    high: Math.max(rangeHigh, pointEstimate),
+  }
+}
+
 function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibration, confidence: number): Measurements {
   const angles = input.images.map(img => img.angleType)
   const hasFront = angles.includes('front')
@@ -1252,8 +1267,11 @@ async function buildVisionScoringOutput(
   const consensusBands = consensusToErrorBands(referenceConsensusResult)
   // Also compute the legacy band so we can take the tighter of the two for conservative estimates
   const legacyBands = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
-  const low  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
-  const high = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
+  const tightLow  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
+  const tightHigh = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
+  // The intersection can crush the band so tight that gross falls outside.
+  // Force the range to contain the point estimate (CLAUDE.md §6.9).
+  const { low, high } = enforceRangeContainsPoint(tightLow, tightHigh, gross)
 
   // Build confidence/trust metadata
   const confidenceTrustMetadata: ConfidenceTrustMetadata = {
@@ -1619,8 +1637,11 @@ function buildHeuristicScoringOutput(
   const { low: baseLow, high: baseHigh } = calculateErrorBands(gross, confidencePercent)
   const bandMid = (baseLow + baseHigh) / 2
   const halfBand = ((baseHigh - baseLow) / 2) * viewBandFactor
-  const low  = Math.max(0, bandMid - halfBand)
-  const high = bandMid + halfBand
+  const rawLow  = Math.max(0, bandMid - halfBand)
+  const rawHigh = bandMid + halfBand
+  // When baseLow clamps to 0 (small gross values), bandMid drifts away from
+  // gross and the widened band can exclude it. Force containment (§6.9).
+  const { low, high } = enforceRangeContainsPoint(rawLow, rawHigh, gross)
 
   // ── Dev log — one structured line per fallback run ────────────────────────
   if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview') {
