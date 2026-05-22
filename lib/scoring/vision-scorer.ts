@@ -31,6 +31,7 @@ import {
 import { logEventFireForget } from '@/lib/monitoring/service'
 import type { PrecisionReferenceProfile } from './reference-mode'
 import { HAT_DIMENSIONS } from './hat-reference'
+import { buildLandmarkDetectionPrompt } from './landmark-prompt'
 
 // OpenAI is the only provider for scoring vision calls.
 // Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
@@ -1335,19 +1336,16 @@ async function detectLandmarksForOneImage(args: {
   if (!apiKey) return fail('OPENAI_API_KEY not configured')
 
   const landmarkList = LANDMARK_IDS.join(', ')
-  const angleHint =
-    angleType === 'unknown'
-      ? `The angle of this image is unspecified. Infer it from the deer's head orientation.`
-      : `This image is the ${angleType} view of the deer.`
 
-  const prompt =
-    `You are a deer antler measurement expert. Locate each antler landmark in the provided image precisely.\n` +
-    `${angleHint}\n` +
-    `Report the pixel (x, y) coordinate of each landmark using the image's pixel coordinate system (0,0 = top-left corner).\n` +
-    `If a landmark is not visible or cannot be reliably located, set px and py to null and visibility to 'not_visible' or 'occluded'.\n` +
-    `Set sourceAngle to '${angleType}' for every landmark (the image is a single ${angleType} view).\n` +
-    `Also report the image dimensions (imageWidth, imageHeight) in pixels.\n` +
-    `Landmarks to locate: ${landmarkList}.`
+  // Image dimensions are not always known up front (we may rely on the model
+  // to report them). Pass 0/0 as a sentinel — the prompt builder uses them as
+  // context but the schema captures the model's own measurement separately.
+  const prompt = buildLandmarkDetectionPrompt({
+    imageWidth: 0,
+    imageHeight: 0,
+    angleType,
+    landmarkList,
+  })
 
   try {
     const { object } = await generateObject({

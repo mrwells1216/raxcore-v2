@@ -1252,8 +1252,29 @@ async function buildVisionScoringOutput(
   const consensusBands = consensusToErrorBands(referenceConsensusResult)
   // Also compute the legacy band so we can take the tighter of the two for conservative estimates
   const legacyBands = calculateErrorBands(gross, calibratedConfidenceResult.calibratedConfidence)
-  const low  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
-  const high = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
+  let low  = Math.max(consensusBands.low, legacyBands.low)   // tighter lower bound
+  let high = Math.min(consensusBands.high, legacyBands.high) // tighter upper bound
+
+  // Invariant: the displayed range must contain the point estimate. Intersecting
+  // two independently-computed bands can yield a window that excludes `gross`
+  // when the two estimators disagree (which is itself a signal worth surfacing
+  // but never a reason to ship an incoherent CI). Widen back to include gross
+  // and record the disagreement so the explanation panel can show it.
+  let bandDisagreementNote: string | null = null
+  if (gross < low || gross > high) {
+    console.warn('[error-band] band intersection excluded point estimate — widening to contain it', {
+      gross,
+      consensusBands,
+      legacyBands,
+      tightenedLow: low,
+      tightenedHigh: high,
+    })
+    bandDisagreementNote =
+      `Calibration disagreement: consensus and legacy error bands diverge around ${gross.toFixed(1)}". ` +
+      `Range widened to contain the point estimate.`
+    low = Math.min(low, gross)
+    high = Math.max(high, gross)
+  }
 
   // Build confidence/trust metadata
   const confidenceTrustMetadata: ConfidenceTrustMetadata = {
@@ -1275,6 +1296,10 @@ async function buildVisionScoringOutput(
     ...visionOutput.explanation,
     `Vision model analyzed ${input.images.length} image(s) with ${baseVisionConfidence}% base confidence.`,
   ]
+
+  if (bandDisagreementNote) {
+    explanations.push(bandDisagreementNote)
+  }
 
   if (precisionReferenceResult.detected) {
     explanations.push(precisionReferenceResult.summary)
