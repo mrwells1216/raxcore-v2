@@ -21,6 +21,7 @@ import type {
   CalibrationState,
   FieldId,
 } from '@/components/measure/measure-store'
+import { circumferenceFromPoints } from '@/lib/advanced-scoring/geometry'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,14 @@ export function buildMeasurementGraph(input: BuildGraphInput): MeasurementGraph 
   const circumferences: CircumferencePoint[] = circumFields.map(({ fieldId, label, side }) => {
     const cd2 = m2[fieldId]
     const cd3 = m3[fieldId]
-    const length = resolveLength(cd2, cd3)
+    // Prefer finalized 3D; otherwise use Taubin on the 2D pixel points and
+    // fall back to the chord-sum inch length only if the fit is degenerate.
+    const use3D = !!(cd3 && cd3.finalized && cd3.inchLength > 0)
+    let length = resolveLength(cd2, cd3)
+    if (!use3D && cd2.points.length >= 3 && ppi > 0) {
+      const fit = circumferenceFromPoints(cd2.points)
+      if (fit) length = fit.circumference / ppi
+    }
     const cPts = cd2.points
     const pos = cPts.length > 0 ? { x: cPts[0].x / ppi, y: cPts[0].y / ppi } : { x: 0, y: 0 }
     return {
