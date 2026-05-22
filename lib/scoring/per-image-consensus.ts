@@ -37,8 +37,24 @@ type RefSpec = {
   baseDistortion: number
   /** Angles on which this reference is reliable; others get distortion bumps. */
   reliableAngles: ReadonlyArray<'front' | 'left' | 'right'>
+  /**
+   * How much head rotation breaks this reference.
+   *   'low'    — robust across all views; eligible as primary calibration.
+   *   'medium' — usable on listed `reliableAngles`; cross-check elsewhere.
+   *   'high'   — only meaningful on a perfectly orthogonal view; cross-check only.
+   * The calibration resolver should only use 'low' priors as the primary px/in
+   * source when no physical reference is available.
+   */
+  viewSensitivity: 'low' | 'medium' | 'high'
 }
 
+// NOTE: the previously-defined `skull_width` spec used the SAME endpoint pair as
+// `pedicle_spacing` (pedicle_left, pedicle_right) but divided by a different
+// assumed inch value (SKULL_FOREHEAD_WIDTH=5.2 vs PEDICLE_SPACING=3.8). That
+// guaranteed a ~37% mathematical disagreement between two derived px/in values
+// from a single pixel measurement, which was the proximate cause of the IMG_6534
+// "141% spread across anatomical priors" bug. It is removed until a real
+// orbital-ridge landmark pair exists in AntlerLandmarkId.
 const REFERENCE_SPECS: RefSpec[] = [
   {
     label: 'eye_box',
@@ -47,6 +63,7 @@ const REFERENCE_SPECS: RefSpec[] = [
     qualityCeiling: 0.92,
     baseDistortion: 0.10,
     reliableAngles: ['front'],
+    viewSensitivity: 'low',
   },
   {
     label: 'pedicle_spacing',
@@ -55,6 +72,7 @@ const REFERENCE_SPECS: RefSpec[] = [
     qualityCeiling: 0.88,
     baseDistortion: 0.10,
     reliableAngles: ['front'],
+    viewSensitivity: 'low',
   },
   {
     label: 'eye_to_pedicle',
@@ -63,14 +81,7 @@ const REFERENCE_SPECS: RefSpec[] = [
     qualityCeiling: 0.85,
     baseDistortion: 0.12,
     reliableAngles: ['front', 'left', 'right'],
-  },
-  {
-    label: 'skull_width',
-    endpoints: ['pedicle_left', 'pedicle_right'],
-    realSizeInches: ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH,
-    qualityCeiling: 0.83,
-    baseDistortion: 0.11,
-    reliableAngles: ['front'],
+    viewSensitivity: 'medium',
   },
   {
     label: 'nose_bridge',
@@ -79,6 +90,10 @@ const REFERENCE_SPECS: RefSpec[] = [
     qualityCeiling: 0.68,
     baseDistortion: 0.15,
     reliableAngles: ['front'],
+    // The nose bridge projects very differently from front vs side because the
+    // snout is roughly axial to the camera. Treat as a cross-check only — its
+    // inch constant is FRONT-PROJECTED, not a true 3D length.
+    viewSensitivity: 'high',
   },
   {
     label: 'ear_base_spacing',
@@ -87,6 +102,7 @@ const REFERENCE_SPECS: RefSpec[] = [
     qualityCeiling: 0.65,
     baseDistortion: 0.13,
     reliableAngles: ['front'],
+    viewSensitivity: 'medium',
   },
   // ear_base_to_tip is added dynamically only when ear-position === 'forward'
 ]
@@ -340,6 +356,8 @@ export function computePerImageConsensus(
       qualityCeiling: 0.72,
       baseDistortion: 0.14,
       reliableAngles: ['front'],
+      // Ear tip moves with ear pose; only meaningful when ears are forward.
+      viewSensitivity: 'high',
     }
     const obs = observeReferenceInImage(spec, image)
     if (!obs) continue
