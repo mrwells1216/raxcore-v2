@@ -120,6 +120,13 @@ export interface CalibrationState {
   finalized: boolean
   /** Physical reference = known object measured; estimated = guessed. */
   source: CalibrationSource
+  /** Sub-pixel refinement provenance — populated only when WI-SP2 ran. */
+  refinement?: {
+    refined: boolean
+    lineQuality: number
+    lengthDeltaPx: number
+    endpointMethods: [string, string]
+  }
 }
 
 // ─── Filters / Render ─────────────────────────────────────────────────────────
@@ -186,6 +193,16 @@ export interface MeasureStore {
   setCalibrationSource: (source: CalibrationSource) => void
   finalizeCalibration: () => void
   resetCalibration: () => void
+  /**
+   * Replace the two calibration endpoints with sub-pixel-refined values.
+   * If the calibration is already finalized, pixelsPerInch is recomputed
+   * from the new pixel distance ÷ existing realInches, and downstream
+   * 2D measurement inch values are updated to match.
+   */
+  applyRefinedCalibrationPoints: (
+    points: [Point2D, Point2D],
+    refinement: NonNullable<CalibrationState['refinement']>,
+  ) => void
 
   photoFilter: PhotoFilter
   setPhotoFilter: (f: PhotoFilter) => void
@@ -452,6 +469,38 @@ export const useMeasureStore = create<MeasureStore>()((set, get) => ({
       measurements2D,
       mode: 'view' as MeasureMode,
     }
+  }),
+
+  applyRefinedCalibrationPoints: (points, refinement) => set((s) => {
+    const next: CalibrationState = {
+      ...s.calibration,
+      linePoints: [points[0], points[1]],
+      refinement,
+    }
+    // If calibration is already finalized, recompute ppi from the refined
+    // endpoints so downstream 2D measurements pick up the better value.
+    if (s.calibration.finalized && s.calibration.realInches > 0) {
+      const dx = points[1].x - points[0].x
+      const dy = points[1].y - points[0].y
+      const px = Math.sqrt(dx * dx + dy * dy)
+      if (px > 0 && isFiniteNumber(px)) {
+        const ppi = px / s.calibration.realInches
+        next.pixelsPerInch = ppi
+        const measurements2D = { ...s.measurements2D }
+        for (const fd of FIELD_DEFS) {
+          const m = measurements2D[fd.id]
+          const pl = polylineLength2D(m.points)
+          const il = pixelsToInches(pl, ppi) ?? 0
+          measurements2D[fd.id] = {
+            ...m,
+            pixelLength: pl,
+            inchLength: il,
+          }
+        }
+        return { calibration: next, measurements2D }
+      }
+    }
+    return { calibration: next }
   }),
 
   resetCalibration: () => set((s) => {

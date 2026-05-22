@@ -100,13 +100,21 @@ export async function refineSubPixelLandmarks(
   return input.candidates.map((c) => refineOne(c, pixels, width, height))
 }
 
-interface DecodedGrayscale {
+export interface DecodedGrayscale {
   pixels: Uint8Array
   width: number
   height: number
 }
 
-async function decodeGrayscale(buffer: Buffer): Promise<DecodedGrayscale | null> {
+/**
+ * Decode an image buffer (HEIC/JPEG/PNG) to a raw grayscale Uint8Array.
+ * Returns null on decode failure. Exported so callers — e.g.
+ * `lib/advanced-scoring/subpixel-refine.ts` — can decode once and run
+ * multiple refinements on the same buffer.
+ */
+export async function decodeGrayscale(
+  buffer: Buffer,
+): Promise<DecodedGrayscale | null> {
   try {
     const { data, info } = await sharp(buffer)
       .greyscale()
@@ -120,6 +128,20 @@ async function decodeGrayscale(buffer: Buffer): Promise<DecodedGrayscale | null>
   } catch {
     return null
   }
+}
+
+/**
+ * Refine a single candidate against pre-decoded grayscale pixels.
+ * Same algorithm as `refineSubPixelLandmarks` but skips the sharp
+ * decode — caller is responsible for decoding once.
+ */
+export function refineSinglePoint(
+  candidate: SubPixelRefineCandidate,
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+): SubPixelRefineResult {
+  return refineOne(candidate, pixels, width, height)
 }
 
 function refineOne(

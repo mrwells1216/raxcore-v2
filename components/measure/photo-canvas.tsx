@@ -23,6 +23,52 @@ const MAX_SCALE   = 12
 const MIN_SCALE   = 0.1
 // Two clicks within this many ms triggers finalize (double-click equivalent)
 const DBL_CLICK_MS = 280
+// WI-SP2: lineQuality threshold below which we keep the user's raw points
+// rather than swap them with refined ones. Below 0.25 the user drew across
+// a poor edge and the refinement is not trustworthy.
+const REFINEMENT_QUALITY_THRESHOLD = 0.25
+
+// Quiet upgrade — runs once after both calibration endpoints are placed.
+// Never throws; on any failure the user keeps their raw calibration points.
+async function refineCalibrationLine(
+  imageDataUrl: string,
+  points: [Point2D, Point2D],
+): Promise<void> {
+  try {
+    const res = await fetch('/api/measure/refine-reference', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl, points }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    const endpoints = data?.endpoints
+    const lineQuality = Number(data?.lineQuality)
+    if (
+      !Array.isArray(endpoints) ||
+      endpoints.length !== 2 ||
+      typeof endpoints[0]?.x !== 'number' ||
+      typeof endpoints[0]?.y !== 'number' ||
+      typeof endpoints[1]?.x !== 'number' ||
+      typeof endpoints[1]?.y !== 'number'
+    ) return
+    if (!Number.isFinite(lineQuality) || lineQuality < REFINEMENT_QUALITY_THRESHOLD) return
+    useMeasureStore.getState().applyRefinedCalibrationPoints(
+      [
+        { x: endpoints[0].x, y: endpoints[0].y },
+        { x: endpoints[1].x, y: endpoints[1].y },
+      ],
+      {
+        refined: true,
+        lineQuality,
+        lengthDeltaPx: Number(data?.lengthDelta) || 0,
+        endpointMethods: [String(endpoints[0]?.method ?? ''), String(endpoints[1]?.method ?? '')],
+      },
+    )
+  } catch (err) {
+    console.warn('[refine-reference] failed, keeping raw points', err)
+  }
+}
 
 // ─── Filter helpers ───────────────────────────────────────────────────────────
 
@@ -196,6 +242,22 @@ export function PhotoCanvas() {
 
     if (useMeasureStore.getState().mode === 'calibrate') {
       setCalibrationPoint(raw)
+      // Fire-and-forget sub-pixel refinement (WI-SP2) — once both endpoints
+      // are placed, ask the server to refine them. Quiet upgrade: failures
+      // (network, weak edge, low lineQuality) silently keep the raw points.
+      const after = useMeasureStore.getState()
+      if (
+        after.calibration.linePoints.length === 2 &&
+        !after.calibration.refinement &&
+        after.photoDataUrl
+      ) {
+        const photo = after.photoDataUrl
+        const pts: [Point2D, Point2D] = [
+          after.calibration.linePoints[0],
+          after.calibration.linePoints[1],
+        ]
+        void refineCalibrationLine(photo, pts)
+      }
       return
     }
 
@@ -257,6 +319,17 @@ export function PhotoCanvas() {
           style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', borderBottom: '1px solid rgba(251,191,36,0.3)' }}
         >
           No calibration set - inch values are withheld until a physical scale is set.
+        </div>
+      )}
+
+      {/* Sub-pixel refinement indicator (WI-SP2) */}
+      {calibration.refinement?.refined && (
+        <div
+          className="absolute top-2 right-2 z-20 px-2 py-1 text-[10px] font-medium rounded"
+          style={{ background: 'rgba(34,197,94,0.18)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.35)' }}
+          title={`Line quality ${(calibration.refinement.lineQuality * 100).toFixed(0)}%, length delta ${calibration.refinement.lengthDeltaPx.toFixed(2)} px`}
+        >
+          Calibration refined ✓
         </div>
       )}
 
