@@ -213,12 +213,14 @@ export function LandmarkOverlay({
   }
 
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
+    // Sit below the Landmarks toggle button (z-10 in scoring-results) so the
+    // toggle and carousel arrows stay clickable above the overlay.
+    <div style={{ position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none' }}>
       <canvas
         ref={canvasRef}
         width={containerWidth}
         height={containerHeight}
-        style={{ position: 'absolute', inset: 0, cursor: dragging ? 'grabbing' : 'crosshair' }}
+        style={{ position: 'absolute', inset: 0, cursor: dragging ? 'grabbing' : 'crosshair', pointerEvents: 'auto' }}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -237,19 +239,21 @@ export function LandmarkOverlay({
             borderRadius: 4,
             pointerEvents: 'none',
             whiteSpace: 'nowrap',
-            zIndex: 10,
+            zIndex: 2,
           }}
         >
           {tooltip.text}
         </div>
       )}
 
-      {/* Zone legend */}
+      {/* Zone legend — top-left, just inside the actual image rectangle
+          (computed via letterbox offsets) so it never sits on the carousel
+          dots indicator below or the Landmarks toggle button at top-right. */}
       <div
         style={{
           position: 'absolute',
-          bottom: 8,
-          right: 8,
+          top: offsetY + 8,
+          left: offsetX + 8,
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
@@ -258,6 +262,7 @@ export function LandmarkOverlay({
           padding: '4px 8px',
           fontSize: 10,
           color: '#fff',
+          zIndex: 1,
         }}
       >
         {Object.entries(LANDMARK_ZONE_COLORS).map(([zone, color]) => (
