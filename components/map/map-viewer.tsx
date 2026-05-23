@@ -275,7 +275,9 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
           )
         })}
 
-        {/* Pending pin */}
+        {/* Pending pin — pulse honors prefers-reduced-motion via a CSS media query.
+            CSS transform scale is used (works cross-browser; SMIL `r` animation
+            does not respect reduced-motion). */}
         {pendingPin && (
           <Marker coordinates={[pendingPin.lng, pendingPin.lat]}>
             <g transform="translate(-7, -18)" style={{ pointerEvents: 'none' }}>
@@ -286,9 +288,21 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
                 stroke="rgba(255,255,255,0.9)"
                 strokeWidth={1}
               />
-              <circle cx="7" cy="7" r="2.4" fill="rgba(255,255,255,0.95)">
-                <animate attributeName="r" values="2.4;3.4;2.4" dur="1.2s" repeatCount="indefinite" />
-              </circle>
+              <circle cx="7" cy="7" r="2.4" fill="rgba(255,255,255,0.95)" className="rax-pending-pin-core" />
+              <style>{`
+                .rax-pending-pin-core {
+                  transform-box: fill-box;
+                  transform-origin: center;
+                  animation: rax-pending-pulse 1.2s ease-in-out infinite;
+                }
+                @keyframes rax-pending-pulse {
+                  0%, 100% { transform: scale(1); }
+                  50% { transform: scale(1.42); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                  .rax-pending-pin-core { animation: none; }
+                }
+              `}</style>
             </g>
           </Marker>
         )}
@@ -318,29 +332,33 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
         </div>
       </div>
 
-      {/* Hint — bottom left */}
-      <div
-        className="absolute bottom-12 left-3 pointer-events-none"
-        style={{
-          color: 'rgba(180,163,145,0.6)',
-          fontSize: '10px',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-        }}
-      >
-        {pendingPin ? 'Confirm or cancel to place pin' : 'Click the map to mark a harvest'}
-      </div>
+      {/* Hint — bottom left. Hidden while the confirmation panel is showing
+          so the two pieces of guidance don't compete on narrow screens. */}
+      {!pendingPin && (
+        <div
+          className="absolute bottom-12 left-3 pointer-events-none"
+          style={{
+            color: 'rgba(180,163,145,0.6)',
+            fontSize: '10px',
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Click the map to mark a harvest
+        </div>
+      )}
 
-      {/* Pending-pin confirmation panel */}
+      {/* Pending-pin confirmation panel. Spans the full width above the legend
+          on narrow screens, anchored bottom-right on tablet+ to leave the map
+          breathing room. */}
       {pendingPin && (
-        <div className="absolute bottom-12 right-3 z-10">
+        <div className="absolute bottom-12 left-3 right-3 sm:left-auto sm:right-3 z-10">
           <div
-            className="rounded-lg p-3"
+            className="rounded-lg p-3 sm:min-w-[200px]"
             style={{
               background: 'rgba(20,16,12,0.98)',
               backdropFilter: 'blur(12px)',
               border: '1px solid rgba(107,93,82,0.32)',
-              minWidth: '200px',
             }}
           >
             <div

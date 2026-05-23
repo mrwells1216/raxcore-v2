@@ -17,9 +17,9 @@ function formatLabel(label: string): string {
 
 function agreementColor(tier: PerReferenceFusion['agreementTier']): string {
   switch (tier) {
-    case 'high':     return 'text-green-700 bg-green-50 border-green-200'
-    case 'medium':   return 'text-amber-700 bg-amber-50 border-amber-200'
-    case 'low':      return 'text-orange-700 bg-orange-50 border-orange-200'
+    case 'high':     return 'text-green-700 bg-green-50 border-green-200 dark:text-green-300 dark:bg-green-950/40 dark:border-green-800/50'
+    case 'medium':   return 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800/50'
+    case 'low':      return 'text-orange-700 bg-orange-50 border-orange-200 dark:text-orange-300 dark:bg-orange-950/40 dark:border-orange-800/50'
     case 'fallback': return 'text-muted-foreground bg-muted border-border'
   }
 }
@@ -31,9 +31,9 @@ function angleLabel(angle: PerImageReferenceObservation['angleType']): string {
   return '?'
 }
 
-function ReferenceRow({ ref }: { ref: PerReferenceFusion }) {
+function ReferenceRow({ data }: { data: PerReferenceFusion }) {
   const [open, setOpen] = useState(false)
-  const usable = ref.observations.filter(o => o.visible)
+  const usable = data.observations.filter(o => o.visible)
   if (usable.length === 0) return null
 
   return (
@@ -41,53 +41,57 @@ function ReferenceRow({ ref }: { ref: PerReferenceFusion }) {
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium capitalize truncate">{formatLabel(ref.label)}</span>
+          <span className="text-sm font-medium capitalize truncate">{formatLabel(data.label)}</span>
           <span
             className={cn(
               'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium',
-              agreementColor(ref.agreementTier),
+              agreementColor(data.agreementTier),
             )}
           >
-            {ref.agreementTier}
+            {data.agreementTier}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
-          <span>{usable.length} obs · spread {ref.spread.toFixed(2)}</span>
+          <span className="hidden sm:inline">{usable.length} obs · spread {data.spread.toFixed(2)}</span>
+          <span className="sm:hidden">{usable.length}·{data.spread.toFixed(2)}</span>
           {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </div>
       </button>
 
       {open && (
         <div className="border-t px-3 py-2 space-y-1.5">
-          {ref.observations.map((obs, i) => {
+          {data.observations.map((obs, i) => {
             const dropped = obs.outlier || !!obs.excludedReason
             return (
               <div
                 key={`${obs.imageIndex}-${i}`}
                 className={cn(
-                  'flex items-center justify-between gap-2 text-xs rounded px-2 py-1',
+                  'text-xs rounded px-2 py-1',
                   dropped ? 'bg-muted/50' : '',
                 )}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  {dropped
-                    ? <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
-                    : <CheckCircle2 className="h-3 w-3 text-green-600 shrink-0" />}
-                  <span className="text-muted-foreground">img {obs.imageIndex + 1} ({angleLabel(obs.angleType)})</span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-mono tabular-nums">
-                    {obs.estimatedGross.toFixed(1)} px/in
-                  </span>
-                  <span className="text-muted-foreground">
-                    q {(obs.quality * 100).toFixed(0)}% · d {(obs.distortion * 100).toFixed(0)}%
-                  </span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {dropped
+                      ? <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
+                      : <CheckCircle2 className="h-3 w-3 text-green-600 shrink-0" />}
+                    <span className="text-muted-foreground">img {obs.imageIndex + 1} ({angleLabel(obs.angleType)})</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono tabular-nums">
+                      {obs.estimatedGross.toFixed(1)} px/in
+                    </span>
+                    <span className="text-muted-foreground hidden sm:inline">
+                      q {(obs.quality * 100).toFixed(0)}% · d {(obs.distortion * 100).toFixed(0)}%
+                    </span>
+                  </div>
                 </div>
                 {dropped && obs.excludedReason && (
-                  <div className="w-full text-[10px] text-amber-700 mt-0.5 pl-5">
+                  <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-1 pl-5">
                     {obs.excludedReason}
                   </div>
                 )}
@@ -122,6 +126,7 @@ export function PerImageConsensusCard({ consensus }: PerImageConsensusCardProps)
           variant="ghost"
           className="w-full justify-between p-0 h-auto hover:bg-transparent"
           onClick={() => setExpanded(v => !v)}
+          aria-expanded={expanded}
         >
           <div className="flex items-center gap-2">
             <CardTitle className="text-sm">Per-image anatomical references</CardTitle>
@@ -135,23 +140,23 @@ export function PerImageConsensusCard({ consensus }: PerImageConsensusCardProps)
       {expanded && (
         <CardContent className="space-y-2 pt-0">
           {perkedImages.length > 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
               <div className="flex items-center gap-2 font-medium">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Ear pose flagged
               </div>
-              <div className="mt-1">
+              <div className="mt-1 space-y-0.5">
                 {perkedImages.map(p => (
                   <div key={p.imageIndex}>
-                    Image {p.imageIndex + 1} ({angleLabel(p.angleType)}): {p.state}
-                    {p.reason ? ` — ${p.reason}` : ''}. ear-tip excluded from references.
+                    Image {p.imageIndex + 1} ({angleLabel(p.angleType)}): {p.state} ear detected
+                    {p.reason ? ` — ${p.reason}` : ''}. Ear-tip distance excluded from consensus.
                   </div>
                 ))}
               </div>
             </div>
           )}
           <div className="space-y-1.5">
-            {visibleRefs.map(ref => <ReferenceRow key={ref.label} ref={ref} />)}
+            {visibleRefs.map(item => <ReferenceRow key={item.label} data={item} />)}
           </div>
           <p className="text-[11px] text-muted-foreground pt-1">
             Each anatomical reference is captured independently per photo. Outliers (≥2.5× MAD from the median) are
