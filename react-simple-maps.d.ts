@@ -34,9 +34,20 @@ declare module 'react-simple-maps' {
     [key: string]: unknown
   }
 
+  export interface GeoProjection {
+    (coords: [number, number]): [number, number] | null
+    invert?: (point: [number, number]) => [number, number] | null
+  }
+
   export interface GeographiesProps {
     geography: string | Record<string, unknown>
-    children: (props: { geographies: GeographyFeature[] }) => ReactNode
+    children: (props: {
+      geographies: GeographyFeature[]
+      projection: GeoProjection
+      path: (geo: unknown) => string | null
+      outline: GeographyFeature
+      borders: GeographyFeature
+    }) => ReactNode
     parseGeographies?: (data: unknown) => GeographyFeature[]
   }
 

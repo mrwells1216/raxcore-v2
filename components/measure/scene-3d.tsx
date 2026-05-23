@@ -334,13 +334,13 @@ function crossSectionCircumference(scene: THREE.Object3D, p0: Point3D, p1: Point
 // ─── Measurement tube ─────────────────────────────────────────────────────────
 
 function MeasurementTube({ points, color, active }: { points: Point3D[]; color: string; active: boolean }) {
-  if (points.length < 2) return null
   const threePoints = useMemo(
     () => points.map(p => new THREE.Vector3(p.x, p.y, p.z)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(points)],
   )
   const geometry = useMemo(() => {
+    if (threePoints.length < 2) return null
     const curve = new THREE.CatmullRomCurve3(threePoints, false, 'chordal', 0.5)
     return new THREE.TubeGeometry(
       curve,
@@ -356,11 +356,12 @@ function MeasurementTube({ points, color, active }: { points: Point3D[]; color: 
 
   useEffect(() => {
     return () => {
-      geometry.dispose()
+      geometry?.dispose()
       material.dispose()
     }
   }, [geometry, material])
 
+  if (!geometry) return null
   return <mesh geometry={geometry} material={material} renderOrder={999} />
 }
 
