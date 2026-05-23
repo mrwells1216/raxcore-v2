@@ -35,6 +35,7 @@ import { recalibrateConfidence, type CalibratedConfidence } from './confidence-c
 import { computeLearningCorrection, toSimpleLearningSummary } from './learning-correction'
 import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } from './measurement-correction'
 import { runSelfCheck, type SelfCheckResult } from './self-check'
+import { validateScoringOutput, hasCriticalViolation, type PlausibilityReport } from './scoring-plausibility'
 import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } from './second-pass'
 import { applyFallbackPenalties, type FallbackMetadata } from './fallback-handler'
 import { calibrateConfidence, getCalibrationMetadata, type CalibratedConfidenceResult } from './calibrated-confidence'
@@ -923,6 +924,15 @@ async function buildVisionScoringOutput(
   startTime: number
 ): Promise<ScoringOutput> {
   const visionOutput = visionResult.output
+  const plausibilityReport: PlausibilityReport = validateScoringOutput(visionOutput)
+  if (plausibilityReport.violations.length > 0) {
+    console.warn('[ai-service] plausibility violations detected', {
+      passed: plausibilityReport.passed,
+      criticalCount: plausibilityReport.violations.filter(v => v.severity === 'critical').length,
+      warningCount: plausibilityReport.violations.filter(v => v.severity === 'warning').length,
+      rules: plausibilityReport.violations.map(v => v.rule),
+    })
+  }
   const unscaledMeasurements = visionOutputToMeasurements(visionOutput)
   const rawLandmarks = visionOutputToLandmarks(visionOutput)
   const precisionReferenceResult = applyPrecisionReferenceScaling({
@@ -1172,6 +1182,18 @@ async function buildVisionScoringOutput(
     mainFramePoints: input.mainFramePoints,
     sourceType: input.sourceType,
   })
+
+  // Surgical Precision: OR critical plausibility violations into the second-pass trigger.
+  // Plausibility lives upstream of self-check and feeds it so the existing two-pass
+  // plumbing can re-score without modifying self-check's own rule set.
+  if (hasCriticalViolation(plausibilityReport) && !selfCheckResult.triggerSecondPass) {
+    selfCheckResult.triggerSecondPass = true
+    selfCheckResult.secondPassReasons.push(
+      ...plausibilityReport.violations
+        .filter(v => v.severity === 'critical')
+        .map(v => `plausibility:${v.rule}${v.fieldKey ? `:${v.fieldKey}` : ''}`),
+    )
+  }
 
   // STAGE 9 & 10: Phase 23 Two-Pass Scoring (if triggered)
   const secondPassInput: SecondPassInput = {
