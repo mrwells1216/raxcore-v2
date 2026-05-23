@@ -140,6 +140,26 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.28. Admin gold standard — confirmed shipped ✓ (§4.8)
+Final entry in the §4 close-out campaign. CLAUDE.md §4.8 was marked as
+PARTIAL ("basic JSON paste, full UI missing") but audit on 2026-05-23 found
+the entire workstream was already shipped: full B&C/P&Y field-by-field form
+with per-image type tagging (`components/admin/training-import-form.tsx`,
+455 lines), POST `/api/admin/training-import` to ingest sheets, GET
+`/admin/training-import/[id]` with the AI-vs-official comparison table
+(`components/admin/official-vs-ai-table.tsx`), POST
+`/api/admin/training-import/[id]/run-ai` (calls `scoreBuck` and stores
+deltas in `ai_run_result`), POST `/api/admin/training-import/[id]/promote`
+(sets `is_benchmark`, creates/adds-to a benchmark pack via
+`lib/training-packs/service.ts`). The pending sheet list and gold standard
+list are both rendered on the main admin page. Tables in use:
+`official_score_sheets` (with `is_benchmark`, `ai_run_result`,
+`promoted_at`, `promoted_by` columns), `official_score_images`, and the
+benchmark_pack infra under `training-packs/`. This entry exists only to
+reconcile CLAUDE.md with reality — no new code was added for §4.8. The
+remaining campaign closeout (this commit) updates §4 to mark the queue
+empty.
+
 ### 3.27. Vanishing-point cross-check ✓ (§4.7)
 Sixth entry in the §4 close-out campaign. NOT a primary calibration source —
 standalone confidence would only be 0.30–0.55 and the algorithm's
@@ -355,49 +375,17 @@ Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle
 
 ---
 
-## 4. What is NOT built yet (the pending plan queue)
+## 4. What is NOT built yet
 
-These are ordered by the MASTER_HANDOFF.md phases. Each has a dedicated plan file.
+The §4 close-out campaign (2026-05-23) shipped the entire backlog. All
+items previously listed here have either landed (§3.22–§3.27 in this
+document) or were already complete in the codebase (§3.28). The queue is
+empty.
 
-### 4.1. Antler crop box (CROP_BOX_PLAN.md) — HIGH PRIORITY
-User draws a rectangle around the antlers after upload. Server crops with 12% padding using `sharp`. Cropped version goes to OpenAI; original preserved for display. Gives AI 4–8× more detail. Coordinates stored in prediction metadata.
-- New: `components/scoring/antler-crop-box.tsx`, `lib/scoring/crop-image.ts`
-- Modified: `scoring-wizard.tsx`, `app/api/score/route.ts`
-
-### 4.2. ArUco marker full detection (ARUCO_MARKER_PLAN.md) — HIGH PRIORITY
-The `aruco_marker` option already exists in `reference_type`. This wires real GPT-4o detection behind it. User prints a free marker at arucogen.com, places it near the rack. Corner detection → exact pixelsPerInch. Confidence 0.55–0.72.
-- New: `lib/scoring/aruco-types.ts`, `lib/calibration/aruco-detector.ts`
-- Modified: `scoring-form.tsx`, `score/route.ts`, `calibration-resolver.ts`
-
-### 4.3. Eye circle calibration (EYE_CIRCLE_CALIBRATION_PLAN.md) — HIGH PRIORITY
-Upgrade landmark prompt to return eye iris radius in pixels. Deer iris diameter is a known anatomical reference (~0.55" apparent radius front-facing). Zero extra API calls — piggybacks on existing landmark detection. Both eyes agreeing boosts confidence.
-- Modified: `landmark-detection.ts`, `landmark-prompt.ts`, `landmark-geometry.ts`, `calibration-resolver.ts`
-- No new files required.
-
-### 4.4. AR calibration dots / pedicle drag (AR_CALIBRATION_DOTS_PLAN.md) — HIGH PRIORITY
-Two draggable amber dots overlaid on the photo. User drags them to each antler burr base. Pixel distance ÷ known pedicle spacing (avg 4.5") = pixelsPerInch. Optional: user enters measured spacing for higher confidence (0.85 vs 0.68).
-- New: `components/scoring/calibration-dots.tsx`
-- Modified: `scoring-wizard.tsx`, `score/route.ts`, `calibration-resolver.ts`
-
-### 4.5. Circumference taper assist (inline in MASTER_HANDOFF.md §9) — HIGH PRIORITY
-Post-score card asking for one physical circumference measurement (H1 left). Derives H2–H4 and right-side H1 via published whitetail taper ratios. Single 60-second user action cuts circumference error by ~50%.
-- New: `lib/scoring/circumference-taper.ts`, `/api/scoring/refine-circumference/route.ts`
-- Modified: `scoring-results.tsx`
-
-### 4.6. Sub-pixel edge refinement (SUBPIXEL_REFINEMENT_PLAN.md) — MEDIUM PRIORITY
-When user places a measurement point in Advanced Scoring photo canvas, refine to the nearest high-contrast edge via Sobel gradient + Gaussian fitting. 10× improvement in point placement precision. Zero new packages.
-- New: `lib/measure/subpixel-refine.ts`
-- Modified: `photo-canvas.tsx`, `measure-store.ts` (additive)
-
-### 4.7. Vanishing point perspective calibration (VANISHING_POINT_PLAN.md) — MEDIUM PRIORITY
-Piggybacks on the landmark detection prompt to ask for background parallel lines (fence rails, truck beds, barn boards). Computes vanishing point + tilt angle. Cross-validates other calibration sources. If disagreement >35% warns user.
-- New: `lib/scoring/vanishing-point-types.ts`, `lib/scoring/vanishing-point-geometry.ts`
-- Modified: `landmark-prompt.ts`, `calibration-resolver.ts`, `ai-service.ts`
-
-### 4.8. Admin gold standard — full build (AI_LEARNING_PLAN.md WI-3) — STRATEGIC PRIORITY
-The moat. Expand `app/admin/training-import` from free-form JSON paste to full B&C/P&Y field-by-field form with per-image type tagging, AI vs official comparison table, and "promote to benchmark pack" workflow.
-- Modified: `admin/training-import/page.tsx`, `api/admin/training-import/route.ts`
-- New: `components/admin/official-vs-ai-table.tsx`, `api/admin/training-import/[id]/run-ai/route.ts`, `api/admin/training-import/[id]/promote/route.ts`
+If new initiatives are scoped in the future, add them under this section
+with the same numbered structure (4.1, 4.2, …). For now, the next
+strategic frontier sits inside the existing flywheel (§3.7) rather than as
+a new feature workstream.
 
 ---
 
