@@ -140,7 +140,7 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
-### 3.28. Admin gold standard — confirmed shipped ✓ (§4.8)
+### 3.29. Admin gold standard — confirmed shipped ✓ (§4.8)
 Final entry in the §4 close-out campaign. CLAUDE.md §4.8 was marked as
 PARTIAL ("basic JSON paste, full UI missing") but audit on 2026-05-23 found
 the entire workstream was already shipped: full B&C/P&Y field-by-field form
@@ -160,7 +160,7 @@ reconcile CLAUDE.md with reality — no new code was added for §4.8. The
 remaining campaign closeout (this commit) updates §4 to mark the queue
 empty.
 
-### 3.27. Vanishing-point cross-check ✓ (§4.7)
+### 3.28. Vanishing-point cross-check ✓ (§4.7)
 Sixth entry in the §4 close-out campaign. NOT a primary calibration source —
 standalone confidence would only be 0.30–0.55 and the algorithm's
 absolute-degree estimates are biased without a known camera focal length.
@@ -197,7 +197,7 @@ centered/edge/multi-pair fusion), and perspective-tilt comparison
 `lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
 `app/api/score/route.ts`, `__tests__/scoring/prompt-snapshots.test.ts`.
 
-### 3.26. Sub-pixel point refinement wiring ✓ (§4.6)
+### 3.27. Sub-pixel point refinement wiring ✓ (§4.6)
 Fifth entry in the §4 close-out campaign. The math has been in
 `lib/scoring/subpixel-refine.ts` (Sobel + Gaussian-2D / parabolic-fallback
 peak fit) and `lib/advanced-scoring/subpixel-refine.ts` (line-aware
@@ -228,7 +228,7 @@ new `app/api/measure/refine-point/route.ts`, new
 `__tests__/scoring/refine-point-flow.test.ts`; modified
 `components/measure/photo-canvas.tsx`.
 
-### 3.25. Circumference taper assist ✓ (§4.5)
+### 3.26. Circumference taper assist ✓ (§4.5)
 Fourth entry in the §4 close-out campaign. NOT a new calibration source — a
 post-score refinement that takes one tape-measured H1 (60 seconds with a soft
 tape) and derives H2/H3/H4 plus the opposite-side ladder via published
@@ -260,7 +260,7 @@ applyTaperToMeasurements field surgery. Files: new
 `__tests__/scoring/circumference-taper.test.ts`; modified
 `components/scoring/scoring-results.tsx`.
 
-### 3.24. ArUco marker calibration ✓ (§4.2)
+### 3.25. ArUco marker calibration ✓ (§4.2)
 Third entry in the §4 close-out campaign. Wires real GPT-4o detection behind
 the already-existing `reference_type: 'aruco_marker'` form value. User prints
 a free marker at arucogen.com, enters the side length (default 2"), and the
@@ -292,7 +292,7 @@ guards, and prompt-style snapshot assertions. Files: new
 `__tests__/scoring/aruco-detector.test.ts`; modified
 `lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`.
 
-### 3.23. AR pedicle calibration dots ✓ (§4.4)
+### 3.24. AR pedicle calibration dots ✓ (§4.4)
 Second entry in the §4 close-out campaign; sequenced second by peak confidence
 (0.85 with user-supplied measurement — highest non-LiDAR/tape value in the §8
 hierarchy). User drags two amber dots onto each antler's burr base, optionally
@@ -327,7 +327,7 @@ input guards. Files: new `components/scoring/calibration-dots.tsx`, new
 `lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`,
 `components/scoring/scoring-wizard.tsx`, `lib/storage/service.ts`.
 
-### 3.22. Eye-circle anatomical calibration ✓ (§4.3)
+### 3.23. Eye-circle anatomical calibration ✓ (§4.3)
 First entry in the §4 close-out campaign; sequenced first by calibration impact
 because it is zero-user-effort and shares the existing per-image landmark
 GPT-4o call (no new API spend). Adds a new `eye_circle_anatomical` source to
@@ -361,6 +361,9 @@ after compacting the eye-circle prompt section. Files: modified
 `lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
 `app/api/score/route.ts`; new `__tests__/scoring/eye-circle.test.ts`.
 
+### 3.22. UI polish + fresh-eyes fine-tune pass ✓
+Surgical UI-only cleanup across the recently-shipped surfaces (no scoring/calibration logic touched, no API contracts changed). (a) **Debug noise**: removed 8 leftover `console.log` calls from `scoring-results.tsx` (`extractPrecisionPassPayload`, `extractFieldProvenance`, the two precision-pass override effects) that were leaking to the production console; deleted the stale "Debug logging removed" comment. (b) **Landmark overlay layering**: the absolute canvas previously had no z-index/pointer-events isolation, so it swallowed clicks meant for the carousel arrows and Landmarks toggle. Wrapper is now `pointerEvents:none` + `zIndex:5`, only the canvas itself is `pointerEvents:auto` (drag-to-correct preserved), tooltip dropped to z-2, and the zone legend moved from bottom-right to top-left positioned via the existing letterbox `offsetX/offsetY` so it never overlaps the carousel dots row or the top-right toggle. (c) **Carousel** (`antler-image-carousel.tsx`): desktop prev/next arrows bumped to `z-10` (above the overlay canvas); pagination dots now sit inside a 24×24 tap target (`grid place-items-center w-6 h-6`) with the visible dot kept small, and `aria-current` added. (d) **Per-image consensus card**: fixed a broken `w-full` div nested in a flex row (the excluded-reason note now wraps onto its own line correctly), added `aria-expanded` to both collapsible triggers, added dark-mode variants to the agreement-tier badges / ear-pose warning / excluded-reason text (were light-only `bg-*-50` on a dark UI), tightened the ear-pose copy ("perked ear detected … Ear-tip distance excluded from consensus"), and renamed the `ReferenceRow` prop `ref`→`data` (avoids the React-reserved-word footgun). (e) **Trophy card**: confidence was encoded by color alone (a bare dot with a hover `title`) — added a visible tier label ("Very High"/"High"/"Medium"/"Low") and marked the dot `aria-hidden`. (f) **Trophy detail**: the `≠` asymmetry chip in the score-sheet now has a `title`/`aria-label` explaining it ("Left and right differ by X\""). (g) **Map** (`map-viewer.tsx`): pending-pin pulse rewritten from SMIL `<animate>` to a CSS `transform: scale` keyframe gated behind `@media (prefers-reduced-motion: reduce)`; the redundant "Confirm or cancel" hint is hidden while the confirmation panel is open; the panel now spans full width above the legend on mobile (`left-3 right-3`) and anchors bottom-right only at `sm:`+. Validation: `tsc --noEmit` clean, `pnpm lint` 0 errors (69 pre-existing warnings unchanged), `vitest` 51/51 pass, `pnpm build` succeeds. Files: `components/scoring/scoring-results.tsx`, `components/scoring/landmark-overlay.tsx`, `components/scoring/antler-image-carousel.tsx`, `components/scoring/per-image-consensus-card.tsx`, `components/trophy-room/trophy-card.tsx`, `components/trophy-room/trophy-detail-client.tsx`, `components/map/map-viewer.tsx`.
+
 ### 3.21. SVG North American map + ESLint flat config ✓
 Replaced the Leaflet elevation map with a self-contained SVG North American map. `components/map/map-viewer.tsx` is now built on `react-simple-maps` (was already a dep, not previously wired) using `geoMercator` centered on `[-95, 48]` with scale 520. Country outlines come from `world-atlas@2/countries-110m.json` filtered by ISO numeric codes to US/Canada/Mexico + Central America + Caribbean — no state borders, no tile servers, no elevation layers. Clicks on the SVG are inverted through the captured d3 projection (`projectionRef`) to produce `[lng, lat]`, surfaced via a confirmation panel before firing `onMapClick`. Pin markers render as colored drops keyed by `LOCATION_TYPE_COLORS`; **at ≥20 placed pins the visualization switches to heat mode** — markers shrink to 2.5px dots and a separate `<g filter="url(#rax-heat-blur)">` layer renders blurred radial-gradient blobs (`stdDeviation=6`, red radial gradient) at each pin to give a harvest-density readout. Mode badge ("Pin View N / 20" → "Heat Map N") sits top-left; legend bar across the bottom is unchanged. Public API preserved: `{ pins, onPinClick, onMapClick, selectedPinId }`, `LOCATION_TYPE_COLORS`, `LOCATION_TYPE_LABELS`. Also fixed `pnpm lint` (the script existed but no ESLint config did) — added `eslint@^9` + `eslint-config-next@16.2.0` as devDeps and authored `eslint.config.mjs` (flat config) that disables `react/no-unescaped-entities`, downgrades `@next/next/no-img-element` and `react-hooks/exhaustive-deps` to warnings, and downgrades the new React Compiler-class rules from `react-hooks` v7 (`purity`, `immutability`, `refs`, `use-memo`, `static-components`, `preserve-manual-memoization`, `component-hook-factories`, `set-state-in-effect`, `error-boundaries`) to warnings so the legacy codebase doesn't fail lint on rules it predates. Lint now reports 0 errors / 79 warnings (down from 118 errors). One real hook-rule bug fixed in `components/measure/scene-3d.tsx` (`MeasurementTube` was calling `useMemo` after a conditional `return null` — moved the early-return after the hooks and folded the empty-points guard inside the `useMemo`). Updated `react-simple-maps.d.ts` shim so `<Geographies>` render-prop type now includes `projection`, `path`, `outline`, `borders` (matches runtime). Files: modified `components/map/map-viewer.tsx`, `react-simple-maps.d.ts`, `components/measure/scene-3d.tsx`, `package.json`, `pnpm-lock.yaml`; new `eslint.config.mjs`.
 
@@ -378,8 +381,8 @@ Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle
 ## 4. What is NOT built yet
 
 The §4 close-out campaign (2026-05-23) shipped the entire backlog. All
-items previously listed here have either landed (§3.22–§3.27 in this
-document) or were already complete in the codebase (§3.28). The queue is
+items previously listed here have either landed (§3.23–§3.28 in this
+document) or were already complete in the codebase (§3.29). The queue is
 empty.
 
 If new initiatives are scoped in the future, add them under this section

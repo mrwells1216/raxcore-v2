@@ -224,7 +224,11 @@ function MeasurementTable({ m, gross, net }: { m: TrophyMeasurements; gross: num
                   {row.color && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: row.color }} />}
                   <span>{row.label}</span>
                   {asymm && (
-                    <span className="text-[10px] text-amber-400 border border-amber-400/40 rounded px-1 py-0.5 leading-none">
+                    <span
+                      className="text-[10px] text-amber-400 border border-amber-400/40 rounded px-1 py-0.5 leading-none cursor-help"
+                      title={`Left and right differ by ${Math.abs((row.left ?? 0) - (row.right ?? 0)).toFixed(1)}"`}
+                      aria-label="Left and right asymmetry over 1 inch"
+                    >
                       ≠
                     </span>
                   )}

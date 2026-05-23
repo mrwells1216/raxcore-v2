@@ -177,11 +177,18 @@ export function TrophyCard({ entry, onDeleted }: Props) {
           <span className="text-[11px] text-muted-foreground">
             {SCORING_LABEL[entry.scoring_system] ?? entry.scoring_system}
           </span>
-          <div
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ background: confidenceColor }}
-            title={entry.confidence_tier}
-          />
+          <div className="flex items-center gap-1.5">
+            <div
+              className="w-2 h-2 rounded-full flex-shrink-0"
+              style={{ background: confidenceColor }}
+              aria-hidden
+            />
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              {entry.confidence_tier === 'very_high' ? 'Very High' :
+               entry.confidence_tier === 'high' ? 'High' :
+               entry.confidence_tier === 'medium' ? 'Medium' : 'Low'}
+            </span>
+          </div>
         </div>
       </div>
     </Link>

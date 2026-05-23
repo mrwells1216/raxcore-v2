@@ -113,11 +113,12 @@ export function AntlerImageCarousel({ images, className, onImageChange }: Antler
           ))}
         </CarouselContent>
 
-        {/* Desktop arrow controls - positioned inside the image area */}
+        {/* Desktop arrow controls - positioned inside the image area.
+            z-10 keeps them above the landmark overlay canvas when both visible. */}
         <Button
           variant="secondary"
           size="icon"
-          className="absolute left-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
+          className="absolute left-2 top-1/2 z-10 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
           onClick={scrollPrev}
           aria-label="Previous image"
         >
@@ -126,7 +127,7 @@ export function AntlerImageCarousel({ images, className, onImageChange }: Antler
         <Button
           variant="secondary"
           size="icon"
-          className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
+          className="absolute right-2 top-1/2 z-10 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background hidden md:flex"
           onClick={scrollNext}
           aria-label="Next image"
         >
@@ -135,25 +136,31 @@ export function AntlerImageCarousel({ images, className, onImageChange }: Antler
       </Carousel>
 
       {/* Position indicator */}
-      <div className="flex items-center justify-center gap-2 mt-3">
-        {/* Dot indicators */}
-        <div className="flex gap-1.5">
+      <div className="flex items-center justify-center gap-2 mt-2">
+        {/* Dot indicators — outer button is a larger tap target;
+            the visible dot inside stays small. */}
+        <div className="flex">
           {images.map((_, index) => (
             <button
               key={index}
               onClick={() => api?.scrollTo(index)}
-              className={cn(
-                'w-2 h-2 rounded-full transition-all duration-200',
-                current === index
-                  ? 'bg-primary w-4'
-                  : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
-              )}
+              className="grid place-items-center w-6 h-6"
               aria-label={`Go to image ${index + 1}`}
-            />
+              aria-current={current === index ? 'true' : undefined}
+            >
+              <span
+                className={cn(
+                  'rounded-full transition-all duration-200',
+                  current === index
+                    ? 'bg-primary w-4 h-2'
+                    : 'bg-muted-foreground/30 hover:bg-muted-foreground/60 w-2 h-2',
+                )}
+              />
+            </button>
           ))}
         </div>
         {/* Numeric indicator */}
-        <span className="text-sm text-muted-foreground ml-2">
+        <span className="text-sm text-muted-foreground ml-1">
           {current + 1} / {count}
         </span>
       </div>

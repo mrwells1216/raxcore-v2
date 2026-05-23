@@ -238,8 +238,6 @@ function normalizeResult(result: RawScoringResult): NormalizedResult {
       ? result.scaling_references_used.filter(Boolean)
       : []
 
-  // Debug logging removed - scoring pipeline is working correctly
-
   return {
     grossScore,
     netScore,
@@ -299,14 +297,6 @@ function extractPrecisionPassPayload(result: any): {
     return null
   }
 
-  console.log('[precision-pass] extracted persisted payload', {
-    runId: run?.id ?? null,
-    hasScoreSheet: !!scoreSheet,
-    hasProvenance: !!provenance,
-    grossScore,
-    netScore,
-  })
-
   return {
     grossScore,
     netScore,
@@ -319,54 +309,23 @@ function extractPrecisionPassPayload(result: any): {
 function extractFieldProvenance(result: any): FieldProvenanceMap | null {
   // Case 1: reviewed sheet already stored with provenance
   if (result?.review?.sheet_json?.provenance) {
-    console.log('[provenance] extracted', {
-      source: 'review.sheet_json.provenance',
-      hasReview: true,
-      hasPrediction: !!result?.prediction,
-      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
-    })
     return result.review.sheet_json.provenance as FieldProvenanceMap
   }
 
   // Case 2: prediction has direct provenance
   if (result?.prediction?.provenance) {
-    console.log('[provenance] extracted', {
-      source: 'prediction.provenance',
-      hasReview: false,
-      hasPrediction: true,
-      hasRawAiResponse: !!result?.prediction?.raw_ai_response,
-    })
     return result.prediction.provenance as FieldProvenanceMap
   }
 
   // Case 3: provenance stored inside prediction.raw_ai_response
   if (result?.prediction?.raw_ai_response?.provenance) {
-    console.log('[provenance] extracted', {
-      source: 'prediction.raw_ai_response.provenance',
-      hasReview: false,
-      hasPrediction: true,
-      hasRawAiResponse: true,
-    })
     return result.prediction.raw_ai_response.provenance as FieldProvenanceMap
   }
 
   // Case 4: top-level fallback shape
   if (result?.rawAiResponse?.provenance) {
-    console.log('[provenance] extracted', {
-      source: 'result.rawAiResponse.provenance',
-      hasReview: false,
-      hasPrediction: !!result?.prediction,
-      hasRawAiResponse: true,
-    })
     return result.rawAiResponse.provenance as FieldProvenanceMap
   }
-
-  console.log('[provenance] extracted', {
-    source: 'none',
-    hasReview: false,
-    hasPrediction: !!result?.prediction,
-    hasRawAiResponse: !!result?.prediction?.raw_ai_response || !!result?.rawAiResponse,
-  })
 
   return null
 }
@@ -487,13 +446,6 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     if (!persisted?.runId) return
     if (lastHydratedPersistedRunIdRef.current === persisted.runId) return
     lastHydratedPersistedRunIdRef.current = persisted.runId
-    console.log('[precision-pass] hydrating persisted override', {
-      runId: persisted.runId,
-      grossScore: persisted.grossScore,
-      netScore: persisted.netScore,
-      hasScoreSheet: !!persisted.scoreSheet,
-      hasProvenance: !!persisted.provenance,
-    })
     setPrecisionPassOverride(persisted)
   }, [result, latestRun])
 
@@ -509,13 +461,6 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
     if (!payload.runId) return
     if (lastAppliedPrecisionRunIdRef.current === payload.runId) return
     lastAppliedPrecisionRunIdRef.current = payload.runId
-    console.log('[precision-pass] applying UI override', {
-      runId: payload.runId,
-      hasScoreSheet: !!payload.scoreSheet,
-      hasProvenance: !!payload.provenance,
-      grossScore: payload.grossScore,
-      netScore: payload.netScore,
-    })
     setPrecisionPassOverride({
       grossScore: payload.grossScore,
       netScore: payload.netScore,
