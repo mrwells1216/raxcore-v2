@@ -140,6 +140,37 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.26. Sub-pixel point refinement wiring ✓ (§4.6)
+Fifth entry in the §4 close-out campaign. The math has been in
+`lib/scoring/subpixel-refine.ts` (Sobel + Gaussian-2D / parabolic-fallback
+peak fit) and `lib/advanced-scoring/subpixel-refine.ts` (line-aware
+projection) with passing tests since §3 was built out; the Advanced Scoring
+photo canvas just wasn't calling it for individual measurement-point
+placement. Now wired: new POST route
+`app/api/measure/refine-point/route.ts` decodes the in-browser photo data
+URL via sharp, calls `refineSinglePoint`, and returns `{x, y, method,
+refinementConfidence, deltaPx}`. New helper `refineMeasurementPoint()` in
+`components/measure/photo-canvas.tsx` fires after each `addPoint2D` and uses
+the existing `movePoint2D` store action to snap the placed point to the
+gradient peak when (a) the user didn't already snap to an existing vertex,
+(b) `refinementConfidence ≥ 0.4`, (c) `method !== 'unchanged'`, and (d) the
+user hasn't already nudged that point manually (delta > 1px from raw =
+skip). The existing `refineCalibrationLine` flow (server endpoint
+`/api/measure/refine-reference`, store action
+`applyRefinedCalibrationPoints`) is untouched — this is additive for
+non-calibration points. Provenance: refined points end up in the same
+`measurements2D[fieldId].points` array as raw points, no separate flag is
+needed because the snap is sub-pixel; the existing `confidence` and
+`calibrationSource` on the field already encode trust correctly. NEVER
+unlocks Verified Score — Verified still requires the full
+`physical_reference` calibration path. Tests: 5 new specs in
+`__tests__/scoring/refine-point-flow.test.ts` cover flat-neighborhood
+unchanged, edge-of-image unchanged, NaN/Infinity input coercion to 0,
+synthetic strong-edge stays finite, and confidence band invariants. Files:
+new `app/api/measure/refine-point/route.ts`, new
+`__tests__/scoring/refine-point-flow.test.ts`; modified
+`components/measure/photo-canvas.tsx`.
+
 ### 3.25. Circumference taper assist ✓ (§4.5)
 Fourth entry in the §4 close-out campaign. NOT a new calibration source — a
 post-score refinement that takes one tape-measured H1 (60 seconds with a soft

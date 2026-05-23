@@ -28,6 +28,51 @@ const DBL_CLICK_MS = 280
 // a poor edge and the refinement is not trustworthy.
 const REFINEMENT_QUALITY_THRESHOLD = 0.25
 
+// §4.6 — Fire-and-forget sub-pixel refinement for a measurement point.
+// Calls the server endpoint after the user drops a point; on success and a
+// trustworthy refinement confidence (>= 0.4), the point is moved to the
+// gradient peak. On any failure the raw point stays put.
+const MEASUREMENT_POINT_REFINE_THRESHOLD = 0.4
+async function refineMeasurementPoint(
+  imageDataUrl: string,
+  fieldId: FieldId,
+  pointIndex: number,
+  raw: Point2D,
+): Promise<void> {
+  try {
+    const res = await fetch('/api/measure/refine-point', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl, point: raw }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    if (
+      typeof data?.x !== 'number' ||
+      typeof data?.y !== 'number' ||
+      !Number.isFinite(data.x) ||
+      !Number.isFinite(data.y) ||
+      data.method === 'unchanged'
+    ) return
+    const conf = Number(data.refinementConfidence)
+    if (!Number.isFinite(conf) || conf < MEASUREMENT_POINT_REFINE_THRESHOLD) return
+    // The user may have already moved this point or undone it; confirm the
+    // index still exists with the same raw coords before snapping.
+    const state = useMeasureStore.getState()
+    const field = state.measurements2D[fieldId]
+    if (!field) return
+    const current = field.points[pointIndex]
+    if (!current) return
+    if (Math.hypot(current.x - raw.x, current.y - raw.y) > 1) {
+      // User has already nudged the point; skip the snap to avoid surprising them.
+      return
+    }
+    state.movePoint2D(fieldId, pointIndex, { x: data.x, y: data.y })
+  } catch {
+    // Network or decode error — keep the raw point.
+  }
+}
+
 // Quiet upgrade — runs once after both calibration endpoints are placed.
 // Never throws; on any failure the user keeps their raw calibration points.
 async function refineCalibrationLine(
@@ -277,7 +322,17 @@ export function PhotoCanvas() {
       const state = useMeasureStore.getState()
       for (const fd of FIELD_DEFS) all.push(...state.measurements2D[fd.id].points)
       const snapped = snapPoint(raw, all, sc)
+      const addedIndex = state.measurements2D[currentField].points.length
       addPoint2D(currentField, snapped)
+
+      // §4.6 — fire-and-forget sub-pixel refinement. Only fire when the
+      // user did not snap to an existing point (snap distance > 0) so we
+      // don't fight the explicit snap-to-vertex intent.
+      const snappedToExisting =
+        Math.hypot(snapped.x - raw.x, snapped.y - raw.y) > 0
+      if (!snappedToExisting && state.photoDataUrl) {
+        void refineMeasurementPoint(state.photoDataUrl, currentField, addedIndex, snapped)
+      }
 
       dblTimerRef.current = setTimeout(() => {
         dblTimerRef.current = null
