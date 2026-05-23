@@ -140,6 +140,38 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.24. ArUco marker calibration ✓ (§4.2)
+Third entry in the §4 close-out campaign. Wires real GPT-4o detection behind
+the already-existing `reference_type: 'aruco_marker'` form value. User prints
+a free marker at arucogen.com, enters the side length (default 2"), and the
+detector returns four pixel corners. Per-image PPI is computed as
+`avgSidePx / knownSideInches`; multi-image fusion uses the same median ± 25%
+outlier rejection pattern as pedicle dots and eye-circle. New
+`aruco_marker` `CalibrationSourceTag` at slot 3 of §8 (between LiDAR and
+pedicle dots), confidence lerps 0.55 → 0.72 based on the worst cosTilt across
+surviving detections (cos θ ≤ 0.5 floors at 0.55, orthogonal markers hit
+0.72). knownSideInches clamped server-side to 0.5–12.0" sanity band. Verified
+Score gates unchanged — ArUco is explicitly NOT `physical_reference`.
+Detector implementation: `lib/calibration/aruco-detector.ts` calls GPT-4o
+with a surgical-precision prompt (`ARUCO_DETECTION_SYSTEM_PROMPT`) that
+demands four corners in strict clockwise order, validates convexity via
+cross-product signs, and rejects degenerate quadrilaterals before returning.
+Detector runs in parallel with per-image landmark detection in
+`app/api/score/route.ts` (one extra `Promise.all` task), and ONLY fires when
+the user explicitly selected `reference_type === 'aruco_marker'` and supplied
+a valid side length — keeps cost flat for the 99% of submissions that don't
+use markers. Persistence reuses the existing `landmarks_detected` JSONB on
+`buck_images` (no migration); resolver chosen ArUco source is recorded in
+`pedicle_calibration_metadata` already-introduced field for traceability
+when both are present. Tests: 12 new specs in
+`__tests__/scoring/aruco-detector.test.ts` cover invalid knownSideInches,
+empty detections, PPI math, confidence ceiling/floor, midpoint lerp,
+worst-cosTilt selection, outlier rejection, sanity-band clamp, zero/NaN
+guards, and prompt-style snapshot assertions. Files: new
+`lib/scoring/aruco-types.ts`, new `lib/calibration/aruco-detector.ts`, new
+`__tests__/scoring/aruco-detector.test.ts`; modified
+`lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`.
+
 ### 3.23. AR pedicle calibration dots ✓ (§4.4)
 Second entry in the §4 close-out campaign; sequenced second by peak confidence
 (0.85 with user-supplied measurement — highest non-LiDAR/tape value in the §8

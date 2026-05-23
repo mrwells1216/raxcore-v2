@@ -8,22 +8,25 @@ import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration
 // in the consensus engine but 3.5" here).
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
 import { eyeCircleToPixelsPerInch } from './landmark-geometry'
+import type { ArucoDetection } from './aruco-types'
 
 /**
  * Calibration source values. Aligns with §8 of CLAUDE.md.
  * - `depth_map_lidar`: priority 2 (iPhone Pro LiDAR + EXIF)
+ * - `aruco_marker`: priority 3 (GPT-4o detected printed ArUco marker)
  * - `user_placed_known`: priority 4 (user dragged pedicle dots + their own measured spacing)
  * - `user_placed_anatomical`: priority 5 (user dragged pedicle dots, avg 3.8" spacing)
  * - `reference_object`: priority 9–10 (ring/hat/ruler — never primary)
  * - `eye_circle_anatomical`: priority 6–7 (whitetail iris diameter)
  * - `anatomical_prior`: priority 8 (eye-to-eye, pedicle spacing, etc.)
  *
- * §4.2 and §4.7 add more sources in later orders. Each one must NOT report
+ * §4.7 adds `vanishing_point` in a later order. Each source must NOT report
  * `physical_reference` — that's reserved for user ruler/tape (the only source
  * that unlocks Verified Score per `lib/advanced-scoring/cross-validation.ts`).
  */
 export type CalibrationSourceTag =
   | 'depth_map_lidar'
+  | 'aruco_marker'
   | 'user_placed_known'
   | 'user_placed_anatomical'
   | 'reference_object'
@@ -82,12 +85,19 @@ export interface ReferenceObjectInput {
  * versus ~20% for eye-to-eye spacing). It still NEVER unlocks Verified Score —
  * only `physical_reference` does.
  */
+export interface ArucoResolverInput {
+  detections: ArucoDetection[]
+  /** Physical marker side length in inches as supplied by the user. */
+  knownSideInches: number
+}
+
 export function resolveCalibration(
   landmarks: LandmarkDetection[],
   depthCalibration: DepthCalibrationResult | null,
   referenceObject: ReferenceObjectInput | null,
   perImageLandmarks?: PerImageLandmarkResult[],
   pedicleCalibrations?: PedicleCalibrationInput[] | null,
+  aruco?: ArucoResolverInput | null,
 ): CalibrationResult | null {
   // Priority 1: LiDAR depth calibration
   if (
@@ -105,15 +115,22 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 2: User-placed pedicle dots. Best non-LiDAR source when the user
-  // physically measured their own pedicle spacing (0.85); falls back to the
-  // average 3.8" prior (0.68) when no measurement was supplied. §8 slots 4–5.
+  // Priority 2: ArUco marker (printed by user, GPT-4o detected). §8 slot 3.
+  // Confidence 0.55–0.72 depending on perspective skew (cosTilt).
+  if (aruco && aruco.detections && aruco.detections.length > 0) {
+    const arucoResult = resolveAruco(aruco)
+    if (arucoResult) return arucoResult
+  }
+
+  // Priority 3: User-placed pedicle dots. §8 slots 4–5. user_placed_known
+  // (0.85) when every observation came with a measured spacing; falls back to
+  // user_placed_anatomical (0.68) using the 3.8" whitetail average.
   if (pedicleCalibrations && pedicleCalibrations.length > 0) {
     const pedicleResult = resolvePedicleDots(pedicleCalibrations)
     if (pedicleResult) return pedicleResult
   }
 
-  // Priority 3: Reference object
+  // Priority 4: Reference object
   if (
     referenceObject &&
     referenceObject.type !== 'none' &&
@@ -159,6 +176,77 @@ export function resolveCalibration(
 
   // Priority 4: Anatomical priors from landmarks (legacy fallback)
   return resolveAnatomicalPrior(landmarks)
+}
+
+/**
+ * Compute calibration from one or more ArUco marker detections.
+ *
+ * Per-image PPI = avgSidePx / knownSideInches. Multiple images fuse with
+ * median + ±25% outlier rejection. Confidence floor 0.55, ceiling 0.72,
+ * driven by the worst cosTilt across surviving detections (the more skewed
+ * the marker, the less reliable the side length read).
+ */
+function resolveAruco(input: ArucoResolverInput): CalibrationResult | null {
+  const { detections, knownSideInches } = input
+
+  if (!isFiniteNumber(knownSideInches) || knownSideInches <= 0) return null
+  const sideInches = Math.max(0.5, Math.min(12.0, knownSideInches))
+
+  const ppis: number[] = []
+  const cosTilts: number[] = []
+  const warnings: string[] = []
+  const perDetectionWarnings: string[] = []
+
+  for (const d of detections) {
+    if (!isFiniteNumber(d.avgSidePx) || d.avgSidePx <= 0) continue
+    if (!isFiniteNumber(d.cosTilt) || d.cosTilt <= 0) continue
+    const ppi = d.avgSidePx / sideInches
+    if (!isFiniteNumber(ppi) || ppi <= 0) continue
+    ppis.push(ppi)
+    cosTilts.push(d.cosTilt)
+    for (const w of d.warnings) perDetectionWarnings.push(`image ${d.imageIndex}: ${w}`)
+  }
+
+  if (ppis.length === 0) return null
+
+  // Outlier rejection across images.
+  const sorted = [...ppis].sort((a, b) => a - b)
+  const med = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[Math.floor(sorted.length / 2)]
+
+  const survivorIndices = ppis
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => (med > 0 ? Math.abs(p - med) / med <= 0.25 : true))
+    .map(({ i }) => i)
+
+  if (survivorIndices.length === 0) return null
+
+  const survivorPpis = survivorIndices.map(i => ppis[i])
+  const survivorCos = survivorIndices.map(i => cosTilts[i])
+
+  const fusedPpi = survivorPpis.reduce((s, v) => s + v, 0) / survivorPpis.length
+  const worstCos = Math.min(...survivorCos)
+
+  // Confidence: lerp from 0.55 (cosTilt=0.5) to 0.72 (cosTilt=1.0).
+  // Below cosTilt 0.5, confidence is clamped at 0.55 — anything that
+  // foreshortened ought to be flagged but still usable as a coarse anchor.
+  const clampedCos = Math.max(0.5, Math.min(1.0, worstCos))
+  const confidence = 0.55 + (clampedCos - 0.5) * (0.72 - 0.55) / 0.5
+
+  const rejected = ppis.length - survivorIndices.length
+  if (rejected > 0) {
+    warnings.push(`Rejected ${rejected} ArUco outlier${rejected === 1 ? '' : 's'} vs median`)
+  }
+  warnings.push(...perDetectionWarnings)
+
+  return {
+    pixelsPerInch: fusedPpi,
+    source: 'aruco_marker',
+    confidence,
+    method: `ArUco marker (${survivorPpis.length} detection${survivorPpis.length === 1 ? '' : 's'}, ${sideInches.toFixed(1)}" side, worst cos θ ${worstCos.toFixed(2)})`,
+    warnings,
+  }
 }
 
 /**

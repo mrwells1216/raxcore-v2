@@ -59,6 +59,8 @@ import { detectLandmarkPositions, detectLandmarkPositionsPerImage } from '@/lib/
 import { computePerImageConsensus } from '@/lib/scoring/per-image-consensus'
 import type { LandmarkDetectionResult, PerImageLandmarkResult } from '@/lib/scoring/landmark-detection'
 import { resolveCalibration, type PedicleCalibrationInput } from '@/lib/scoring/calibration-resolver'
+import { detectArucoMarkersPerImage } from '@/lib/calibration/aruco-detector'
+import { ARUCO_SIDE_MIN_INCHES, ARUCO_SIDE_MAX_INCHES } from '@/lib/scoring/aruco-types'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'
 import type { PreScoringMeasurements } from '@/lib/types'
@@ -941,7 +943,24 @@ export async function POST(request: Request) {
         return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
       }) as Array<'front' | 'left' | 'right' | 'unknown'>
 
-      perImageLandmarks = await detectLandmarkPositionsPerImage(storedImageUrls, angleTypes)
+      // Detect landmarks and ArUco markers in parallel. ArUco only runs when
+      // the user declared an ArUco marker is present AND supplied a sane side
+      // length — otherwise we skip the API call to keep cost flat for the
+      // 99% case that doesn't print markers.
+      const arucoEnabled =
+        referenceTypeRaw === 'aruco_marker' &&
+        referenceSizeValueRaw != null &&
+        Number(referenceSizeValueRaw) >= ARUCO_SIDE_MIN_INCHES &&
+        Number(referenceSizeValueRaw) <= ARUCO_SIDE_MAX_INCHES
+      const arucoSideInches = arucoEnabled ? Number(referenceSizeValueRaw) : null
+
+      const [landmarksResult, arucoDetections] = await Promise.all([
+        detectLandmarkPositionsPerImage(storedImageUrls, angleTypes),
+        arucoEnabled
+          ? detectArucoMarkersPerImage(storedImageUrls)
+          : Promise.resolve([]),
+      ])
+      perImageLandmarks = landmarksResult
       const usable = perImageLandmarks.filter((r) => !r.failed)
 
       if (usable.length > 0) {
@@ -974,7 +993,17 @@ export async function POST(request: Request) {
           console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
         }
 
-        const calibration = resolveCalibration(allLandmarks, depthCalibration, null, perImageLandmarks, pedicleCalibration)
+        const arucoResolverInput = arucoEnabled && arucoSideInches != null && arucoDetections.length > 0
+          ? { detections: arucoDetections, knownSideInches: arucoSideInches }
+          : null
+        const calibration = resolveCalibration(
+          allLandmarks,
+          depthCalibration,
+          null,
+          perImageLandmarks,
+          pedicleCalibration,
+          arucoResolverInput,
+        )
 
         // Persist pedicle calibration metadata for the learning flywheel,
         // including which source the resolver actually selected (so future
