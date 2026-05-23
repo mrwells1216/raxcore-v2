@@ -140,6 +140,38 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.25. Circumference taper assist ✓ (§4.5)
+Fourth entry in the §4 close-out campaign. NOT a new calibration source — a
+post-score refinement that takes one tape-measured H1 (60 seconds with a soft
+tape) and derives H2/H3/H4 plus the opposite-side ladder via published
+whitetail taper ratios. Roughly halves circumference error, which today is the
+least-accurate B&C field class. New `lib/scoring/circumference-taper.ts`
+defines the constants (`TAPER_RATIOS.H2 = 0.94`, `H3 = 0.88`, `H4 = 0.84`),
+exposes `deriveCircumferences(measuredInches, side)` and a helper
+`applyTaperToMeasurements()` that splices the derived ladder into an existing
+Measurements record. Sanity band 1.0–8.0" enforced by both client and server
+(`CircumferenceTaperError`). New POST route
+`app/api/scoring/refine-circumference/route.ts` validates the body via Zod,
+loads the prediction, applies the taper, recomputes gross/net via the H-field
+delta only (other fields untouched), and persists. Persistence reuses the
+existing `user_measurements_metadata` JSONB column on `predictions` (added in
+§3.15) under a new `circumferenceTaper` subkey — no migration. New
+`components/scoring/circumference-taper-card.tsx` is the UI: collapsible
+under the Measurement Breakdown card, side selector, H1 input, live preview
+of the derived ladder, submit POSTs and reloads on success. Derived values
+are tagged `source: 'derived_taper'` per CLAUDE.md §5 (never call them
+"measured"); this NEVER unlocks Verified Score — only `physical_reference`
+via Advanced Scoring does. Tests: 9 new specs in
+`__tests__/scoring/circumference-taper.test.ts` cover taper math, opposite-
+side mirroring, provenance tagging, out-of-band rejection (low and high),
+NaN/Infinity guards, monotonically decreasing ladder, rounding, and the
+applyTaperToMeasurements field surgery. Files: new
+`lib/scoring/circumference-taper.ts`, new
+`app/api/scoring/refine-circumference/route.ts`, new
+`components/scoring/circumference-taper-card.tsx`, new
+`__tests__/scoring/circumference-taper.test.ts`; modified
+`components/scoring/scoring-results.tsx`.
+
 ### 3.24. ArUco marker calibration ✓ (§4.2)
 Third entry in the §4 close-out campaign. Wires real GPT-4o detection behind
 the already-existing `reference_type: 'aruco_marker'` form value. User prints
