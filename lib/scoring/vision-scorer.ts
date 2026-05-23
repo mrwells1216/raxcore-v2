@@ -32,6 +32,7 @@ import { logEventFireForget } from '@/lib/monitoring/service'
 import type { PrecisionReferenceProfile } from './reference-mode'
 import { HAT_DIMENSIONS } from './hat-reference'
 import { buildLandmarkDetectionPrompt } from './landmark-prompt'
+import { roleIsolationParagraph } from './prompt-style'
 
 // OpenAI is the only provider for scoring vision calls.
 // Requires @ai-sdk/openai@^2.0.0 — the v2 package implements LanguageModelV2
@@ -368,7 +369,7 @@ ${lines.join('\n')}
 `
 }
 
-function buildVisionPrompt(input: VisionScoringInput): string {
+export function buildVisionPrompt(input: VisionScoringInput): string {
   const angleDescriptions = input.images.map((img, i) =>
     `Image ${i + 1}: ${img.angleType} angle (${img.width}x${img.height})${img.hasCropBox ? ' [CROPPED]' : ''}`
   ).join('\n')
@@ -455,109 +456,87 @@ Estimate all unmeasured fields based on these confirmed anchors.
 `
     : ''
 
-  return `You are an expert whitetail deer antler scorer with decades of experience measuring trophy bucks for Boone & Crockett and Pope & Young records.
+  const biasBlock = (() => {
+    const biases = input.fieldBiases
+    if (!biases || Object.keys(biases).length === 0) return ''
+    const lines = Object.entries(biases)
+      .map(([field, delta]) =>
+        `  - ${field}: historically estimated ${delta > 0 ? 'LOW' : 'HIGH'} by ~${Math.abs(delta).toFixed(1)}" — lean ${delta > 0 ? 'higher' : 'lower'}`,
+      )
+      .join('\n')
+    return `\nKNOWN BIASES (pre-compensate)\nStatistically significant biases from user corrections (>=10 samples each):\n${lines}\n`
+  })()
 
-TASK: Analyze the provided deer antler image(s) and estimate all B&C scoring measurements.
+  return `${roleIsolationParagraph('measurement')}
 
-CONTEXT:
-- State: ${input.state ?? 'Not provided'}
-- User-indicated rack type: ${input.rackType}
-- User says ears fully visible: ${input.earsFullyVisible ? 'Yes' : 'Unknown/No'}
-- Source type: ${input.sourceType || 'Unknown'}
-- Capture device: ${input.captureDevice || 'Unknown'}
-- User-indicated total points: ${input.totalPoints || 'Not provided'}
-- User-suggested main frame points: ${input.mainFramePoints || 'Not provided'}
-
-IMAGES PROVIDED:
+INPUT CONTRACT
+- Images: ${input.images.length}
 ${angleDescriptions}
-${cropNote}
-${preMeasurementBlock}
-${precisionReferenceBlock}
-${ringReferenceBlock}
-${hatReferenceBlock}
-${preAiContextBlock}
+- Crop status: ${anyCropped ? 'one or more images server-cropped to the antler region' : 'no crops applied'}
+- State: ${input.state ?? 'not provided'}
+- User-indicated rack type: ${input.rackType}
+- Source: ${input.sourceType || 'unknown'} / device: ${input.captureDevice || 'unknown'}
+- User-indicated total points: ${input.totalPoints || 'not provided'}; main-frame: ${input.mainFramePoints || 'not provided'}
+- User says ears fully visible: ${input.earsFullyVisible ? 'yes' : 'unknown/no'}
+${cropNote}${preMeasurementBlock}${precisionReferenceBlock}${ringReferenceBlock}${hatReferenceBlock}${preAiContextBlock}
+OUTPUT CONTRACT
+- All linear measurements in inches, float, one decimal place.
+- confidence_percent honest, integer 10-95.
+- null (or 0 for required schema fields) for any field you cannot measure; do not invent.
+- quality_notes: short strings for every value you flag.
+- scaling_reference_used: the single reference tier you committed to.
 
-═══════════════════════════════════════════════════════════════
-MULTI-REFERENCE SCALING SYSTEM — CRITICAL INSTRUCTIONS
-═══════════════════════════════════════════════════════════════
-You MUST use MULTIPLE anatomical references to derive scale, not just ears.
-For EACH reference below, report: visibility (true/false), quality (0–1),
-and distortion (0–1). Then use detected sizes to set *_px_inches fields.
+SCALING DECISION TREE (commit to exactly ONE tier; never blend tiers)
+if user tape measurements present:           tier = "user_tape"
+elif precision_reference detected:           tier = "precision_reference"
+elif eye box visible:                        tier = "eye_box"             (known ${ANATOMICAL_REFERENCES.EYE_BOX_WIDTH}")
+elif pedicle spacing visible:                tier = "pedicle_spacing"     (known ${ANATOMICAL_REFERENCES.PEDICLE_SPACING}")
+elif eye-to-pedicle visible:                 tier = "eye_to_pedicle"      (known ${ANATOMICAL_REFERENCES.EYE_TO_PEDICLE}")
+elif skull forehead width visible:           tier = "skull_width"         (known ${ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH}")
+else:                                        tier = "secondary"
+- Record the tier in scaling_reference_used.
+- Secondary references (nose bridge ${ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH}", muzzle width ${ANATOMICAL_REFERENCES.MUZZLE_WIDTH}", ear base spacing ${ANATOMICAL_REFERENCES.EAR_BASE_SPACING}", ear base-to-tip ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}") are CROSS-CHECK ONLY — do not let them override a top-tier choice.
+- For each reference, populate visibility (true/false), quality (0-1), distortion (0-1). If a reference is not visible, set visibility: false rather than omitting it.
+- Set *_px_inches fields to your best inch-equivalent estimate of each reference's detected size, in the same inch space as your other measurements. Leave as undefined if not detected.
 
-REFERENCE PRIORITY — use top-tier references first:
+MEASUREMENT RULES
+- Inside spread: widest interior point between main beams. Mature bucks 16-22".
+- Main beams: outside curve, burr to tip. Mature 22-28" per side.
+- Tine base: where the tine first separates from the main beam, NOT the visual start.
+- Tine length ranges: G1 3-6", G2 8-12", G3 7-11", G4 4-9", G5 (if present) 2-5".
+- Circumferences (smallest point between tines): H1 4-5.5", H2 4-5", H3 4-4.5", H4 3.5-4.5".
+- Abnormal points: any point outside the typical pattern; sum lengths into abnormal_points.
+- Deductions: sum |left - right| asymmetries; estimate non-typical-on-typical penalties.
+- gross_score = sum(beams) + sum(tines) + sum(H) + inside_spread + abnormal_points.
+- net_score (typical) = gross_score - abnormal_points - deductions.
+- net_score (non-typical) = gross_score - deductions (abnormals count positively).
 
-TOP-TIER (highest accuracy — use these to anchor all measurements):
-  1. Eye box (orbital socket)          — known width: ${ANATOMICAL_REFERENCES.EYE_BOX_WIDTH}" | Best angle: front
-  2. Pedicle spacing (antler bases)    — known c-to-c: ${ANATOMICAL_REFERENCES.PEDICLE_SPACING}"  | Best angle: front
-  3. Eye-to-pedicle distance           — known: ${ANATOMICAL_REFERENCES.EYE_TO_PEDICLE}"         | Best angle: front/45°
-  4. Skull forehead width              — known: ${ANATOMICAL_REFERENCES.SKULL_FOREHEAD_WIDTH}"    | Best angle: front
+ANGLE GUIDANCE
+- Front: best for spread, eye box, pedicle, skull width.
+- Side (left/right): best for main beam length and tine lengths.
+- 45-degree: good cross-check; expect moderate perspective distortion.
+- Side/oblique distortion 0.3-0.7; front 0.05-0.2; trail-cam/fisheye higher.
 
-SECONDARY (use to corroborate if top-tier is unclear):
-  5. Nose bridge length                — known: ${ANATOMICAL_REFERENCES.NOSE_BRIDGE_LENGTH}"      | Best angle: front/45°
-  6. Muzzle width                      — known: ${ANATOMICAL_REFERENCES.MUZZLE_WIDTH}"            | Best angle: front
-  7. Ear base spacing                  — known c-to-c: ${ANATOMICAL_REFERENCES.EAR_BASE_SPACING}"  | Best angle: front
+PLAUSIBILITY RULES (verify EACH before returning)
+- main_beam_{side} > max(g1_{side}, g2_{side}, g3_{side}, g4_{side}) on the same side.
+- For each paired field |left - right| / max(left, right) < 0.35 unless the rack is visibly broken or asymmetric; if greater, set confidence_percent < 60 and explain in quality_notes.
+- deductions >= 0 and abnormal_points >= 0.
+- net_score <= gross_score.
+- 40 <= gross_score <= 280 for any real whitetail.
+- H1 >= H2 >= H3 >= H4 typically (mass tapers distally); violations -> note in quality_notes; do not "fix" by inventing values.
+- G2 typically >= G1 on mature bucks; sub-mature bucks may legitimately violate.
 
-BONUS (only if ears confirmed fully visible — less reliable, do NOT let this override top-tier):
-  8. Ear base-to-tip                   — known: ${ANATOMICAL_REFERENCES.EAR_BASE_TO_TIP}"         | Front/45° only
+SELF-CHECK (perform before returning)
+1. Did you commit to ONE scaling tier and record it in scaling_reference_used?
+2. Recompute gross_score from the fields above. Does it match what you set?
+3. net_score <= gross_score? deductions >= 0? All measurements within ranges?
+4. For every value with low confidence, did you add a quality_note explaining why?
+5. If the image is too poor to measure: set confidence_percent < 40 and explain in quality_notes. Do not invent inches.
 
-IMPORTANT RULES:
-- DO NOT rely primarily on ears for scaling.
-- Eye box + pedicle spacing + eye-to-pedicle MUST dominate scaling.
-- Nose bridge is secondary; ears are a bonus check only.
-- If you can see the eye socket clearly, you MUST populate eye_box.
-- If pedicle bases are visible from front, you MUST populate pedicle_spacing.
-- For distortion: side/oblique angles distort perspective heavily (0.3–0.7).
-  Front angle = low distortion (0.05–0.2). Trail cam / fisheye = higher.
-- If a reference is NOT visible, still include it with visibility: false.
-- Set *_px_inches fields to your best inch-equivalent estimate of each
-  reference's detected size in the image's scale (same inch space as your
-  other measurements). Leave as undefined if not detected.
-
-═══════════════════════════════════════════════════════════════
-MEASUREMENT GUIDELINES
-═══════════════════════════════════════════════════════════════
-1. INSIDE SPREAD: Widest point between main beams. Mature bucks: 16–22".
-
-2. MAIN BEAMS: Outer curve from burr to tip. Mature bucks: 22–28" per side.
-
-3. TINE LENGTHS (G1–G5): Base of tine at main beam to tine tip:
-   - G1 (brow): 3–6"  |  G2: 8–12"  |  G3: 7–11"  |  G4: 4–9"  |  G5 if present: 2–5"
-
-4. CIRCUMFERENCES (H1–H4): Smallest point between tines:
-   - H1: 4–5.5"  |  H2: 4–5"  |  H3: 4–4.5"  |  H4: 3.5–4.5"
-
-5. ABNORMAL POINTS: Any point outside the normal typical pattern.
-
-6. DEDUCTIONS: Estimate asymmetry from left/right differences.
-
-ANGLE-SPECIFIC GUIDANCE:
-- FRONT: Best for spread, eye box, pedicle, skull width, ear/eye refs.
-- SIDE (left/right): Best for main beam length and tine lengths.
-- 45-degree: Good for overall cross-check.
-
-SCORING CALCULATION:
-- Gross = Sum of all measurements including abnormal points
-- Net (Typical) = Gross − abnormal points − deductions
-- Net (Non-typical) = Gross − deductions (abnormals count positively)
-
-Be conservative — slightly under rather than over. Account for perspective
-distortion, occlusion, and image quality in your confidence level.
-
-${(() => {
-  const biases = input.fieldBiases
-  if (!biases || Object.keys(biases).length === 0) return ''
-  const lines = Object.entries(biases)
-    .map(([field, delta]) =>
-      `  - ${field}: historically estimated ${delta > 0 ? 'LOW' : 'HIGH'} by ~${Math.abs(delta).toFixed(1)}" — lean ${delta > 0 ? 'higher' : 'lower'}`
-    )
-    .join('\n')
-  return `\n═══════════════════════════════════════════════════════════════
-KNOWN MEASUREMENT BIASES (learned from user corrections)
-═══════════════════════════════════════════════════════════════
-Statistically significant biases from user corrections (≥10 samples each). Pre-compensate:
-${lines}
-`
-})()}Provide your analysis as structured JSON matching the required schema.`
+REFUSE
+If image quality fails (blur beyond recognition, obstruction, rack absent), do NOT invent numbers. Return your best honest estimate with confidence_percent < 40 and quality_notes explaining what failed.
+${biasBlock}
+Respond with structured JSON matching the required schema.`
 }
 
 /**

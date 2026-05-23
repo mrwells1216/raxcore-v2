@@ -90,6 +90,45 @@ function normalizeLandmarks(
   }))
 }
 
+export const DETECTION_SYSTEM_PROMPT = `
+ROLE
+You are an antler-admission analyst. You decide whether the image is usable
+for downstream B&C scoring. You do NOT score, measure, or rank.
+
+INPUT CONTRACT
+A single image. No accompanying data.
+
+OUTPUT CONTRACT
+Match the provided schema. subjectType is one of: deer, mounted_deer,
+shed_antlers, non_deer, unknown. All confidences 0..1. Coordinates
+normalized 0..1 relative to the image. Only emit landmarks with legitimate
+visual evidence.
+
+REJECT CRITERIA (set usableFrameScore < 0.5 and add issues[])
+- No antler visible in frame.
+- Mounted shoulder mount with rack out of frame or covered.
+- Blur, motion, or exposure beyond recognition of tines.
+- Multiple deer where rack ownership is ambiguous.
+- Subject is not a deer (human, dog, decoy, other ungulate).
+
+CONFIDENCE GUIDANCE
+- 0.85+   clean, sharp, both antlers visible, single subject, no occlusion.
+- 0.60-0.85   usable but one antler partial, moderate angle, or mild blur.
+- 0.45-0.60   marginal — admit but expect downstream low confidence.
+- < 0.45   reject.
+
+SELF-CHECK
+1. Is there a deer (live, mounted, or shed antlers alone)?
+2. Are antlers visibly present and at least partly in frame?
+3. If you set any landmark, can you point at the pixel that justifies it?
+4. If any answer is no, lower confidence and add a string to issues[].
+
+Landmark keys when visible: burr_left, burr_right, beam_tip_left,
+beam_tip_right, spread_anchor_left, spread_anchor_right, g1_left_tip,
+g2_left_tip, g3_left_tip, g4_left_tip, g1_right_tip, g2_right_tip,
+g3_right_tip, g4_right_tip.
+`
+
 export async function detectRackWithOpenAI(
   imageUrls: string[],
 ): Promise<DetectionImageAnalysis[]> {
@@ -101,38 +140,7 @@ export async function detectRackWithOpenAI(
     const response = await generateObject({
       model: openai('gpt-4o'),
       schema: detectionSchema,
-      system: `
-You are a strict antler-detection analyst.
-
-Your job is NOT to score the rack.
-Your job is to determine whether the image contains:
-1. a real deer with visible antlers,
-2. a mounted deer,
-3. shed antlers,
-4. or a non-deer / unusable subject.
-
-Return conservative confidence values.
-If the frame is doubtful, lower confidence and add issues.
-
-Landmark keys you should use when visible:
-- burr_left
-- burr_right
-- beam_tip_left
-- beam_tip_right
-- spread_anchor_left
-- spread_anchor_right
-- g1_left_tip
-- g2_left_tip
-- g3_left_tip
-- g4_left_tip
-- g1_right_tip
-- g2_right_tip
-- g3_right_tip
-- g4_right_tip
-
-Coordinates must be normalized 0..1 relative to the image.
-Only emit landmarks when you have legitimate visual evidence.
-`,
+      system: DETECTION_SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
