@@ -10,6 +10,7 @@ import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { AntlerCropBox, type CropRegion } from './antler-crop-box'
+import { CalibrationDots, type PedicleDotPlacement } from './calibration-dots'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
@@ -61,6 +62,8 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
   const [bannerDismissed, setBannerDismissed] = useState(false)
   const [cropRegions, setCropRegions] = useState<Record<number, CropRegion | null>>({})
   const [cropSkipped, setCropSkipped] = useState<Record<number, boolean>>({})
+  const [pedicleDots, setPedicleDots] = useState<Record<number, PedicleDotPlacement | null>>({})
+  const [pedicleCalibrationOpen, setPedicleCalibrationOpen] = useState(false)
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -389,6 +392,24 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       }
       apiFormData.append('crop_regions', JSON.stringify(cropRegionsPayload))
 
+      // Pedicle calibration dots — flatten the keyed record into an array of
+      // PedicleCalibrationInput payloads for the resolver.
+      const pedicleDotsPayload: Array<{
+        imageIndex: number
+        leftPx: number
+        leftPy: number
+        rightPx: number
+        rightPy: number
+        knownInches: number | null
+      }> = []
+      for (let index = 0; index < images.length; index++) {
+        const placement = pedicleDots[index]
+        if (placement) pedicleDotsPayload.push(placement)
+      }
+      if (pedicleDotsPayload.length > 0) {
+        apiFormData.append('pedicle_calibration', JSON.stringify(pedicleDotsPayload))
+      }
+
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
         try {
@@ -678,6 +699,61 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
             </div>
           </div>
         </Section>
+      )}
+
+      {gridImages.length > 0 && (
+        <div
+          className="rounded overflow-hidden"
+          style={{
+            border: '1px solid var(--bronze-dark)',
+            background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setPedicleCalibrationOpen(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
+            aria-expanded={pedicleCalibrationOpen}
+          >
+            <div>
+              <span
+                className="text-[10px] font-black tracking-[0.22em] uppercase"
+                style={{ color: 'var(--bronze-light)' }}
+              >
+                Pedicle Calibration (Optional)
+              </span>
+              <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                Drag the amber dots onto the burr bases. Adds a 0.68–0.85 confidence scale source.
+              </p>
+            </div>
+            {pedicleCalibrationOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          {pedicleCalibrationOpen && (
+            <div className="px-5 pb-5 space-y-5">
+              {gridImages.map((img, index) => (
+                <div key={img.id} className="space-y-2">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Photo {index + 1} — {img.angleType}
+                  </div>
+                  <CalibrationDots
+                    imageUrl={img.url}
+                    imageIndex={index}
+                    imageWidth={img.width || 1024}
+                    imageHeight={img.height || 768}
+                    initial={pedicleDots[index] ?? null}
+                    onChange={(placement) => {
+                      setPedicleDots(prev => ({ ...prev, [index]: placement }))
+                    }}
+                  />
+                </div>
+              ))}
+              <p className="text-[10px] font-mono text-muted-foreground">
+                Per §8 of the calibration hierarchy, dots-with-known-spacing rank
+                above ArUco/eye-circle/anatomical priors but never unlock Verified Score.
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── 5b. Scan validation banner ──────────────────────────────────── */}

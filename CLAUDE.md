@@ -140,6 +140,41 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.23. AR pedicle calibration dots ✓ (§4.4)
+Second entry in the §4 close-out campaign; sequenced second by peak confidence
+(0.85 with user-supplied measurement — highest non-LiDAR/tape value in the §8
+hierarchy). User drags two amber dots onto each antler's burr base, optionally
+enters their measured pedicle spacing, and the resolver fuses across images
+with the standard median + ±25% outlier rejection. Two new
+`CalibrationSourceTag` values: `user_placed_known` (0.85, slot 4) when every
+surviving observation came with a known measurement, and
+`user_placed_anatomical` (0.68, slot 5) when any observation used the 3.8"
+whitetail population average. Mixing demotes to anatomical — never claims a
+known reading it can't substantiate. Pedicle dots are placed in priority 2 of
+the resolver (just below LiDAR, above reference object and eye-circle). User
+input is clamped server-side to a 2.0–8.0" sanity band; out-of-band inputs
+fall back to the anatomical default and warn. Verified Score gates unchanged
+— user_placed_* is explicitly NOT `physical_reference`. New
+`components/scoring/calibration-dots.tsx` is a vanilla-React drag overlay (no
+Konva dependency) with `ResizeObserver`-driven letterbox/pillarbox math
+borrowed from the §3.17 LandmarkOverlay fix so dots land on actual image
+pixels regardless of container aspect ratio. Wizard exposes an opt-in
+collapsible "Pedicle Calibration" card under the crop section that renders the
+overlay per uploaded image. Coordinates serialized as `pedicle_calibration` on
+the API FormData; parsed and threaded through to `resolveCalibration`'s new
+optional `pedicleCalibrations` arg. New JSONB column
+`pedicle_calibration_metadata` on `predictions` stores the raw inputs alongside
+the resolver's chosen source/confidence/PPI for learning-flywheel correlation.
+Tests: 10 new specs in `__tests__/scoring/pedicle-calibration.test.ts` cover
+empty/null inputs, sub-5px sanity floor, known vs anatomical confidence
+selection, out-of-band knownInches clamp, mixed-source demotion, ±25%
+outlier rejection across images, >12% disagreement warning, and NaN/Infinity
+input guards. Files: new `components/scoring/calibration-dots.tsx`, new
+`__tests__/scoring/pedicle-calibration.test.ts`, new migration
+`supabase/migrations/20260524_pedicle_calibration_metadata.sql`; modified
+`lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`,
+`components/scoring/scoring-wizard.tsx`, `lib/storage/service.ts`.
+
 ### 3.22. Eye-circle anatomical calibration ✓ (§4.3)
 First entry in the §4 close-out campaign; sequenced first by calibration impact
 because it is zero-user-effort and shares the existing per-image landmark

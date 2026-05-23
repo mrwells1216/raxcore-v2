@@ -12,19 +12,46 @@ import { eyeCircleToPixelsPerInch } from './landmark-geometry'
 /**
  * Calibration source values. Aligns with §8 of CLAUDE.md.
  * - `depth_map_lidar`: priority 2 (iPhone Pro LiDAR + EXIF)
+ * - `user_placed_known`: priority 4 (user dragged pedicle dots + their own measured spacing)
+ * - `user_placed_anatomical`: priority 5 (user dragged pedicle dots, avg 3.8" spacing)
  * - `reference_object`: priority 9–10 (ring/hat/ruler — never primary)
  * - `eye_circle_anatomical`: priority 6–7 (whitetail iris diameter)
  * - `anatomical_prior`: priority 8 (eye-to-eye, pedicle spacing, etc.)
  *
- * §4.2, §4.4, §4.7 add more sources in later orders. Each one must NOT report
+ * §4.2 and §4.7 add more sources in later orders. Each one must NOT report
  * `physical_reference` — that's reserved for user ruler/tape (the only source
  * that unlocks Verified Score per `lib/advanced-scoring/cross-validation.ts`).
  */
 export type CalibrationSourceTag =
   | 'depth_map_lidar'
+  | 'user_placed_known'
+  | 'user_placed_anatomical'
   | 'reference_object'
   | 'eye_circle_anatomical'
   | 'anatomical_prior'
+
+/**
+ * Per-image pedicle dot placement from the user. Pixel coords are in the
+ * coordinate space of the source image (NOT the canvas), so the UI must
+ * translate from canvas-px to image-px before sending (see
+ * `LandmarkOverlay`'s letterbox/pillarbox math, §3.17).
+ */
+export interface PedicleCalibrationInput {
+  imageIndex: number
+  leftPx: number
+  leftPy: number
+  rightPx: number
+  rightPy: number
+  /** When provided, the user has physically measured this pair on the skull.
+   *  Clamped to a sane band server-side (see PEDICLE_KNOWN_INCHES_*). */
+  knownInches?: number | null
+}
+
+/** Average adult whitetail pedicle spacing in inches; matches PEDICLE_SPACING
+ *  in lib/constants.ts. Used as the default when no known measurement is given. */
+const DEFAULT_PEDICLE_SPACING_INCHES = ANATOMICAL_REFERENCES.PEDICLE_SPACING
+const PEDICLE_KNOWN_INCHES_MIN = 2.0
+const PEDICLE_KNOWN_INCHES_MAX = 8.0
 
 export interface CalibrationResult {
   pixelsPerInch: number
@@ -60,6 +87,7 @@ export function resolveCalibration(
   depthCalibration: DepthCalibrationResult | null,
   referenceObject: ReferenceObjectInput | null,
   perImageLandmarks?: PerImageLandmarkResult[],
+  pedicleCalibrations?: PedicleCalibrationInput[] | null,
 ): CalibrationResult | null {
   // Priority 1: LiDAR depth calibration
   if (
@@ -77,7 +105,15 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 2: Reference object
+  // Priority 2: User-placed pedicle dots. Best non-LiDAR source when the user
+  // physically measured their own pedicle spacing (0.85); falls back to the
+  // average 3.8" prior (0.68) when no measurement was supplied. §8 slots 4–5.
+  if (pedicleCalibrations && pedicleCalibrations.length > 0) {
+    const pedicleResult = resolvePedicleDots(pedicleCalibrations)
+    if (pedicleResult) return pedicleResult
+  }
+
+  // Priority 3: Reference object
   if (
     referenceObject &&
     referenceObject.type !== 'none' &&
@@ -123,6 +159,101 @@ export function resolveCalibration(
 
   // Priority 4: Anatomical priors from landmarks (legacy fallback)
   return resolveAnatomicalPrior(landmarks)
+}
+
+/**
+ * Compute calibration from user-dragged pedicle dots.
+ * Each input contributes one (px/in) estimate; we fuse with median + ±25%
+ * outlier rejection across images. A measured spacing earns 0.85 confidence;
+ * the population average earns 0.68. Mixed inputs are treated as "known" only
+ * if every contributing image agreed on the same knownInches value (rare).
+ */
+function resolvePedicleDots(
+  inputs: PedicleCalibrationInput[],
+): CalibrationResult | null {
+  const warnings: string[] = []
+
+  const estimates: Array<{
+    ppi: number
+    isKnown: boolean
+    knownInches: number | null
+  }> = []
+
+  for (const inp of inputs) {
+    if (
+      !isFiniteNumber(inp.leftPx) || !isFiniteNumber(inp.leftPy) ||
+      !isFiniteNumber(inp.rightPx) || !isFiniteNumber(inp.rightPy)
+    ) continue
+
+    const dx = inp.rightPx - inp.leftPx
+    const dy = inp.rightPy - inp.leftPy
+    const pixelDist = Math.sqrt(dx * dx + dy * dy)
+    if (!isFiniteNumber(pixelDist) || pixelDist <= 5) continue // 5 px sanity floor
+
+    let knownInches: number | null = null
+    if (inp.knownInches != null && isFiniteNumber(inp.knownInches)) {
+      if (inp.knownInches < PEDICLE_KNOWN_INCHES_MIN || inp.knownInches > PEDICLE_KNOWN_INCHES_MAX) {
+        warnings.push(`Pedicle spacing ${inp.knownInches.toFixed(1)}" outside ${PEDICLE_KNOWN_INCHES_MIN}-${PEDICLE_KNOWN_INCHES_MAX}" band; using anatomical average`)
+      } else {
+        knownInches = inp.knownInches
+      }
+    }
+
+    const referenceInches = knownInches ?? DEFAULT_PEDICLE_SPACING_INCHES
+    const ppi = pixelDist / referenceInches
+    if (!isFiniteNumber(ppi) || ppi <= 0) continue
+
+    estimates.push({ ppi, isKnown: knownInches != null, knownInches })
+  }
+
+  if (estimates.length === 0) return null
+
+  // Outlier rejection across multiple images (each one a separate observation).
+  const sorted = [...estimates].map(e => e.ppi).sort((a, b) => a - b)
+  const med = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[Math.floor(sorted.length / 2)]
+
+  const survivors = estimates.filter(e =>
+    med > 0 ? Math.abs(e.ppi - med) / med <= 0.25 : true,
+  )
+
+  if (survivors.length === 0) return null
+
+  // Survivors mean (every observation already in the same px/in scale).
+  const fusedPpi = survivors.reduce((s, e) => s + e.ppi, 0) / survivors.length
+
+  // Source classification: "known" only when every surviving observation
+  // came with a known measurement. Mixing known + anatomical-default is
+  // demoted to anatomical so we never over-claim.
+  const allKnown = survivors.every(e => e.isKnown)
+  const source: CalibrationSourceTag = allKnown ? 'user_placed_known' : 'user_placed_anatomical'
+  const confidence = allKnown ? 0.85 : 0.68
+
+  const rejected = estimates.length - survivors.length
+  if (rejected > 0) {
+    warnings.push(`Rejected ${rejected} pedicle outlier${rejected === 1 ? '' : 's'} vs median`)
+  }
+
+  // Tight agreement across multiple images reinforces; loose agreement penalizes
+  // confidence slightly (still better than the priors above).
+  if (survivors.length >= 2) {
+    const ppis = survivors.map(e => e.ppi)
+    const spread = (Math.max(...ppis) - Math.min(...ppis)) / Math.max(...ppis)
+    if (spread > 0.12) {
+      warnings.push('Pedicle dot placements disagree across images by >12%')
+    }
+  }
+
+  return {
+    pixelsPerInch: fusedPpi,
+    source,
+    confidence,
+    method: allKnown
+      ? `user-placed dots, measured spacing (${survivors.length} image${survivors.length === 1 ? '' : 's'})`
+      : `user-placed dots, anatomical default (${survivors.length} image${survivors.length === 1 ? '' : 's'})`,
+    warnings,
+  }
 }
 
 function resolveAnatomicalPrior(landmarks: LandmarkDetection[]): CalibrationResult | null {

@@ -16,6 +16,7 @@ import {
   getBuckImages,
   updateBuckImageLandmarks,
   updatePredictionPerImageConsensus,
+  updatePredictionPedicleCalibration,
 } from '@/lib/storage/service'
 import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
 import type { CropRegion } from '@/components/scoring/antler-crop-box'
@@ -57,7 +58,7 @@ import { computeDepthCalibration, type DepthCalibrationResult } from '@/lib/cali
 import { detectLandmarkPositions, detectLandmarkPositionsPerImage } from '@/lib/scoring/vision-scorer'
 import { computePerImageConsensus } from '@/lib/scoring/per-image-consensus'
 import type { LandmarkDetectionResult, PerImageLandmarkResult } from '@/lib/scoring/landmark-detection'
-import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
+import { resolveCalibration, type PedicleCalibrationInput } from '@/lib/scoring/calibration-resolver'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'
 import type { PreScoringMeasurements } from '@/lib/types'
@@ -155,6 +156,16 @@ export async function POST(request: Request) {
       referenceObject = JSON.parse(referenceObjectRaw)
     } catch {
       // ignore parse errors — ring reference is optional
+    }
+  }
+  const pedicleCalibrationRaw = formData.get('pedicle_calibration') as string | null
+  let pedicleCalibration: PedicleCalibrationInput[] | null = null
+  if (pedicleCalibrationRaw) {
+    try {
+      const parsed = JSON.parse(pedicleCalibrationRaw)
+      if (Array.isArray(parsed)) pedicleCalibration = parsed as PedicleCalibrationInput[]
+    } catch {
+      // ignore parse errors — pedicle calibration is optional
     }
   }
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
@@ -963,7 +974,26 @@ export async function POST(request: Request) {
           console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
         }
 
-        const calibration = resolveCalibration(allLandmarks, depthCalibration, null, perImageLandmarks)
+        const calibration = resolveCalibration(allLandmarks, depthCalibration, null, perImageLandmarks, pedicleCalibration)
+
+        // Persist pedicle calibration metadata for the learning flywheel,
+        // including which source the resolver actually selected (so future
+        // bias analysis can correlate user-known-spacing vs anatomical-default
+        // dots against final score error). Best-effort.
+        if (pedicleCalibration && pedicleCalibration.length > 0) {
+          try {
+            await updatePredictionPedicleCalibration(prediction.id, {
+              inputs: pedicleCalibration,
+              resolvedSource: calibration?.source ?? null,
+              resolvedConfidence: calibration?.confidence ?? null,
+              resolvedPpi: calibration?.pixelsPerInch ?? null,
+              resolvedAt: new Date().toISOString(),
+            })
+          } catch (pedErr) {
+            console.warn('[score] pedicle calibration persistence failed (non-blocking):', pedErr)
+          }
+        }
+
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             allLandmarks,
