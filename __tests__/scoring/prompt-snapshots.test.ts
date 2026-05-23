@@ -89,7 +89,10 @@ describe('buildLandmarkDetectionPrompt', () => {
 
   it('stays compact', () => {
     expect(prompt.length).toBeGreaterThan(1500)
-    expect(prompt.length).toBeLessThan(4000)
+    // Bumped 4000 → 4500 in §3.27 to accommodate the optional
+    // vanishing-point parallel-line section. Still well under the original
+    // 6000+ baseline of the legacy verbose prompt.
+    expect(prompt.length).toBeLessThan(4500)
   })
 })
 

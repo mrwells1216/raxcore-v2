@@ -1259,6 +1259,12 @@ const LandmarkPointSchema = z.object({
   sourceAngle: z.enum(['front', 'left', 'right', 'unknown']),
 })
 
+const ParallelLinePairSchema = z.object({
+  label: z.string().optional(),
+  line1: z.array(z.object({ x: z.number(), y: z.number() })).length(2),
+  line2: z.array(z.object({ x: z.number(), y: z.number() })).length(2),
+})
+
 const LandmarkDetectionSchema = z.object({
   imageWidth: z.number(),
   imageHeight: z.number(),
@@ -1267,6 +1273,9 @@ const LandmarkDetectionSchema = z.object({
   // model responses without these fields still parse cleanly.
   eyeCircleLeftRadiusPx: z.number().positive().nullable().optional(),
   eyeCircleRightRadiusPx: z.number().positive().nullable().optional(),
+  // Optional vanishing-point cross-check (§4.7). Two background line pairs
+  // the model believes are parallel in 3D. Always optional — absent ⇒ skip.
+  parallelLinePairs: z.array(ParallelLinePairSchema).max(2).optional(),
 })
 
 const LANDMARK_IDS: AntlerLandmarkId[] = [
@@ -1373,6 +1382,18 @@ async function detectLandmarksForOneImage(args: {
         }
       : undefined
 
+    const parallelLinePairs = object.parallelLinePairs
+      ? object.parallelLinePairs.map((p) => ({
+          label: p.label,
+          line1: [p.line1[0], p.line1[1]] as [
+            { x: number; y: number }, { x: number; y: number },
+          ],
+          line2: [p.line2[0], p.line2[1]] as [
+            { x: number; y: number }, { x: number; y: number },
+          ],
+        }))
+      : undefined
+
     return {
       imageIndex,
       imageUrl,
@@ -1385,6 +1406,7 @@ async function detectLandmarksForOneImage(args: {
       locatedCount,
       requestedCount: LANDMARK_IDS.length,
       eyeCircles,
+      parallelLinePairs,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'

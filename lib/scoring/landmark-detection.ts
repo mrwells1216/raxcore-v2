@@ -65,6 +65,13 @@ export interface EyeCircleObservation {
   rightRadiusPx: number | null
 }
 
+/** Background parallel-line pair (vanishing-point cross-check, §4.7). */
+export interface ParallelLinePairObservation {
+  label?: string
+  line1: [{ x: number; y: number }, { x: number; y: number }]
+  line2: [{ x: number; y: number }, { x: number; y: number }]
+}
+
 /**
  * Result of running landmark detection on a single image.
  * Used by detectLandmarkPositionsPerImage to keep per-image observations
@@ -84,6 +91,9 @@ export interface PerImageLandmarkResult {
   /** Iris radii observed by the same per-image call. Eye-circle calibration
    * (§4.3) uses this alongside the canonical IRIS_RADIUS constant. */
   eyeCircles?: EyeCircleObservation
+  /** Optional background parallel-line pairs (§4.7) for vanishing-point
+   *  perspective cross-check. Absent ⇒ no VP analysis on this image. */
+  parallelLinePairs?: ParallelLinePairObservation[]
   /** When the per-image call failed but the run continued. */
   failed?: boolean
   /** Free-text reason when failed === true. */

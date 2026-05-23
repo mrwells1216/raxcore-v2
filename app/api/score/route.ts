@@ -58,7 +58,11 @@ import { computeDepthCalibration, type DepthCalibrationResult } from '@/lib/cali
 import { detectLandmarkPositions, detectLandmarkPositionsPerImage } from '@/lib/scoring/vision-scorer'
 import { computePerImageConsensus } from '@/lib/scoring/per-image-consensus'
 import type { LandmarkDetectionResult, PerImageLandmarkResult } from '@/lib/scoring/landmark-detection'
-import { resolveCalibration, type PedicleCalibrationInput } from '@/lib/scoring/calibration-resolver'
+import {
+  resolveCalibration,
+  computeVanishingPointWarnings,
+  type PedicleCalibrationInput,
+} from '@/lib/scoring/calibration-resolver'
 import { detectArucoMarkersPerImage } from '@/lib/calibration/aruco-detector'
 import { ARUCO_SIDE_MIN_INCHES, ARUCO_SIDE_MAX_INCHES } from '@/lib/scoring/aruco-types'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
@@ -1020,6 +1024,15 @@ export async function POST(request: Request) {
             })
           } catch (pedErr) {
             console.warn('[score] pedicle calibration persistence failed (non-blocking):', pedErr)
+          }
+        }
+
+        // §4.7 Vanishing-point cross-check. Appends warnings to the resolved
+        // calibration so the UI can surface them. Never overrides the primary.
+        if (calibration) {
+          const vpWarnings = computeVanishingPointWarnings(perImageLandmarks, calibration)
+          if (vpWarnings.length > 0) {
+            calibration.warnings = [...calibration.warnings, ...vpWarnings]
           }
         }
 

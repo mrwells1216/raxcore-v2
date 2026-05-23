@@ -9,6 +9,11 @@ import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
 import { eyeCircleToPixelsPerInch } from './landmark-geometry'
 import type { ArucoDetection } from './aruco-types'
+import {
+  analyzeVanishingPoint,
+  comparePerspectiveTilt,
+} from './vanishing-point-geometry'
+import type { ParallelLinePair } from './vanishing-point-types'
 
 /**
  * Calibration source values. Aligns with §8 of CLAUDE.md.
@@ -19,10 +24,11 @@ import type { ArucoDetection } from './aruco-types'
  * - `reference_object`: priority 9–10 (ring/hat/ruler — never primary)
  * - `eye_circle_anatomical`: priority 6–7 (whitetail iris diameter)
  * - `anatomical_prior`: priority 8 (eye-to-eye, pedicle spacing, etc.)
+ * - `vanishing_point`: priority 11 (cross-check only, surfaces perspective warning)
  *
- * §4.7 adds `vanishing_point` in a later order. Each source must NOT report
- * `physical_reference` — that's reserved for user ruler/tape (the only source
- * that unlocks Verified Score per `lib/advanced-scoring/cross-validation.ts`).
+ * Each source must NOT report `physical_reference` — that's reserved for user
+ * ruler/tape (the only source that unlocks Verified Score per
+ * `lib/advanced-scoring/cross-validation.ts`).
  */
 export type CalibrationSourceTag =
   | 'depth_map_lidar'
@@ -32,6 +38,7 @@ export type CalibrationSourceTag =
   | 'reference_object'
   | 'eye_circle_anatomical'
   | 'anatomical_prior'
+  | 'vanishing_point'
 
 /**
  * Per-image pedicle dot placement from the user. Pixel coords are in the
@@ -176,6 +183,62 @@ export function resolveCalibration(
 
   // Priority 4: Anatomical priors from landmarks (legacy fallback)
   return resolveAnatomicalPrior(landmarks)
+}
+
+/**
+ * Vanishing-point cross-check. Pulls parallel-line pairs from the per-image
+ * landmark results (when the model reported any), runs the geometry analysis,
+ * and compares against the primary resolved tilt. Returns the appended
+ * warnings — caller decides where to surface them.
+ *
+ * Per CLAUDE.md §4.7, VP NEVER overrides the primary calibration. It only
+ * surfaces a warning when the implied perspective disagrees by >35% (warn)
+ * or >50% (critical). Returns an empty array when no parallel-line pairs were
+ * supplied or the math degenerated.
+ */
+export function computeVanishingPointWarnings(
+  perImageLandmarks: PerImageLandmarkResult[] | undefined,
+  primary: CalibrationResult | null,
+): string[] {
+  if (!perImageLandmarks || perImageLandmarks.length === 0) return []
+  if (!primary) return []
+
+  const warnings: string[] = []
+  for (const image of perImageLandmarks) {
+    if (image.failed) continue
+    const pairs = image.parallelLinePairs
+    if (!pairs || pairs.length === 0) continue
+
+    const vpPairs: ParallelLinePair[] = pairs.map(p => ({
+      label: p.label,
+      line1: [{ x: p.line1[0].x, y: p.line1[0].y }, { x: p.line1[1].x, y: p.line1[1].y }],
+      line2: [{ x: p.line2[0].x, y: p.line2[0].y }, { x: p.line2[1].x, y: p.line2[1].y }],
+    }))
+
+    const result = analyzeVanishingPoint(vpPairs, image.imageWidth || 0, image.imageHeight || 0)
+    // Translate the primary's expected perspective into a tilt-degrees proxy.
+    // LiDAR and reference_object assume orthogonal (0°); ArUco encodes its
+    // own cosTilt; anatomical/eye_circle/user-placed all assume close-to-
+    // orthogonal so we use the image angleType as a rough guide.
+    const primaryTilt = inferPrimaryTilt(primary, image.angleType)
+    const disagreement = comparePerspectiveTilt(result, primaryTilt)
+    if (disagreement) {
+      warnings.push(`Image ${image.imageIndex}: ${disagreement.message}`)
+    }
+  }
+  return warnings
+}
+
+function inferPrimaryTilt(
+  primary: CalibrationResult,
+  angleType: 'front' | 'left' | 'right' | 'unknown',
+): number {
+  // Assume orthogonal-or-close for these primary sources; the angleType
+  // anchor adjusts when the photo is a side profile.
+  if (primary.source === 'depth_map_lidar') return 0
+  if (primary.source === 'aruco_marker') return 0 // ArUco's cosTilt is already baked into its confidence
+  if (angleType === 'left' || angleType === 'right') return 25
+  return 5
 }
 
 /**

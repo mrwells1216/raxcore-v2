@@ -140,6 +140,43 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.27. Vanishing-point cross-check ✓ (§4.7)
+Sixth entry in the §4 close-out campaign. NOT a primary calibration source —
+standalone confidence would only be 0.30–0.55 and the algorithm's
+absolute-degree estimates are biased without a known camera focal length.
+Per CLAUDE.md §4.7, its job is to **disagree loudly** with the primary
+calibration when perspective tilt is severe. New
+`lib/scoring/vanishing-point-types.ts` defines `ParallelLinePair`,
+`VanishingPointResult`, `PerspectiveDisagreement`, and the warn/crit
+thresholds (35% / 50% of a 30° reference scale). New
+`lib/scoring/vanishing-point-geometry.ts` is pure math: `lineIntersection`,
+`analyzeVanishingPoint` (multi-pair fusion via median), `comparePerspectiveTilt`
+(diff against an inferred primary tilt). New `vanishing_point`
+`CalibrationSourceTag` value added to the resolver's union — reserved for
+future use when a known-length object is supplied along one of the line
+pairs. For now the public surface is `computeVanishingPointWarnings()`,
+called by `app/api/score/route.ts` after the primary `resolveCalibration`
+returns; appends any disagreement messages to `calibration.warnings` (never
+overrides the primary). Landmark prompt extended with an optional
+`parallelLinePairs` schema field (≤2 pairs) for fence rails / truck bed /
+barn boards; model is explicitly told to omit when no clear pair is
+visible, never invent. Prompt length budget bumped 4000 → 4500 chars to
+accommodate the new section (still well under the original verbose
+baseline). Per-image landmark result now carries the optional
+`parallelLinePairs` field; vision-scorer maps the Zod schema into
+`PerImageLandmarkResult.parallelLinePairs`. Verified Score gates unchanged
+— vanishing-point is explicitly NOT `physical_reference`. Tests: 16 new
+specs in `__tests__/scoring/vanishing-point.test.ts` cover line
+intersection (parallel/non-finite/diagonal), VP analysis (empty/parallel/
+centered/edge/multi-pair fusion), and perspective-tilt comparison
+(no-pairs/agree/warn/critical/non-finite). Files: new
+`lib/scoring/vanishing-point-types.ts`, new
+`lib/scoring/vanishing-point-geometry.ts`, new
+`__tests__/scoring/vanishing-point.test.ts`; modified
+`lib/scoring/landmark-prompt.ts`, `lib/scoring/landmark-detection.ts`,
+`lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
+`app/api/score/route.ts`, `__tests__/scoring/prompt-snapshots.test.ts`.
+
 ### 3.26. Sub-pixel point refinement wiring ✓ (§4.6)
 Fifth entry in the §4 close-out campaign. The math has been in
 `lib/scoring/subpixel-refine.ts` (Sobel + Gaussian-2D / parabolic-fallback
