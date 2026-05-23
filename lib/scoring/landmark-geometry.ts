@@ -1,5 +1,178 @@
 import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
-import type { LandmarkDetection, AntlerLandmarkId } from './landmark-detection'
+import { ANATOMICAL_REFERENCES } from '@/lib/constants'
+import type {
+  LandmarkDetection,
+  AntlerLandmarkId,
+  EyeCircleObservation,
+  PerImageLandmarkResult,
+} from './landmark-detection'
+
+/**
+ * Eye-circle anatomical calibration result. See §4.3 of CLAUDE.md.
+ *
+ * Returned by `eyeCircleToPixelsPerInch` when at least one usable iris
+ * observation exists across the per-image detection results. Confidence
+ * follows the §8 hierarchy:
+ *   - Both eyes agreeing in the same image (front view): up to 0.72
+ *   - Single eye, front view: 0.55–0.65
+ *   - Single eye, side view: 0.50 (foreshortened iris)
+ *   - Cross-image fusion penalties applied via median+MAD.
+ */
+export interface EyeCirclePpiResult {
+  pixelsPerInch: number
+  confidence: number
+  /** Number of per-image iris observations that survived outlier rejection. */
+  contributingObservations: number
+  /** Brief human-readable explanation for the UI / debug logs. */
+  method: string
+  warnings: string[]
+}
+
+/**
+ * Compute the calibration pixels-per-inch implied by iris radius observations.
+ *
+ * Per CLAUDE.md §8, this lives at slot 6–7 in the calibration hierarchy
+ * (0.50–0.72). It NEVER unlocks Verified Score — it's an anatomical_prior
+ * cousin, just with much tighter physiology than skull-spacing priors.
+ *
+ * Inputs are the per-image landmark results from
+ * `detectLandmarkPositionsPerImage`. We fuse with the same median + relative
+ * deviation outlier rejection pattern used by `calibration-resolver.ts` so a
+ * single bad iris (squinting deer, motion blur) can't drag the consensus.
+ *
+ * Returns null when no per-image result reported an iris radius.
+ */
+export function eyeCircleToPixelsPerInch(
+  perImage: PerImageLandmarkResult[],
+): EyeCirclePpiResult | null {
+  const observations: Array<{
+    ppi: number
+    weight: number
+    angle: 'front' | 'left' | 'right' | 'unknown'
+    side: 'left' | 'right'
+  }> = []
+
+  const irisInches = ANATOMICAL_REFERENCES.IRIS_RADIUS
+
+  for (const image of perImage) {
+    if (image.failed) continue
+    const ec: EyeCircleObservation | undefined = image.eyeCircles
+    if (!ec) continue
+
+    const angle = image.angleType
+
+    // Front view irises read cleanly; profiles foreshorten the iris circle
+    // into an ellipse so a circular radius read is biased downward.
+    const angleWeight =
+      angle === 'front' ? 1.0 :
+      angle === 'left' || angle === 'right' ? 0.55 :
+      0.7
+
+    const consider = (radiusPx: number | null, side: 'left' | 'right') => {
+      if (!isFiniteNumber(radiusPx) || (radiusPx as number) <= 0) return
+      const ppi = (radiusPx as number) / irisInches
+      if (!isFiniteNumber(ppi) || ppi <= 0) return
+      observations.push({ ppi, weight: angleWeight, angle, side })
+    }
+
+    consider(ec.leftRadiusPx, 'left')
+    consider(ec.rightRadiusPx, 'right')
+  }
+
+  if (observations.length === 0) return null
+
+  const warnings: string[] = []
+
+  // Single observation: nothing to cross-check; cap confidence per §8 row 7.
+  if (observations.length === 1) {
+    const only = observations[0]
+    const baseConfidence =
+      only.angle === 'front' ? 0.62 :
+      only.angle === 'unknown' ? 0.55 :
+      0.50
+    return {
+      pixelsPerInch: only.ppi,
+      confidence: baseConfidence,
+      contributingObservations: 1,
+      method: `eye-circle (${only.side} iris, ${only.angle})`,
+      warnings: ['Single iris observation — no cross-check'],
+    }
+  }
+
+  // Multi-observation: median + ±25% relative-deviation outlier rejection.
+  const sorted = [...observations].map(o => o.ppi).sort((a, b) => a - b)
+  const med = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[Math.floor(sorted.length / 2)]
+
+  const survivors = observations.filter(o =>
+    med > 0 ? Math.abs(o.ppi - med) / med <= 0.25 : true,
+  )
+
+  if (survivors.length === 0) {
+    // Degenerate case: pick the highest-weight observation as fallback.
+    const best = [...observations].sort((a, b) => b.weight - a.weight)[0]
+    warnings.push('Iris observations disagreed by >25%; using highest-weight reading')
+    return {
+      pixelsPerInch: best.ppi,
+      confidence: 0.45,
+      contributingObservations: 1,
+      method: `eye-circle (fallback, ${best.angle})`,
+      warnings,
+    }
+  }
+
+  const rejected = observations.length - survivors.length
+  if (rejected > 0) {
+    warnings.push(`Rejected ${rejected} iris outlier${rejected === 1 ? '' : 's'} vs median`)
+  }
+
+  const totalWeight = survivors.reduce((s, o) => s + o.weight, 0)
+  const fusedPpi = totalWeight > 0
+    ? survivors.reduce((s, o) => s + o.ppi * o.weight, 0) / totalWeight
+    : med
+
+  // Both eyes agree on one front-view image is the gold case → 0.72 ceiling.
+  // Multiple front observations from different images is similar; side-only
+  // even with agreement is capped lower because all are foreshortened.
+  const hasFront = survivors.some(o => o.angle === 'front')
+  const hasBothEyesSameImage = (() => {
+    const byImage = new Map<string, Set<'left' | 'right'>>()
+    for (const o of survivors) {
+      const key = `${o.angle}`
+      const cur = byImage.get(key) ?? new Set<'left' | 'right'>()
+      cur.add(o.side)
+      byImage.set(key, cur)
+    }
+    return [...byImage.values()].some(s => s.has('left') && s.has('right'))
+  })()
+
+  let confidence: number
+  if (hasFront && hasBothEyesSameImage) {
+    confidence = 0.72
+  } else if (hasFront) {
+    confidence = 0.66
+  } else if (hasBothEyesSameImage) {
+    confidence = 0.60
+  } else {
+    confidence = 0.55
+  }
+
+  // Tighten further when survivors are within 8% of each other (high agreement).
+  const ppis = survivors.map(o => o.ppi)
+  const spread = (Math.max(...ppis) - Math.min(...ppis)) / Math.max(...ppis)
+  if (spread > 0 && spread < 0.08 && survivors.length >= 2) {
+    confidence = Math.min(0.78, confidence + 0.04)
+  }
+
+  return {
+    pixelsPerInch: fusedPpi,
+    confidence,
+    contributingObservations: survivors.length,
+    method: `eye-circle (${survivors.length} iris reading${survivors.length === 1 ? '' : 's'})`,
+    warnings,
+  }
+}
 
 export interface LandmarkMeasurement {
   fieldKey: string

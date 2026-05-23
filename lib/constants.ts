@@ -174,6 +174,12 @@ export const ANATOMICAL_REFERENCES = {
   // on a true front-facing photo as a cross-check, never as primary calibration.
   NOSE_BRIDGE_LENGTH: 2.8,     // FRONT-PROJECTED bridge length (not true 3D)
   MUZZLE_WIDTH: 2.6,           // muzzle width at widest point (front view)
+
+  // ── Iris/eye-circle (apparent radius head-on, used by eye-circle calibration)
+  // Whitetail iris diameter is ~1.05–1.15" in adult bucks; we use a 0.55"
+  // apparent radius for front-on photos. The visible iris foreshortens on
+  // strong side profiles so confidence drops away from front view.
+  IRIS_RADIUS: 0.55,
 } as const
 
 export const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const

@@ -25,6 +25,7 @@ import {
   type ApproximateLearningScoreMetadata,
 } from '@/lib/review/types'
 import { PrecisionPassCard } from './precision-pass-card'
+import { CircumferenceTaperCard } from './circumference-taper-card'
 import { StructuralHypothesisCard } from './structural-hypothesis-card'
 import { AbnormalPointsDisplay } from './abnormal-points-display'
 import { BCScoreSheet } from './bc-score-sheet'
@@ -1225,6 +1226,14 @@ export function ScoringResults({ result, formData, onReset }: ScoringResultsProp
         abnormalPointTags={formData.abnormal_point_tags}
         variant="card"
       />
+
+      {/* §4.5 Circumference taper refinement */}
+      {normalized.predictionId && (
+        <CircumferenceTaperCard
+          predictionId={normalized.predictionId}
+          onRefined={() => { window.location.reload() }}
+        />
+      )}
 
       {/* Precision Pass - Phase 50 */}
       {normalized.predictionId && (

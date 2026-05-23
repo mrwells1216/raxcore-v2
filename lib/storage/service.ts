@@ -447,6 +447,29 @@ export async function updatePredictionPerImageConsensus(
 }
 
 /**
+ * Persist pedicle calibration metadata onto the prediction row. Used by
+ * the §4.4 user-placed pedicle dots flow; safe to call with empty array
+ * (writes [] so the learning flywheel can distinguish "no input" from "user
+ * declined" later if needed).
+ */
+export async function updatePredictionPedicleCalibration(
+  predictionId: string,
+  payload: unknown,
+): Promise<void> {
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('predictions')
+    .update({ pedicle_calibration_metadata: payload })
+    .eq('id', predictionId)
+  if (error) {
+    console.warn('[updatePredictionPedicleCalibration] update failed (non-blocking):', {
+      predictionId,
+      error: error.message,
+    })
+  }
+}
+
+/**
  * Persist per-image landmark detections into buck_images.landmarks_detected.
  * Best-effort: logs a warning and continues if a row fails to update so the
  * scoring response is never blocked by storage hiccups.

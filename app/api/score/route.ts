@@ -16,6 +16,7 @@ import {
   getBuckImages,
   updateBuckImageLandmarks,
   updatePredictionPerImageConsensus,
+  updatePredictionPedicleCalibration,
 } from '@/lib/storage/service'
 import { cropImageToRegion, type CropResult } from '@/lib/scoring/crop-image'
 import type { CropRegion } from '@/components/scoring/antler-crop-box'
@@ -57,7 +58,13 @@ import { computeDepthCalibration, type DepthCalibrationResult } from '@/lib/cali
 import { detectLandmarkPositions, detectLandmarkPositionsPerImage } from '@/lib/scoring/vision-scorer'
 import { computePerImageConsensus } from '@/lib/scoring/per-image-consensus'
 import type { LandmarkDetectionResult, PerImageLandmarkResult } from '@/lib/scoring/landmark-detection'
-import { resolveCalibration } from '@/lib/scoring/calibration-resolver'
+import {
+  resolveCalibration,
+  computeVanishingPointWarnings,
+  type PedicleCalibrationInput,
+} from '@/lib/scoring/calibration-resolver'
+import { detectArucoMarkersPerImage } from '@/lib/calibration/aruco-detector'
+import { ARUCO_SIDE_MIN_INCHES, ARUCO_SIDE_MAX_INCHES } from '@/lib/scoring/aruco-types'
 import { computeMeasurementsFromLandmarks, type LandmarkScoreResult } from '@/lib/scoring/landmark-geometry'
 import { createClient as createSupabaseServerClient } from '@/lib/supabase/server'
 import type { PreScoringMeasurements } from '@/lib/types'
@@ -155,6 +162,16 @@ export async function POST(request: Request) {
       referenceObject = JSON.parse(referenceObjectRaw)
     } catch {
       // ignore parse errors — ring reference is optional
+    }
+  }
+  const pedicleCalibrationRaw = formData.get('pedicle_calibration') as string | null
+  let pedicleCalibration: PedicleCalibrationInput[] | null = null
+  if (pedicleCalibrationRaw) {
+    try {
+      const parsed = JSON.parse(pedicleCalibrationRaw)
+      if (Array.isArray(parsed)) pedicleCalibration = parsed as PedicleCalibrationInput[]
+    } catch {
+      // ignore parse errors — pedicle calibration is optional
     }
   }
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
@@ -930,7 +947,24 @@ export async function POST(request: Request) {
         return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
       }) as Array<'front' | 'left' | 'right' | 'unknown'>
 
-      perImageLandmarks = await detectLandmarkPositionsPerImage(storedImageUrls, angleTypes)
+      // Detect landmarks and ArUco markers in parallel. ArUco only runs when
+      // the user declared an ArUco marker is present AND supplied a sane side
+      // length — otherwise we skip the API call to keep cost flat for the
+      // 99% case that doesn't print markers.
+      const arucoEnabled =
+        referenceTypeRaw === 'aruco_marker' &&
+        referenceSizeValueRaw != null &&
+        Number(referenceSizeValueRaw) >= ARUCO_SIDE_MIN_INCHES &&
+        Number(referenceSizeValueRaw) <= ARUCO_SIDE_MAX_INCHES
+      const arucoSideInches = arucoEnabled ? Number(referenceSizeValueRaw) : null
+
+      const [landmarksResult, arucoDetections] = await Promise.all([
+        detectLandmarkPositionsPerImage(storedImageUrls, angleTypes),
+        arucoEnabled
+          ? detectArucoMarkersPerImage(storedImageUrls)
+          : Promise.resolve([]),
+      ])
+      perImageLandmarks = landmarksResult
       const usable = perImageLandmarks.filter((r) => !r.failed)
 
       if (usable.length > 0) {
@@ -963,7 +997,45 @@ export async function POST(request: Request) {
           console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
         }
 
-        const calibration = resolveCalibration(allLandmarks, depthCalibration, null)
+        const arucoResolverInput = arucoEnabled && arucoSideInches != null && arucoDetections.length > 0
+          ? { detections: arucoDetections, knownSideInches: arucoSideInches }
+          : null
+        const calibration = resolveCalibration(
+          allLandmarks,
+          depthCalibration,
+          null,
+          perImageLandmarks,
+          pedicleCalibration,
+          arucoResolverInput,
+        )
+
+        // Persist pedicle calibration metadata for the learning flywheel,
+        // including which source the resolver actually selected (so future
+        // bias analysis can correlate user-known-spacing vs anatomical-default
+        // dots against final score error). Best-effort.
+        if (pedicleCalibration && pedicleCalibration.length > 0) {
+          try {
+            await updatePredictionPedicleCalibration(prediction.id, {
+              inputs: pedicleCalibration,
+              resolvedSource: calibration?.source ?? null,
+              resolvedConfidence: calibration?.confidence ?? null,
+              resolvedPpi: calibration?.pixelsPerInch ?? null,
+              resolvedAt: new Date().toISOString(),
+            })
+          } catch (pedErr) {
+            console.warn('[score] pedicle calibration persistence failed (non-blocking):', pedErr)
+          }
+        }
+
+        // §4.7 Vanishing-point cross-check. Appends warnings to the resolved
+        // calibration so the UI can surface them. Never overrides the primary.
+        if (calibration) {
+          const vpWarnings = computeVanishingPointWarnings(perImageLandmarks, calibration)
+          if (vpWarnings.length > 0) {
+            calibration.warnings = [...calibration.warnings, ...vpWarnings]
+          }
+        }
+
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             allLandmarks,

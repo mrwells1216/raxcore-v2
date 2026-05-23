@@ -140,6 +140,227 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.29. Admin gold standard — confirmed shipped ✓ (§4.8)
+Final entry in the §4 close-out campaign. CLAUDE.md §4.8 was marked as
+PARTIAL ("basic JSON paste, full UI missing") but audit on 2026-05-23 found
+the entire workstream was already shipped: full B&C/P&Y field-by-field form
+with per-image type tagging (`components/admin/training-import-form.tsx`,
+455 lines), POST `/api/admin/training-import` to ingest sheets, GET
+`/admin/training-import/[id]` with the AI-vs-official comparison table
+(`components/admin/official-vs-ai-table.tsx`), POST
+`/api/admin/training-import/[id]/run-ai` (calls `scoreBuck` and stores
+deltas in `ai_run_result`), POST `/api/admin/training-import/[id]/promote`
+(sets `is_benchmark`, creates/adds-to a benchmark pack via
+`lib/training-packs/service.ts`). The pending sheet list and gold standard
+list are both rendered on the main admin page. Tables in use:
+`official_score_sheets` (with `is_benchmark`, `ai_run_result`,
+`promoted_at`, `promoted_by` columns), `official_score_images`, and the
+benchmark_pack infra under `training-packs/`. This entry exists only to
+reconcile CLAUDE.md with reality — no new code was added for §4.8. The
+remaining campaign closeout (this commit) updates §4 to mark the queue
+empty.
+
+### 3.28. Vanishing-point cross-check ✓ (§4.7)
+Sixth entry in the §4 close-out campaign. NOT a primary calibration source —
+standalone confidence would only be 0.30–0.55 and the algorithm's
+absolute-degree estimates are biased without a known camera focal length.
+Per CLAUDE.md §4.7, its job is to **disagree loudly** with the primary
+calibration when perspective tilt is severe. New
+`lib/scoring/vanishing-point-types.ts` defines `ParallelLinePair`,
+`VanishingPointResult`, `PerspectiveDisagreement`, and the warn/crit
+thresholds (35% / 50% of a 30° reference scale). New
+`lib/scoring/vanishing-point-geometry.ts` is pure math: `lineIntersection`,
+`analyzeVanishingPoint` (multi-pair fusion via median), `comparePerspectiveTilt`
+(diff against an inferred primary tilt). New `vanishing_point`
+`CalibrationSourceTag` value added to the resolver's union — reserved for
+future use when a known-length object is supplied along one of the line
+pairs. For now the public surface is `computeVanishingPointWarnings()`,
+called by `app/api/score/route.ts` after the primary `resolveCalibration`
+returns; appends any disagreement messages to `calibration.warnings` (never
+overrides the primary). Landmark prompt extended with an optional
+`parallelLinePairs` schema field (≤2 pairs) for fence rails / truck bed /
+barn boards; model is explicitly told to omit when no clear pair is
+visible, never invent. Prompt length budget bumped 4000 → 4500 chars to
+accommodate the new section (still well under the original verbose
+baseline). Per-image landmark result now carries the optional
+`parallelLinePairs` field; vision-scorer maps the Zod schema into
+`PerImageLandmarkResult.parallelLinePairs`. Verified Score gates unchanged
+— vanishing-point is explicitly NOT `physical_reference`. Tests: 16 new
+specs in `__tests__/scoring/vanishing-point.test.ts` cover line
+intersection (parallel/non-finite/diagonal), VP analysis (empty/parallel/
+centered/edge/multi-pair fusion), and perspective-tilt comparison
+(no-pairs/agree/warn/critical/non-finite). Files: new
+`lib/scoring/vanishing-point-types.ts`, new
+`lib/scoring/vanishing-point-geometry.ts`, new
+`__tests__/scoring/vanishing-point.test.ts`; modified
+`lib/scoring/landmark-prompt.ts`, `lib/scoring/landmark-detection.ts`,
+`lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
+`app/api/score/route.ts`, `__tests__/scoring/prompt-snapshots.test.ts`.
+
+### 3.27. Sub-pixel point refinement wiring ✓ (§4.6)
+Fifth entry in the §4 close-out campaign. The math has been in
+`lib/scoring/subpixel-refine.ts` (Sobel + Gaussian-2D / parabolic-fallback
+peak fit) and `lib/advanced-scoring/subpixel-refine.ts` (line-aware
+projection) with passing tests since §3 was built out; the Advanced Scoring
+photo canvas just wasn't calling it for individual measurement-point
+placement. Now wired: new POST route
+`app/api/measure/refine-point/route.ts` decodes the in-browser photo data
+URL via sharp, calls `refineSinglePoint`, and returns `{x, y, method,
+refinementConfidence, deltaPx}`. New helper `refineMeasurementPoint()` in
+`components/measure/photo-canvas.tsx` fires after each `addPoint2D` and uses
+the existing `movePoint2D` store action to snap the placed point to the
+gradient peak when (a) the user didn't already snap to an existing vertex,
+(b) `refinementConfidence ≥ 0.4`, (c) `method !== 'unchanged'`, and (d) the
+user hasn't already nudged that point manually (delta > 1px from raw =
+skip). The existing `refineCalibrationLine` flow (server endpoint
+`/api/measure/refine-reference`, store action
+`applyRefinedCalibrationPoints`) is untouched — this is additive for
+non-calibration points. Provenance: refined points end up in the same
+`measurements2D[fieldId].points` array as raw points, no separate flag is
+needed because the snap is sub-pixel; the existing `confidence` and
+`calibrationSource` on the field already encode trust correctly. NEVER
+unlocks Verified Score — Verified still requires the full
+`physical_reference` calibration path. Tests: 5 new specs in
+`__tests__/scoring/refine-point-flow.test.ts` cover flat-neighborhood
+unchanged, edge-of-image unchanged, NaN/Infinity input coercion to 0,
+synthetic strong-edge stays finite, and confidence band invariants. Files:
+new `app/api/measure/refine-point/route.ts`, new
+`__tests__/scoring/refine-point-flow.test.ts`; modified
+`components/measure/photo-canvas.tsx`.
+
+### 3.26. Circumference taper assist ✓ (§4.5)
+Fourth entry in the §4 close-out campaign. NOT a new calibration source — a
+post-score refinement that takes one tape-measured H1 (60 seconds with a soft
+tape) and derives H2/H3/H4 plus the opposite-side ladder via published
+whitetail taper ratios. Roughly halves circumference error, which today is the
+least-accurate B&C field class. New `lib/scoring/circumference-taper.ts`
+defines the constants (`TAPER_RATIOS.H2 = 0.94`, `H3 = 0.88`, `H4 = 0.84`),
+exposes `deriveCircumferences(measuredInches, side)` and a helper
+`applyTaperToMeasurements()` that splices the derived ladder into an existing
+Measurements record. Sanity band 1.0–8.0" enforced by both client and server
+(`CircumferenceTaperError`). New POST route
+`app/api/scoring/refine-circumference/route.ts` validates the body via Zod,
+loads the prediction, applies the taper, recomputes gross/net via the H-field
+delta only (other fields untouched), and persists. Persistence reuses the
+existing `user_measurements_metadata` JSONB column on `predictions` (added in
+§3.15) under a new `circumferenceTaper` subkey — no migration. New
+`components/scoring/circumference-taper-card.tsx` is the UI: collapsible
+under the Measurement Breakdown card, side selector, H1 input, live preview
+of the derived ladder, submit POSTs and reloads on success. Derived values
+are tagged `source: 'derived_taper'` per CLAUDE.md §5 (never call them
+"measured"); this NEVER unlocks Verified Score — only `physical_reference`
+via Advanced Scoring does. Tests: 9 new specs in
+`__tests__/scoring/circumference-taper.test.ts` cover taper math, opposite-
+side mirroring, provenance tagging, out-of-band rejection (low and high),
+NaN/Infinity guards, monotonically decreasing ladder, rounding, and the
+applyTaperToMeasurements field surgery. Files: new
+`lib/scoring/circumference-taper.ts`, new
+`app/api/scoring/refine-circumference/route.ts`, new
+`components/scoring/circumference-taper-card.tsx`, new
+`__tests__/scoring/circumference-taper.test.ts`; modified
+`components/scoring/scoring-results.tsx`.
+
+### 3.25. ArUco marker calibration ✓ (§4.2)
+Third entry in the §4 close-out campaign. Wires real GPT-4o detection behind
+the already-existing `reference_type: 'aruco_marker'` form value. User prints
+a free marker at arucogen.com, enters the side length (default 2"), and the
+detector returns four pixel corners. Per-image PPI is computed as
+`avgSidePx / knownSideInches`; multi-image fusion uses the same median ± 25%
+outlier rejection pattern as pedicle dots and eye-circle. New
+`aruco_marker` `CalibrationSourceTag` at slot 3 of §8 (between LiDAR and
+pedicle dots), confidence lerps 0.55 → 0.72 based on the worst cosTilt across
+surviving detections (cos θ ≤ 0.5 floors at 0.55, orthogonal markers hit
+0.72). knownSideInches clamped server-side to 0.5–12.0" sanity band. Verified
+Score gates unchanged — ArUco is explicitly NOT `physical_reference`.
+Detector implementation: `lib/calibration/aruco-detector.ts` calls GPT-4o
+with a surgical-precision prompt (`ARUCO_DETECTION_SYSTEM_PROMPT`) that
+demands four corners in strict clockwise order, validates convexity via
+cross-product signs, and rejects degenerate quadrilaterals before returning.
+Detector runs in parallel with per-image landmark detection in
+`app/api/score/route.ts` (one extra `Promise.all` task), and ONLY fires when
+the user explicitly selected `reference_type === 'aruco_marker'` and supplied
+a valid side length — keeps cost flat for the 99% of submissions that don't
+use markers. Persistence reuses the existing `landmarks_detected` JSONB on
+`buck_images` (no migration); resolver chosen ArUco source is recorded in
+`pedicle_calibration_metadata` already-introduced field for traceability
+when both are present. Tests: 12 new specs in
+`__tests__/scoring/aruco-detector.test.ts` cover invalid knownSideInches,
+empty detections, PPI math, confidence ceiling/floor, midpoint lerp,
+worst-cosTilt selection, outlier rejection, sanity-band clamp, zero/NaN
+guards, and prompt-style snapshot assertions. Files: new
+`lib/scoring/aruco-types.ts`, new `lib/calibration/aruco-detector.ts`, new
+`__tests__/scoring/aruco-detector.test.ts`; modified
+`lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`.
+
+### 3.24. AR pedicle calibration dots ✓ (§4.4)
+Second entry in the §4 close-out campaign; sequenced second by peak confidence
+(0.85 with user-supplied measurement — highest non-LiDAR/tape value in the §8
+hierarchy). User drags two amber dots onto each antler's burr base, optionally
+enters their measured pedicle spacing, and the resolver fuses across images
+with the standard median + ±25% outlier rejection. Two new
+`CalibrationSourceTag` values: `user_placed_known` (0.85, slot 4) when every
+surviving observation came with a known measurement, and
+`user_placed_anatomical` (0.68, slot 5) when any observation used the 3.8"
+whitetail population average. Mixing demotes to anatomical — never claims a
+known reading it can't substantiate. Pedicle dots are placed in priority 2 of
+the resolver (just below LiDAR, above reference object and eye-circle). User
+input is clamped server-side to a 2.0–8.0" sanity band; out-of-band inputs
+fall back to the anatomical default and warn. Verified Score gates unchanged
+— user_placed_* is explicitly NOT `physical_reference`. New
+`components/scoring/calibration-dots.tsx` is a vanilla-React drag overlay (no
+Konva dependency) with `ResizeObserver`-driven letterbox/pillarbox math
+borrowed from the §3.17 LandmarkOverlay fix so dots land on actual image
+pixels regardless of container aspect ratio. Wizard exposes an opt-in
+collapsible "Pedicle Calibration" card under the crop section that renders the
+overlay per uploaded image. Coordinates serialized as `pedicle_calibration` on
+the API FormData; parsed and threaded through to `resolveCalibration`'s new
+optional `pedicleCalibrations` arg. New JSONB column
+`pedicle_calibration_metadata` on `predictions` stores the raw inputs alongside
+the resolver's chosen source/confidence/PPI for learning-flywheel correlation.
+Tests: 10 new specs in `__tests__/scoring/pedicle-calibration.test.ts` cover
+empty/null inputs, sub-5px sanity floor, known vs anatomical confidence
+selection, out-of-band knownInches clamp, mixed-source demotion, ±25%
+outlier rejection across images, >12% disagreement warning, and NaN/Infinity
+input guards. Files: new `components/scoring/calibration-dots.tsx`, new
+`__tests__/scoring/pedicle-calibration.test.ts`, new migration
+`supabase/migrations/20260524_pedicle_calibration_metadata.sql`; modified
+`lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`,
+`components/scoring/scoring-wizard.tsx`, `lib/storage/service.ts`.
+
+### 3.23. Eye-circle anatomical calibration ✓ (§4.3)
+First entry in the §4 close-out campaign; sequenced first by calibration impact
+because it is zero-user-effort and shares the existing per-image landmark
+GPT-4o call (no new API spend). Adds a new `eye_circle_anatomical` source to
+the calibration resolver at §8 slot 6–7 (0.50–0.72), sitting above the legacy
+`anatomical_prior` path because iris diameter varies <10% between adult bucks
+versus ~20% for skull-spacing priors. The per-image landmark call now also
+asks the model to report `eyeCircleLeftRadiusPx` / `eyeCircleRightRadiusPx`
+alongside the existing landmark array; both are optional in the Zod schema so
+older responses still parse. New `eyeCircleToPixelsPerInch()` helper in
+`landmark-geometry.ts` fuses observations across images with the same median +
+±25% relative-deviation outlier rejection pattern as the legacy anatomical
+path; both-eyes-agree on a front view tops out at 0.72, single-eye side-view
+caps at 0.50. New `CalibrationSourceTag` union exported from
+`calibration-resolver.ts` (`'depth_map_lidar' | 'reference_object' |
+'eye_circle_anatomical' | 'anatomical_prior'`) replaces the inline union on
+`CalibrationResult.source`. `resolveCalibration` now takes an optional
+`perImageLandmarks` arg; absent ⇒ eye-circle slot is skipped and behavior is
+identical to before. Verified Score gates unchanged — eye-circle is explicitly
+NOT `physical_reference`. Cost stays flat (~$0.05/run) because radii ride
+along on the existing detection request. New `IRIS_RADIUS = 0.55` constant in
+`lib/constants.ts` (whitetail adult iris radius head-on, derived from
+1.05–1.15" diameter literature). Persistence reuses the existing
+`landmarks_detected` JSONB on `buck_images` — no migration. Tests: 9 new
+specs in `__tests__/scoring/eye-circle.test.ts` cover null/empty inputs,
+failed-image skips, single-eye front, both-eyes-agree gold case, side-view
+cap, outlier rejection, tight-agreement boost, zero/negative radii guards,
+and degenerate-fallback path. Prompt-snapshot ceiling held at <4000 chars
+after compacting the eye-circle prompt section. Files: modified
+`lib/constants.ts`, `lib/scoring/landmark-detection.ts`,
+`lib/scoring/landmark-prompt.ts`, `lib/scoring/landmark-geometry.ts`,
+`lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
+`app/api/score/route.ts`; new `__tests__/scoring/eye-circle.test.ts`.
+
 ### 3.22. UI polish + fresh-eyes fine-tune pass ✓
 Surgical UI-only cleanup across the recently-shipped surfaces (no scoring/calibration logic touched, no API contracts changed). (a) **Debug noise**: removed 8 leftover `console.log` calls from `scoring-results.tsx` (`extractPrecisionPassPayload`, `extractFieldProvenance`, the two precision-pass override effects) that were leaking to the production console; deleted the stale "Debug logging removed" comment. (b) **Landmark overlay layering**: the absolute canvas previously had no z-index/pointer-events isolation, so it swallowed clicks meant for the carousel arrows and Landmarks toggle. Wrapper is now `pointerEvents:none` + `zIndex:5`, only the canvas itself is `pointerEvents:auto` (drag-to-correct preserved), tooltip dropped to z-2, and the zone legend moved from bottom-right to top-left positioned via the existing letterbox `offsetX/offsetY` so it never overlaps the carousel dots row or the top-right toggle. (c) **Carousel** (`antler-image-carousel.tsx`): desktop prev/next arrows bumped to `z-10` (above the overlay canvas); pagination dots now sit inside a 24×24 tap target (`grid place-items-center w-6 h-6`) with the visible dot kept small, and `aria-current` added. (d) **Per-image consensus card**: fixed a broken `w-full` div nested in a flex row (the excluded-reason note now wraps onto its own line correctly), added `aria-expanded` to both collapsible triggers, added dark-mode variants to the agreement-tier badges / ear-pose warning / excluded-reason text (were light-only `bg-*-50` on a dark UI), tightened the ear-pose copy ("perked ear detected … Ear-tip distance excluded from consensus"), and renamed the `ReferenceRow` prop `ref`→`data` (avoids the React-reserved-word footgun). (e) **Trophy card**: confidence was encoded by color alone (a bare dot with a hover `title`) — added a visible tier label ("Very High"/"High"/"Medium"/"Low") and marked the dot `aria-hidden`. (f) **Trophy detail**: the `≠` asymmetry chip in the score-sheet now has a `title`/`aria-label` explaining it ("Left and right differ by X\""). (g) **Map** (`map-viewer.tsx`): pending-pin pulse rewritten from SMIL `<animate>` to a CSS `transform: scale` keyframe gated behind `@media (prefers-reduced-motion: reduce)`; the redundant "Confirm or cancel" hint is hidden while the confirmation panel is open; the panel now spans full width above the legend on mobile (`left-3 right-3`) and anchors bottom-right only at `sm:`+. Validation: `tsc --noEmit` clean, `pnpm lint` 0 errors (69 pre-existing warnings unchanged), `vitest` 51/51 pass, `pnpm build` succeeds. Files: `components/scoring/scoring-results.tsx`, `components/scoring/landmark-overlay.tsx`, `components/scoring/antler-image-carousel.tsx`, `components/scoring/per-image-consensus-card.tsx`, `components/trophy-room/trophy-card.tsx`, `components/trophy-room/trophy-detail-client.tsx`, `components/map/map-viewer.tsx`.
 
@@ -157,49 +378,17 @@ Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle
 
 ---
 
-## 4. What is NOT built yet (the pending plan queue)
+## 4. What is NOT built yet
 
-These are ordered by the MASTER_HANDOFF.md phases. Each has a dedicated plan file.
+The §4 close-out campaign (2026-05-23) shipped the entire backlog. All
+items previously listed here have either landed (§3.23–§3.28 in this
+document) or were already complete in the codebase (§3.29). The queue is
+empty.
 
-### 4.1. Antler crop box (CROP_BOX_PLAN.md) — HIGH PRIORITY
-User draws a rectangle around the antlers after upload. Server crops with 12% padding using `sharp`. Cropped version goes to OpenAI; original preserved for display. Gives AI 4–8× more detail. Coordinates stored in prediction metadata.
-- New: `components/scoring/antler-crop-box.tsx`, `lib/scoring/crop-image.ts`
-- Modified: `scoring-wizard.tsx`, `app/api/score/route.ts`
-
-### 4.2. ArUco marker full detection (ARUCO_MARKER_PLAN.md) — HIGH PRIORITY
-The `aruco_marker` option already exists in `reference_type`. This wires real GPT-4o detection behind it. User prints a free marker at arucogen.com, places it near the rack. Corner detection → exact pixelsPerInch. Confidence 0.55–0.72.
-- New: `lib/scoring/aruco-types.ts`, `lib/calibration/aruco-detector.ts`
-- Modified: `scoring-form.tsx`, `score/route.ts`, `calibration-resolver.ts`
-
-### 4.3. Eye circle calibration (EYE_CIRCLE_CALIBRATION_PLAN.md) — HIGH PRIORITY
-Upgrade landmark prompt to return eye iris radius in pixels. Deer iris diameter is a known anatomical reference (~0.55" apparent radius front-facing). Zero extra API calls — piggybacks on existing landmark detection. Both eyes agreeing boosts confidence.
-- Modified: `landmark-detection.ts`, `landmark-prompt.ts`, `landmark-geometry.ts`, `calibration-resolver.ts`
-- No new files required.
-
-### 4.4. AR calibration dots / pedicle drag (AR_CALIBRATION_DOTS_PLAN.md) — HIGH PRIORITY
-Two draggable amber dots overlaid on the photo. User drags them to each antler burr base. Pixel distance ÷ known pedicle spacing (avg 4.5") = pixelsPerInch. Optional: user enters measured spacing for higher confidence (0.85 vs 0.68).
-- New: `components/scoring/calibration-dots.tsx`
-- Modified: `scoring-wizard.tsx`, `score/route.ts`, `calibration-resolver.ts`
-
-### 4.5. Circumference taper assist (inline in MASTER_HANDOFF.md §9) — HIGH PRIORITY
-Post-score card asking for one physical circumference measurement (H1 left). Derives H2–H4 and right-side H1 via published whitetail taper ratios. Single 60-second user action cuts circumference error by ~50%.
-- New: `lib/scoring/circumference-taper.ts`, `/api/scoring/refine-circumference/route.ts`
-- Modified: `scoring-results.tsx`
-
-### 4.6. Sub-pixel edge refinement (SUBPIXEL_REFINEMENT_PLAN.md) — MEDIUM PRIORITY
-When user places a measurement point in Advanced Scoring photo canvas, refine to the nearest high-contrast edge via Sobel gradient + Gaussian fitting. 10× improvement in point placement precision. Zero new packages.
-- New: `lib/measure/subpixel-refine.ts`
-- Modified: `photo-canvas.tsx`, `measure-store.ts` (additive)
-
-### 4.7. Vanishing point perspective calibration (VANISHING_POINT_PLAN.md) — MEDIUM PRIORITY
-Piggybacks on the landmark detection prompt to ask for background parallel lines (fence rails, truck beds, barn boards). Computes vanishing point + tilt angle. Cross-validates other calibration sources. If disagreement >35% warns user.
-- New: `lib/scoring/vanishing-point-types.ts`, `lib/scoring/vanishing-point-geometry.ts`
-- Modified: `landmark-prompt.ts`, `calibration-resolver.ts`, `ai-service.ts`
-
-### 4.8. Admin gold standard — full build (AI_LEARNING_PLAN.md WI-3) — STRATEGIC PRIORITY
-The moat. Expand `app/admin/training-import` from free-form JSON paste to full B&C/P&Y field-by-field form with per-image type tagging, AI vs official comparison table, and "promote to benchmark pack" workflow.
-- Modified: `admin/training-import/page.tsx`, `api/admin/training-import/route.ts`
-- New: `components/admin/official-vs-ai-table.tsx`, `api/admin/training-import/[id]/run-ai/route.ts`, `api/admin/training-import/[id]/promote/route.ts`
+If new initiatives are scoped in the future, add them under this section
+with the same numbered structure (4.1, 4.2, …). For now, the next
+strategic frontier sits inside the existing flywheel (§3.7) rather than as
+a new feature workstream.
 
 ---
 
