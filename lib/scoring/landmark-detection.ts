@@ -54,6 +54,18 @@ export interface LandmarkDetectionResult {
 }
 
 /**
+ * Eye iris radii observed in a single image (in pixels). Used by the
+ * eye-circle anatomical calibration source. Either side may be null when the
+ * iris is partly occluded, only the pupil is visible, or the eye is closed.
+ */
+export interface EyeCircleObservation {
+  /** Pixel radius of the left-side iris when distinguishable, else null. */
+  leftRadiusPx: number | null
+  /** Pixel radius of the right-side iris when distinguishable, else null. */
+  rightRadiusPx: number | null
+}
+
+/**
  * Result of running landmark detection on a single image.
  * Used by detectLandmarkPositionsPerImage to keep per-image observations
  * unambiguous (no risk of the model mixing up which image is which).
@@ -69,6 +81,9 @@ export interface PerImageLandmarkResult {
   detectionTimestamp: string
   locatedCount: number
   requestedCount: number
+  /** Iris radii observed by the same per-image call. Eye-circle calibration
+   * (§4.3) uses this alongside the canonical IRIS_RADIUS constant. */
+  eyeCircles?: EyeCircleObservation
   /** When the per-image call failed but the run continued. */
   failed?: boolean
   /** Free-text reason when failed === true. */

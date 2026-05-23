@@ -963,7 +963,7 @@ export async function POST(request: Request) {
           console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
         }
 
-        const calibration = resolveCalibration(allLandmarks, depthCalibration, null)
+        const calibration = resolveCalibration(allLandmarks, depthCalibration, null, perImageLandmarks)
         if (calibration) {
           landmarkScoreResult = computeMeasurementsFromLandmarks(
             allLandmarks,

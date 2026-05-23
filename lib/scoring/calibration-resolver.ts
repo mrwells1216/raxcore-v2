@@ -1,16 +1,34 @@
 import 'server-only'
 import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
-import type { LandmarkDetection } from './landmark-detection'
+import type { LandmarkDetection, PerImageLandmarkResult } from './landmark-detection'
 import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration'
 // Use the canonical anatomical constants from lib/constants.ts. Keeping a local
 // copy here drifted out of sync with the per-image consensus engine and produced
 // different px/in values from the same pixel measurement (eye-to-eye was 4.3"
 // in the consensus engine but 3.5" here).
 import { ANATOMICAL_REFERENCES } from '@/lib/constants'
+import { eyeCircleToPixelsPerInch } from './landmark-geometry'
+
+/**
+ * Calibration source values. Aligns with §8 of CLAUDE.md.
+ * - `depth_map_lidar`: priority 2 (iPhone Pro LiDAR + EXIF)
+ * - `reference_object`: priority 9–10 (ring/hat/ruler — never primary)
+ * - `eye_circle_anatomical`: priority 6–7 (whitetail iris diameter)
+ * - `anatomical_prior`: priority 8 (eye-to-eye, pedicle spacing, etc.)
+ *
+ * §4.2, §4.4, §4.7 add more sources in later orders. Each one must NOT report
+ * `physical_reference` — that's reserved for user ruler/tape (the only source
+ * that unlocks Verified Score per `lib/advanced-scoring/cross-validation.ts`).
+ */
+export type CalibrationSourceTag =
+  | 'depth_map_lidar'
+  | 'reference_object'
+  | 'eye_circle_anatomical'
+  | 'anatomical_prior'
 
 export interface CalibrationResult {
   pixelsPerInch: number
-  source: 'depth_map_lidar' | 'reference_object' | 'anatomical_prior'
+  source: CalibrationSourceTag
   confidence: number
   method: string
   warnings: string[]
@@ -25,15 +43,23 @@ export interface ReferenceObjectInput {
 /**
  * Resolve the best available pixelsPerInch calibration.
  *
- * Priority:
- *   1. LiDAR depth map + EXIF (highest)
- *   2. Reference object (ring, hat, ruler)
- *   3. Anatomical priors (eye spacing, pedicle spacing)
+ * Priority (mirrors §8 of CLAUDE.md):
+ *   1. LiDAR depth map + EXIF
+ *   2. Reference object (ring, hat, ruler) when explicitly provided by user
+ *   3. Eye-circle anatomical (iris radius vs IRIS_RADIUS constant) — only fires
+ *      when per-image iris observations are present
+ *   4. Anatomical priors (eye spacing, pedicle spacing)
+ *
+ * Eye-circle is placed above the legacy anatomical_prior path because its
+ * physiology is far tighter (iris diameter varies <10% between adult bucks
+ * versus ~20% for eye-to-eye spacing). It still NEVER unlocks Verified Score —
+ * only `physical_reference` does.
  */
 export function resolveCalibration(
   landmarks: LandmarkDetection[],
   depthCalibration: DepthCalibrationResult | null,
   referenceObject: ReferenceObjectInput | null,
+  perImageLandmarks?: PerImageLandmarkResult[],
 ): CalibrationResult | null {
   // Priority 1: LiDAR depth calibration
   if (
@@ -74,7 +100,28 @@ export function resolveCalibration(
     }
   }
 
-  // Priority 3: Anatomical priors from landmarks
+  // Priority 3: Eye-circle anatomical (iris radius from per-image detection).
+  // Tighter physiology than skull-spacing priors so it sits above the legacy
+  // anatomical_prior path. Only fires when at least one per-image result
+  // reported an iris radius (model populates them via the §4.3 prompt extension).
+  if (perImageLandmarks && perImageLandmarks.length > 0) {
+    const eyeCircle = eyeCircleToPixelsPerInch(perImageLandmarks)
+    if (
+      eyeCircle &&
+      isFiniteNumber(eyeCircle.pixelsPerInch) &&
+      eyeCircle.pixelsPerInch > 0
+    ) {
+      return {
+        pixelsPerInch: eyeCircle.pixelsPerInch,
+        source: 'eye_circle_anatomical',
+        confidence: eyeCircle.confidence,
+        method: eyeCircle.method,
+        warnings: eyeCircle.warnings,
+      }
+    }
+  }
+
+  // Priority 4: Anatomical priors from landmarks (legacy fallback)
   return resolveAnatomicalPrior(landmarks)
 }
 

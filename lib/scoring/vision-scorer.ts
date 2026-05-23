@@ -1263,6 +1263,10 @@ const LandmarkDetectionSchema = z.object({
   imageWidth: z.number(),
   imageHeight: z.number(),
   landmarks: z.array(LandmarkPointSchema),
+  // Eye-circle calibration radii — optional per §4.3 of CLAUDE.md so older
+  // model responses without these fields still parse cleanly.
+  eyeCircleLeftRadiusPx: z.number().positive().nullable().optional(),
+  eyeCircleRightRadiusPx: z.number().positive().nullable().optional(),
 })
 
 const LANDMARK_IDS: AntlerLandmarkId[] = [
@@ -1360,6 +1364,15 @@ async function detectLandmarksForOneImage(args: {
       (lm) => lm.px != null && lm.py != null && lm.visibility !== 'not_visible',
     ).length
 
+    const leftIris = object.eyeCircleLeftRadiusPx
+    const rightIris = object.eyeCircleRightRadiusPx
+    const eyeCircles = (leftIris != null || rightIris != null)
+      ? {
+          leftRadiusPx: leftIris ?? null,
+          rightRadiusPx: rightIris ?? null,
+        }
+      : undefined
+
     return {
       imageIndex,
       imageUrl,
@@ -1371,6 +1384,7 @@ async function detectLandmarksForOneImage(args: {
       detectionTimestamp: new Date().toISOString(),
       locatedCount,
       requestedCount: LANDMARK_IDS.length,
+      eyeCircles,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown error'

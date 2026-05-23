@@ -140,6 +140,40 @@ Optional collapsible "Known Measurements" section in the scoring form lets users
 - **Trophy room visual overhaul**: `TrophyDetailClient` fully redesigned with: (a) score thermometer chart (0–220" SVG gradient bar, tier markers at 115/130/150/170", animated buck marker); (b) schematic antler SVG diagram with tine lengths labeled by B&C zone color; (c) full B&C score sheet breakdown table (left/right per field, asymmetry ≠ indicators, gross/net totals); (d) learning contribution note. `TrophyCard` improved with mini score position bar, confidence color dot, verified shield badge, and hover glow. `lib/trophy-room/service.ts` adds `getTrophyEntryWithMeasurements()` joining predictions table. `lib/trophy-room/types.ts` adds `TrophyMeasurements` and `TrophyRoomEntryWithMeasurements`. Detail page uses new service function. Files: `components/trophy-room/trophy-detail-client.tsx`, `components/trophy-room/trophy-card.tsx`, `lib/trophy-room/service.ts`, `lib/trophy-room/types.ts`, `app/trophy-room/[id]/page.tsx`.
 - **Learning pipeline**: `dpad-adjust/route.ts` now computes and records `confidence_tier_before` in correction_events. Bias corrections pre-loaded in `scoreBuck` and injected into the vision prompt (new `fieldBiases` field on `VisionScoringInput`) so AI pre-compensates for known systematic biases before generating numbers — closes the correction→prompt feedback loop. Admin accuracy dashboard shows bias correction report via `getBiasReport()`. Files: `app/api/scoring/dpad-adjust/route.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/admin/accuracy/page.tsx`.
 
+### 3.22. Eye-circle anatomical calibration ✓ (§4.3)
+First entry in the §4 close-out campaign; sequenced first by calibration impact
+because it is zero-user-effort and shares the existing per-image landmark
+GPT-4o call (no new API spend). Adds a new `eye_circle_anatomical` source to
+the calibration resolver at §8 slot 6–7 (0.50–0.72), sitting above the legacy
+`anatomical_prior` path because iris diameter varies <10% between adult bucks
+versus ~20% for skull-spacing priors. The per-image landmark call now also
+asks the model to report `eyeCircleLeftRadiusPx` / `eyeCircleRightRadiusPx`
+alongside the existing landmark array; both are optional in the Zod schema so
+older responses still parse. New `eyeCircleToPixelsPerInch()` helper in
+`landmark-geometry.ts` fuses observations across images with the same median +
+±25% relative-deviation outlier rejection pattern as the legacy anatomical
+path; both-eyes-agree on a front view tops out at 0.72, single-eye side-view
+caps at 0.50. New `CalibrationSourceTag` union exported from
+`calibration-resolver.ts` (`'depth_map_lidar' | 'reference_object' |
+'eye_circle_anatomical' | 'anatomical_prior'`) replaces the inline union on
+`CalibrationResult.source`. `resolveCalibration` now takes an optional
+`perImageLandmarks` arg; absent ⇒ eye-circle slot is skipped and behavior is
+identical to before. Verified Score gates unchanged — eye-circle is explicitly
+NOT `physical_reference`. Cost stays flat (~$0.05/run) because radii ride
+along on the existing detection request. New `IRIS_RADIUS = 0.55` constant in
+`lib/constants.ts` (whitetail adult iris radius head-on, derived from
+1.05–1.15" diameter literature). Persistence reuses the existing
+`landmarks_detected` JSONB on `buck_images` — no migration. Tests: 9 new
+specs in `__tests__/scoring/eye-circle.test.ts` cover null/empty inputs,
+failed-image skips, single-eye front, both-eyes-agree gold case, side-view
+cap, outlier rejection, tight-agreement boost, zero/negative radii guards,
+and degenerate-fallback path. Prompt-snapshot ceiling held at <4000 chars
+after compacting the eye-circle prompt section. Files: modified
+`lib/constants.ts`, `lib/scoring/landmark-detection.ts`,
+`lib/scoring/landmark-prompt.ts`, `lib/scoring/landmark-geometry.ts`,
+`lib/scoring/vision-scorer.ts`, `lib/scoring/calibration-resolver.ts`,
+`app/api/score/route.ts`; new `__tests__/scoring/eye-circle.test.ts`.
+
 ### 3.21. SVG North American map + ESLint flat config ✓
 Replaced the Leaflet elevation map with a self-contained SVG North American map. `components/map/map-viewer.tsx` is now built on `react-simple-maps` (was already a dep, not previously wired) using `geoMercator` centered on `[-95, 48]` with scale 520. Country outlines come from `world-atlas@2/countries-110m.json` filtered by ISO numeric codes to US/Canada/Mexico + Central America + Caribbean — no state borders, no tile servers, no elevation layers. Clicks on the SVG are inverted through the captured d3 projection (`projectionRef`) to produce `[lng, lat]`, surfaced via a confirmation panel before firing `onMapClick`. Pin markers render as colored drops keyed by `LOCATION_TYPE_COLORS`; **at ≥20 placed pins the visualization switches to heat mode** — markers shrink to 2.5px dots and a separate `<g filter="url(#rax-heat-blur)">` layer renders blurred radial-gradient blobs (`stdDeviation=6`, red radial gradient) at each pin to give a harvest-density readout. Mode badge ("Pin View N / 20" → "Heat Map N") sits top-left; legend bar across the bottom is unchanged. Public API preserved: `{ pins, onPinClick, onMapClick, selectedPinId }`, `LOCATION_TYPE_COLORS`, `LOCATION_TYPE_LABELS`. Also fixed `pnpm lint` (the script existed but no ESLint config did) — added `eslint@^9` + `eslint-config-next@16.2.0` as devDeps and authored `eslint.config.mjs` (flat config) that disables `react/no-unescaped-entities`, downgrades `@next/next/no-img-element` and `react-hooks/exhaustive-deps` to warnings, and downgrades the new React Compiler-class rules from `react-hooks` v7 (`purity`, `immutability`, `refs`, `use-memo`, `static-components`, `preserve-manual-memoization`, `component-hook-factories`, `set-state-in-effect`, `error-boundaries`) to warnings so the legacy codebase doesn't fail lint on rules it predates. Lint now reports 0 errors / 79 warnings (down from 118 errors). One real hook-rule bug fixed in `components/measure/scene-3d.tsx` (`MeasurementTube` was calling `useMemo` after a conditional `return null` — moved the early-return after the hooks and folded the empty-points guard inside the `useMemo`). Updated `react-simple-maps.d.ts` shim so `<Geographies>` render-prop type now includes `projection`, `path`, `outline`, `borders` (matches runtime). Files: modified `components/map/map-viewer.tsx`, `react-simple-maps.d.ts`, `components/measure/scene-3d.tsx`, `package.json`, `pnpm-lock.yaml`; new `eslint.config.mjs`.
 
