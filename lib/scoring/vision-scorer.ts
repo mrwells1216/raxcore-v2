@@ -113,6 +113,8 @@ export interface VisionScoringInput {
   traceId?: string
   /** Known field biases from correction_events — injected into prompt so AI can pre-compensate */
   fieldBiases?: Record<string, number>
+  /** Classroom: extra instruction appended to the prompt. Never replaces the contract. */
+  customPromptOverride?: string | null
 }
 
 // ============================================================================
@@ -467,6 +469,10 @@ Estimate all unmeasured fields based on these confirmed anchors.
     return `\nKNOWN BIASES (pre-compensate)\nStatistically significant biases from user corrections (>=10 samples each):\n${lines}\n`
   })()
 
+  const customPromptBlock = input.customPromptOverride?.trim()
+    ? `\nADDITIONAL OPERATOR INSTRUCTION (experimental — does not override the rules above)\n${input.customPromptOverride.trim()}\n`
+    : ''
+
   return `${roleIsolationParagraph('measurement')}
 
 INPUT CONTRACT
@@ -535,7 +541,7 @@ SELF-CHECK (perform before returning)
 
 REFUSE
 If image quality fails (blur beyond recognition, obstruction, rack absent), do NOT invent numbers. Return your best honest estimate with confidence_percent < 40 and quality_notes explaining what failed.
-${biasBlock}
+${biasBlock}${customPromptBlock}
 Respond with structured JSON matching the required schema.`
 }
 

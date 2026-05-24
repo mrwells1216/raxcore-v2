@@ -1,4 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
+import {
+  DEFAULT_GLOBAL_GROSS_BIAS,
+  DEFAULT_GLOBAL_NET_BIAS,
+  type CalibrationOverride,
+} from '@/lib/calibration-constants'
+
+export { DEFAULT_GLOBAL_GROSS_BIAS, DEFAULT_GLOBAL_NET_BIAS, type CalibrationOverride }
 
 export interface CalibrationProfile {
   profile_key: string
@@ -11,7 +18,16 @@ export interface CalibrationProfile {
   gross_mae: number
   net_mae: number
   confidence_multiplier: number
+  gross_multiplier?: number
+  net_multiplier?: number
   is_active?: boolean
+}
+
+function firstFinite(...values: Array<number | null | undefined>): number | null {
+  for (const v of values) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+  }
+  return null
 }
 
 function normalizeRackType(value: string | null | undefined) {
@@ -54,56 +70,78 @@ export function applyCalibration(params: {
   rawNet: number | null
   rawConfidence: number | null
   profile: CalibrationProfile | null
+  /** Optional per-request override (Classroom experiments). Supersedes the profile. */
+  override?: CalibrationOverride | null
 }) {
-  const { rawGross, rawNet, rawConfidence, profile } = params
+  const { rawGross, rawNet, rawConfidence, profile, override } = params
 
-  if (!profile) {
-    return {
-      calibratedGross: rawGross,
-      calibratedNet: rawNet,
-      calibratedConfidence: rawConfidence,
-      calibrationApplied: false,
-      calibrationMeta: null,
-    }
-  }
+  // Resolve each knob: override > learned profile > seeded default.
+  // Multipliers default to 1 (additive-only learning today); the seeded default
+  // offset re-centers scores app-wide until a learned profile exists.
+  const grossBias =
+    firstFinite(override?.grossBias, profile?.gross_bias, DEFAULT_GLOBAL_GROSS_BIAS) ?? 0
+  const netBias =
+    firstFinite(override?.netBias, profile?.net_bias, DEFAULT_GLOBAL_NET_BIAS) ?? 0
+  const grossMult =
+    firstFinite(override?.grossMultiplier, profile?.gross_multiplier, 1) ?? 1
+  const netMult =
+    firstFinite(override?.netMultiplier, profile?.net_multiplier, 1) ?? 1
+  const confidenceMult =
+    firstFinite(override?.confidenceMultiplier, profile?.confidence_multiplier, 1) ?? 1
+
+  const hasOverride =
+    !!override &&
+    [
+      override.grossBias,
+      override.netBias,
+      override.grossMultiplier,
+      override.netMultiplier,
+      override.confidenceMultiplier,
+    ].some((v) => typeof v === 'number' && Number.isFinite(v))
+
+  const source: 'override' | 'profile' | 'default' = hasOverride
+    ? 'override'
+    : profile
+      ? 'profile'
+      : 'default'
 
   const calibratedGross =
     typeof rawGross === 'number'
-      ? Number((rawGross + Number(profile.gross_bias || 0)).toFixed(1))
+      ? Number((rawGross * grossMult + grossBias).toFixed(1))
       : rawGross
 
   const calibratedNet =
     typeof rawNet === 'number'
-      ? Number((rawNet + Number(profile.net_bias || 0)).toFixed(1))
+      ? Number((rawNet * netMult + netBias).toFixed(1))
       : rawNet
 
   const calibratedConfidence =
     typeof rawConfidence === 'number'
-      ? Math.max(
-          1,
-          Math.min(
-            100,
-            Math.round(rawConfidence * Number(profile.confidence_multiplier || 1))
-          )
-        )
+      ? Math.max(1, Math.min(100, Math.round(rawConfidence * confidenceMult)))
       : rawConfidence
+
+  const calibrationApplied =
+    grossBias !== 0 || netBias !== 0 || grossMult !== 1 || netMult !== 1 || confidenceMult !== 1
 
   return {
     calibratedGross,
     calibratedNet,
     calibratedConfidence,
-    calibrationApplied: true,
+    calibrationApplied,
     calibrationMeta: {
-      profile_key: profile.profile_key,
-      profile_type: profile.profile_type,
-      state: profile.state ?? null,
-      rack_type: profile.rack_type ?? null,
-      sample_count: profile.sample_count,
-      gross_bias: profile.gross_bias,
-      net_bias: profile.net_bias,
-      gross_mae: profile.gross_mae,
-      net_mae: profile.net_mae,
-      confidence_multiplier: profile.confidence_multiplier,
+      source,
+      profile_key: profile?.profile_key ?? (source === 'default' ? 'global_default' : null),
+      profile_type: profile?.profile_type ?? null,
+      state: profile?.state ?? null,
+      rack_type: profile?.rack_type ?? null,
+      sample_count: profile?.sample_count ?? 0,
+      gross_bias: grossBias,
+      net_bias: netBias,
+      gross_multiplier: grossMult,
+      net_multiplier: netMult,
+      gross_mae: profile?.gross_mae ?? 0,
+      net_mae: profile?.net_mae ?? 0,
+      confidence_multiplier: confidenceMult,
     },
   }
 }
@@ -170,6 +208,8 @@ export async function getBestCalibrationProfile(params: {
     gross_mae: Number(selected.gross_mae ?? 0),
     net_mae: Number(selected.net_mae ?? 0),
     confidence_multiplier: Number(selected.confidence_multiplier ?? 1),
+    gross_multiplier: Number(selected.gross_multiplier ?? 1),
+    net_multiplier: Number(selected.net_multiplier ?? 1),
     is_active: selected.is_active,
   }
 }

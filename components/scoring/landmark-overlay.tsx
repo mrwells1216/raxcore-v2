@@ -271,6 +271,9 @@ export function LandmarkOverlay({
             {zone}
           </div>
         ))}
+        <div style={{ marginTop: 3, maxWidth: 150, opacity: 0.75, lineHeight: 1.25 }}>
+          Reference points for scale &amp; QA — not the score itself.
+        </div>
       </div>
     </div>
   )

@@ -37,19 +37,31 @@ export function PrecisionPassCard({
   const [isStarting, setIsStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [timedOut, setTimedOut] = useState(false)
 
   // Guard: fire onPrecisionPassComplete at most once per runId regardless of
   // how many times the parent re-renders or the effect re-evaluates.
   const firedRunIdRef = useRef<string | null>(null)
+  // Safety net: stop polling after ~90s so the UI can never spin forever if the
+  // run never reaches a terminal state.
+  const pollCountRef = useRef(0)
+  const MAX_POLLS = 60
 
   // Stop polling once completed or failed — no need to keep hitting the API
-  const shouldPoll = runId && initialStatus !== 'completed' && initialStatus !== 'failed'
+  const shouldPoll =
+    !!runId && initialStatus !== 'completed' && initialStatus !== 'failed' && !timedOut
 
   const { data } = useSWR(
-    shouldPoll ? `/api/reverse/runs/${runId}` : runId ? `/api/reverse/runs/${runId}` : null,
+    runId ? `/api/reverse/runs/${runId}` : null,
     fetcher,
     { refreshInterval: shouldPoll ? 1500 : 0, revalidateOnFocus: false }
   )
+
+  useEffect(() => {
+    if (!shouldPoll) return
+    pollCountRef.current += 1
+    if (pollCountRef.current >= MAX_POLLS) setTimedOut(true)
+  }, [data, shouldPoll])
 
   const status = data?.run?.status as string | undefined
   const best = data?.run?.best_summary as Record<string, unknown> | undefined
@@ -209,10 +221,17 @@ export function PrecisionPassCard({
           </Button>
         ) : (
           <div className="space-y-3">
-            {isRunning && (
+            {isRunning && !timedOut && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Analyzing hypotheses...
+              </div>
+            )}
+
+            {isRunning && timedOut && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <AlertCircle className="h-4 w-4" />
+                Still processing in the background — check back shortly.
               </div>
             )}
 

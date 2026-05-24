@@ -552,6 +552,9 @@ export interface CreatePredictionParams {
   cropBoxMetadata?: Record<string, unknown> | null
   userMeasurementsMetadata?: Record<string, unknown> | null
   perImageConsensus?: Record<string, unknown> | null
+  isClassroomRun?: boolean
+  experimentConfig?: Record<string, unknown> | null
+  featuresUsed?: Record<string, unknown> | null
 }
 
 // Normalize confidence from string ("low"/"medium"/"high") or number to numeric 0-1
@@ -674,6 +677,9 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
       crop_box_metadata: params.cropBoxMetadata ?? null,
       user_measurements_metadata: params.userMeasurementsMetadata ?? null,
       per_image_consensus: params.perImageConsensus ?? null,
+      is_classroom_run: params.isClassroomRun ?? false,
+      experiment_config: params.experimentConfig ?? null,
+      features_used: params.featuresUsed ?? null,
     })
     .select()
     .single()
@@ -1901,7 +1907,7 @@ export async function listHistory(options?: {
       .order('display_order', { ascending: true }),
     supabase
       .from('predictions')
-      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, created_at')
+      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, is_classroom_run, created_at')
       .in('buck_id', buckIds)
       .order('created_at', { ascending: false }),
   ])
@@ -1951,7 +1957,7 @@ export async function listUserBucks(
       .order('display_order', { ascending: true }),
     supabase
       .from('predictions')
-      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, created_at')
+      .select('id, buck_id, predicted_gross, confidence_percent, scoring_method, is_classroom_run, created_at')
       .in('buck_id', buckIds)
       .order('created_at', { ascending: false }),
   ])

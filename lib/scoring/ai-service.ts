@@ -80,6 +80,8 @@ export interface ScoringInput {
   preAiScoringContext?: PreAiScoringContext | null
   /** Phase 39: Correlation ID from the parent HTTP request for observability traces */
   traceId?: string
+  /** Classroom experiment flags — absent ⇒ all features on (production default). */
+  experiment?: import('@/lib/scoring/experiment-config').AiServiceExperimentFlags
 }
 
 export interface ScoringOutput {
@@ -775,8 +777,12 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const stateCalibration = getStateCalibration(input.state ?? 'unknown')
 
   // Load field biases early so they can be injected into the vision prompt
-  // (also used later in stage 2.5 for post-hoc measurement correction)
-  const preloadedFieldBiases = await loadFieldBiases().catch(() => ({} as Record<string, number>))
+  // (also used later in stage 2.5 for post-hoc measurement correction).
+  // Classroom can disable this via the promptBiasCorrection flag.
+  const biasCorrectionEnabled = input.experiment?.promptBiasCorrection !== false
+  const preloadedFieldBiases = biasCorrectionEnabled
+    ? await loadFieldBiases().catch(() => ({} as Record<string, number>))
+    : {}
 
   // Try vision scoring first (with Phase 24 runtime hardening)
   const visionResult = await scoreWithVision({
@@ -794,6 +800,7 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     preAiScoringContext: input.preAiScoringContext ?? null,
     traceId: input.traceId,  // Phase 39: propagate trace ID
     fieldBiases: Object.keys(preloadedFieldBiases).length > 0 ? preloadedFieldBiases : undefined,
+    customPromptOverride: input.experiment?.customPrompt ?? undefined,
   })
 
   if (visionResult.success) {
@@ -924,7 +931,10 @@ async function buildVisionScoringOutput(
   startTime: number
 ): Promise<ScoringOutput> {
   const visionOutput = visionResult.output
-  const plausibilityReport: PlausibilityReport = validateScoringOutput(visionOutput)
+  const plausibilityReport: PlausibilityReport =
+    input.experiment?.plausibilityValidator === false
+      ? { passed: true, violations: [], suggestedConfidenceAdjustments: {} }
+      : validateScoringOutput(visionOutput)
   if (plausibilityReport.violations.length > 0) {
     console.warn('[ai-service] plausibility violations detected', {
       passed: plausibilityReport.passed,
@@ -956,7 +966,10 @@ async function buildVisionScoringOutput(
   const normalizedMeasurements = normalizationResult.normalized
 
   // STAGE 2.5: Apply learned per-field bias corrections from correction_events
-  const fieldBiases = await loadFieldBiases().catch(() => ({} as Record<string, number>))
+  // (Classroom can disable via the promptBiasCorrection flag).
+  const fieldBiases = input.experiment?.promptBiasCorrection === false
+    ? ({} as Record<string, number>)
+    : await loadFieldBiases().catch(() => ({} as Record<string, number>))
   const { corrected: biasCorrectedMeasurements } = applyBiasCorrections(normalizedMeasurements, fieldBiases)
 
   // STAGE 3: Landmark consistency - validate anatomical ratios
@@ -1193,6 +1206,11 @@ async function buildVisionScoringOutput(
         .filter(v => v.severity === 'critical')
         .map(v => `plausibility:${v.rule}${v.fieldKey ? `:${v.fieldKey}` : ''}`),
     )
+  }
+
+  // Classroom: hard-disable the second pass when the experiment turns it off.
+  if (input.experiment?.secondPass === false) {
+    selfCheckResult.triggerSecondPass = false
   }
 
   // STAGE 9 & 10: Phase 23 Two-Pass Scoring (if triggered)

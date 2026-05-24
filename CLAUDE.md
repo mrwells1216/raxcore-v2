@@ -376,6 +376,53 @@ Four-part fix derived from the IMG_6534/IMG_6535 screenshots. (a) **Error-band i
 ### 3.18. Per-image anatomical reference capture + angle-distortion compensation ✓
 Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle, skull width, ear-base spacing, ear-base-to-tip) is now captured **per image** instead of once across the whole submission. The GPT-4o landmark detector runs once per image in parallel via new `detectLandmarkPositionsPerImage`; each call only sees one image so the model cannot mix up which image a coordinate came from. Per-image observations are fused with **median + MAD outlier rejection** (estimates >2.5× MAD from median are dropped with `excludedReason`) and per-reference agreement spread is computed across surviving images. Side-angle photos automatically take a +0.18 distortion bump for references that are only reliable head-on (eye box, pedicle spacing, skull width, nose bridge, ear-base spacing). Ear handling: new `ear_base_*` and `ear_tip_*` landmark IDs let `detectEarPosition()` flag perked/sideways ear poses and exclude `ear_base_to_tip` from the consensus for those images — ear-base spacing (skull-fixed) stays as a reference. Per-image landmarks are persisted into the existing `BuckImage.landmarks_detected` field (was null until now); aggregated `per_image_consensus` blob is cached on `predictions` via a new JSONB column for fast UI reads. The carousel now drives a `currentImageIndex` so `LandmarkOverlay` renders only that image's dots, and a new collapsible "Per-image anatomical references" card surfaces per-reference per-image breakdown with outlier badges and ear-pose warnings. Learning win: correction events now carry `source_image_index` + `sourceAngle` for free, so future bias-correction analytics can learn angle-specific biases ("AI overestimates eye box on left profiles"). Cost: ~$0.05/run vs $0.03 today (N parallel calls, modest prompt overhead duplication). Verified Score gates unchanged. Files: new `lib/scoring/ear-position.ts`, `lib/scoring/per-image-consensus.ts`, `components/scoring/per-image-consensus-card.tsx`, `supabase/migrations/20260520_per_image_consensus.sql`; modified `lib/scoring/landmark-detection.ts` (added ear landmark IDs + `PerImageLandmarkResult` type), `lib/scoring/vision-scorer.ts` (added `detectLandmarkPositionsPerImage`, legacy `detectLandmarkPositions` now a back-compat wrapper), `lib/types.ts` (added `PerImageReferenceObservation`, `PerReferenceFusion`, `PerImageConsensusResult`, `Prediction.per_image_consensus`), `lib/storage/service.ts` (added `updateBuckImageLandmarks`, `updatePredictionPerImageConsensus`, threaded `perImageConsensus` through `CreatePredictionParams`), `app/api/score/route.ts` (calls per-image detector, persists per-image data, exposes `perImageConsensus` and `landmarkDetections.perImage` in response), `components/scoring/scoring-results.tsx` (carousel index threading, per-image landmark overlay slicing), `components/scoring/antler-image-carousel.tsx` (new `onImageChange` callback).
 
+### 3.30. Classroom (RAXam / RAXrs) + global calibration + precision-pass fix ✓
+New public `/classroom` tab — a lab for testing and calibrating the scorer —
+plus two fixes derived from the IMG_6534/IMG_6535 session (scores ~5-8" low,
+precision pass spinning forever).
+- **Global + learnable calibration**: `applyCalibration` (`lib/calibration.ts`)
+  now supports a multiplicative scale and a seeded default offset
+  (`DEFAULT_GLOBAL_GROSS_BIAS = 6`, in new client-safe `lib/calibration-constants.ts`).
+  When no learned profile exists it applies the seeded offset so the live
+  `/score` tab re-centers up; learned profiles (from ground-truth +
+  classroom-rescore deltas via `buildProfileFromRows`) and per-request overrides
+  supersede it. `calibrationMeta.source` is `'default' | 'profile' | 'override'`
+  — the default is labeled estimated. New `calibration_profiles.gross_multiplier`
+  / `net_multiplier` columns (default 1).
+- **Per-request feature gating**: optional `experiment_config` FormData field on
+  `/api/score` (absent ⇒ identical production behavior). `lib/scoring/experiment-config.ts`
+  defines the feature keys (detection gate, landmarks, eye-circle, pedicle, ArUco,
+  vanishing-point, per-image consensus, prompt-bias, plausibility, second pass,
+  calibration, shadow precision pass), parses/sanitizes the blob, and maps it to
+  calibration overrides + AI-service flags. Gates wired into `app/api/score/route.ts`
+  and `lib/scoring/ai-service.ts` (bias, plausibility, second pass) + a custom-prompt
+  append in `buildVisionPrompt` (`lib/scoring/vision-scorer.ts`).
+- **RAXam (exam lab)**: compact reuse of `ScoringWizard` (`classroom` +
+  `experimentConfig` props; `ScoringForm` gains `hideOptionalDetails`) with a
+  Features &amp; Variables panel. **RAXrs (rescore)**: pick a recent buck
+  (`GET /api/classroom/recent`), flag error categories (expected higher/lower,
+  left/right antler → tine sub-options), re-run via `/api/score`, and record the
+  flags as `correction_events` (`correction_source: 'classroom_rescore'`) via
+  `POST /api/classroom/rescore`; compact results show new-vs-old.
+- Classroom runs persist as normal predictions but flagged
+  `predictions.is_classroom_run` (+ `experiment_config`, `features_used` JSONB) and
+  show an asterisk in History.
+- **Precision pass fix**: `app/api/reverse/predictions/[predictionId]/precision-pass/route.ts`
+  now runs `executePrecisionPass` inline in all environments (was dev/preview only)
+  with `maxDuration = 300`; `precision-pass-card.tsx` gained a ~90s poll cap so it
+  can never spin forever.
+- **Landmark clarity**: `landmark-overlay.tsx` legend now states landmarks are
+  scale/QA reference points, not the score.
+Verified Score gates unchanged (calibration/experiment overrides never unlock it).
+Files: new `lib/calibration-constants.ts`, `lib/scoring/experiment-config.ts`,
+`app/classroom/page.tsx`, `components/classroom/{features-panel,raxam-flow,raxrs-flow,classroom-results}.tsx`,
+`app/api/classroom/{recent,rescore}/route.ts`, `supabase/migrations/20260524_classroom_predictions.sql`,
+`__tests__/scoring/classroom-experiment.test.ts`; modified `lib/calibration.ts`,
+`app/api/score/route.ts`, `lib/scoring/ai-service.ts`, `lib/scoring/vision-scorer.ts`,
+`lib/storage/service.ts`, `lib/types.ts`, `lib/training/correction-events.ts`,
+`components/scoring/{scoring-wizard,scoring-form,landmark-overlay,precision-pass-card}.tsx`,
+`components/header.tsx`, `app/history/page.tsx`.
+
 ---
 
 ## 4. What is NOT built yet
