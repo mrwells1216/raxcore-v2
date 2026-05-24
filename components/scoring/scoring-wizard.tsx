@@ -41,9 +41,13 @@ interface ScoringWizardProps {
   initialMode: 'camera' | 'upload'
   userId?: string | null
   onComplete: (result: ScoringResult, formData: ScoringFormData) => void
+  /** Classroom: feature toggles + variable overrides serialized onto the request. */
+  experimentConfig?: import('@/lib/scoring/experiment-config').ExperimentConfig | null
+  /** Classroom: mark the run with an asterisk and hide Optional Details. */
+  classroom?: boolean
 }
 
-export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizardProps) {
+export function ScoringWizard({ initialMode, userId, onComplete, experimentConfig, classroom }: ScoringWizardProps) {
   const scoringFormRef = useRef<ScoringFormHandle>(null)
   const [inputMode, setInputMode] = useState<ScoreInputMode>(
     initialMode === 'upload' ? 'guided-upload' : 'smart-scan',
@@ -292,6 +296,14 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
       }
 
       if (userId) apiFormData.append('user_id', userId)
+
+      // Classroom: feature toggles + variable overrides + run flag.
+      if (experimentConfig) {
+        apiFormData.append('experiment_config', JSON.stringify(experimentConfig))
+      }
+      if (classroom) {
+        apiFormData.append('is_classroom_run', 'true')
+      }
 
       if (finalQuality) {
         const qualitySummary: IntakeQualitySummary = {
@@ -814,6 +826,7 @@ export function ScoringWizard({ initialMode, userId, onComplete }: ScoringWizard
               isSubmitting={isAnalyzing}
               hideBackButton
               hideSubmitButton
+              hideOptionalDetails={classroom}
               onImageDiagnosticsComputed={(diags, summary) => {
                 setImageDiagnostics(diags)
                 setImageDiagnosticsSummary(summary)

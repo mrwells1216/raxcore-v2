@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Menu, X, Target, History, Map, Library, Shield, Ruler, Home, Trophy,
+  Menu, X, Target, History, Map, Library, Shield, Ruler, Home, Trophy, GraduationCap,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet'
@@ -16,16 +16,18 @@ import { RaxcoreLogo } from '@/components/raxcore-logo'
 // ─── Navigation entries (auth-aware) ─────────────────────────────────────────
 
 const publicNavigation = [
-  { name: 'Home',    href: '/',        icon: Home },
-  { name: 'Score',   href: '/score',   icon: Target },
-  { name: 'Measure', href: '/measure', icon: Ruler },
-  { name: 'Map',     href: '/map',     icon: Map },
-  { name: 'History', href: '/history', icon: History },
+  { name: 'Home',      href: '/',          icon: Home },
+  { name: 'Score',     href: '/score',     icon: Target },
+  { name: 'Classroom', href: '/classroom', icon: GraduationCap },
+  { name: 'Measure',   href: '/measure',   icon: Ruler },
+  { name: 'Map',       href: '/map',       icon: Map },
+  { name: 'History',   href: '/history',   icon: History },
 ]
 
 const authenticatedNavigation = [
   { name: 'Home',         href: '/',             icon: Home },
   { name: 'Score',        href: '/score',        icon: Target },
+  { name: 'Classroom',    href: '/classroom',    icon: GraduationCap },
   { name: 'Measure',      href: '/measure',      icon: Ruler },
   { name: 'Library',      href: '/library',      icon: Library },
   { name: 'Trophy Room',  href: '/trophy-room',  icon: Trophy },

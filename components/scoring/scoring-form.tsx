@@ -86,10 +86,12 @@ interface ScoringFormProps {
   onImageDiagnosticsComputed?: (diagnostics: ImageDiagnostics[], summary: ImageDiagnosticsSummary | null) => void
   hideBackButton?: boolean
   hideSubmitButton?: boolean
+  /** Classroom compact mode: hide the Optional Details (harvest method/year/notes) section. */
+  hideOptionalDetails?: boolean
 }
 
 export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(function ScoringForm(
-  { onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed, hideBackButton, hideSubmitButton },
+  { onSubmit, onBack, isSubmitting, onImageDiagnosticsComputed, hideBackButton, hideSubmitButton, hideOptionalDetails },
   ref
 ) {
   const submitBtnRef = useRef<HTMLButtonElement>(null)
@@ -721,6 +723,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
           </div>
         </Collapsible>
 
+        {!hideOptionalDetails && (
+        <>
         <Separator className="my-3" />
 
         {/* Section: Optional Details (collapsible) */}
@@ -795,6 +799,8 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
             </CollapsibleContent>
           </div>
         </Collapsible>
+        </>
+        )}
 
 
         {/* Image Diagnostics Summary */}

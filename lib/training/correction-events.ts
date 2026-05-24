@@ -1,7 +1,12 @@
 import 'server-only'
 import { getServiceSupabase } from '@/lib/supabase/admin'
 
-export type CorrectionSource = 'score_editor' | 'dpad' | 'precision_pass' | 'review_sheet'
+export type CorrectionSource =
+  | 'score_editor'
+  | 'dpad'
+  | 'precision_pass'
+  | 'review_sheet'
+  | 'classroom_rescore'
 
 export interface CorrectionEventInput {
   buckId: string

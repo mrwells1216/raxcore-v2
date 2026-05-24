@@ -42,6 +42,13 @@ import { logEventFireForget } from '@/lib/monitoring/service'
 import { buildScoreSheet } from '@/lib/scoring/score-sheet'
 import { buildFieldProvenanceFromMeasurements } from '@/lib/rules-engine/field-provenance'
 import { getBestCalibrationProfile, applyCalibration } from '@/lib/calibration'
+import {
+  parseExperimentConfig,
+  isFeatureEnabled,
+  resolveFeaturesUsed,
+  toAiServiceFlags,
+  toCalibrationOverride,
+} from '@/lib/scoring/experiment-config'
 import { startPrecisionPass } from '@/lib/reverse-engineering/service'
 import { detectRackWithOpenAI } from '@/lib/detection/detect-rack-with-openai'
 import { buildMultiImageDetectionSummary } from '@/lib/detection/build-antler-graph'
@@ -176,6 +183,9 @@ export async function POST(request: Request) {
   }
   const imageDiagnosticsRaw = formData.get('image_diagnostics') as string | null
   const imageDiagnosticsSummaryRaw = formData.get('image_diagnostics_summary') as string | null
+  // Classroom experiment config — absent ⇒ identical production behavior.
+  const experimentConfig = parseExperimentConfig(formData.get('experiment_config') as string | null)
+  const isClassroomRun = formData.get('is_classroom_run') === 'true'
   const submittedUserId = formData.get('user_id') as string | null
   let authenticatedUserId: string | null = null
   try {
@@ -527,10 +537,10 @@ export async function POST(request: Request) {
         rejectionReasonCount: detectionSummary.rejectionReasons.length,
       })
 
-      if (!detectionSummary.accepted) {
+      if (!detectionSummary.accepted && isFeatureEnabled(experimentConfig, 'detectionGate')) {
         // Mark buck as failed due to detection rejection
         await updateBuckStatus(buck.id, 'failed')
-        
+
         return NextResponse.json(
           {
             error: 'No usable deer rack detected.',
@@ -673,6 +683,7 @@ export async function POST(request: Request) {
       referenceObject: referenceObject ?? undefined,
       preAiScoringContext,
       traceId: requestId,
+      experiment: toAiServiceFlags(experimentConfig),
     })
 
     // Apply calibration from training data using unified calibration engine
@@ -701,6 +712,7 @@ export async function POST(request: Request) {
       rawNet: rawPredictedNet,
       rawConfidence,
       profile: calibrationProfile,
+      override: toCalibrationOverride(experimentConfig),
     })
 
     // Preserve raw values
@@ -920,6 +932,9 @@ export async function POST(request: Request) {
         }
       })() : null,
       userMeasurementsMetadata: preScoringMeasurements ?? null,
+      isClassroomRun,
+      experimentConfig: experimentConfig ?? null,
+      featuresUsed: experimentConfig ? resolveFeaturesUsed(experimentConfig) : null,
     } as any)
 
     // Persist the initial measurement graph (Phase 1 — best-effort, never throws)
@@ -942,6 +957,8 @@ export async function POST(request: Request) {
     let perImageLandmarks: PerImageLandmarkResult[] = []
     let perImageConsensus: ReturnType<typeof computePerImageConsensus> | null = null
     try {
+      // Classroom feature gates — all default ON in production.
+      const landmarksEnabled = isFeatureEnabled(experimentConfig, 'landmarks')
       const angleTypes = resolvedImages.map((img) => {
         const a = img.angleType
         return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
@@ -952,6 +969,8 @@ export async function POST(request: Request) {
       // length — otherwise we skip the API call to keep cost flat for the
       // 99% case that doesn't print markers.
       const arucoEnabled =
+        landmarksEnabled &&
+        isFeatureEnabled(experimentConfig, 'arucoCalibration') &&
         referenceTypeRaw === 'aruco_marker' &&
         referenceSizeValueRaw != null &&
         Number(referenceSizeValueRaw) >= ARUCO_SIDE_MIN_INCHES &&
@@ -959,7 +978,9 @@ export async function POST(request: Request) {
       const arucoSideInches = arucoEnabled ? Number(referenceSizeValueRaw) : null
 
       const [landmarksResult, arucoDetections] = await Promise.all([
-        detectLandmarkPositionsPerImage(storedImageUrls, angleTypes),
+        landmarksEnabled
+          ? detectLandmarkPositionsPerImage(storedImageUrls, angleTypes)
+          : Promise.resolve([] as PerImageLandmarkResult[]),
         arucoEnabled
           ? detectArucoMarkersPerImage(storedImageUrls)
           : Promise.resolve([]),
@@ -983,29 +1004,37 @@ export async function POST(request: Request) {
           requestedCount: best.requestedCount,
         }
 
-        perImageConsensus = computePerImageConsensus(perImageLandmarks)
+        if (isFeatureEnabled(experimentConfig, 'perImageConsensus')) {
+          perImageConsensus = computePerImageConsensus(perImageLandmarks)
 
-        // Patch the just-inserted prediction row with the per-image consensus
-        // blob. Prediction was created before landmark detection ran, so this
-        // is an additive update. Best-effort.
-        try {
-          await updatePredictionPerImageConsensus(
-            prediction.id,
-            perImageConsensus as unknown,
-          )
-        } catch (consErr) {
-          console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
+          // Patch the just-inserted prediction row with the per-image consensus
+          // blob. Prediction was created before landmark detection ran, so this
+          // is an additive update. Best-effort.
+          try {
+            await updatePredictionPerImageConsensus(
+              prediction.id,
+              perImageConsensus as unknown,
+            )
+          } catch (consErr) {
+            console.warn('[score] per-image consensus persistence failed (non-blocking):', consErr)
+          }
         }
 
         const arucoResolverInput = arucoEnabled && arucoSideInches != null && arucoDetections.length > 0
           ? { detections: arucoDetections, knownSideInches: arucoSideInches }
           : null
+        const pedicleForResolver = isFeatureEnabled(experimentConfig, 'pedicleCalibration')
+          ? pedicleCalibration
+          : null
+        const eyeCircleForResolver = isFeatureEnabled(experimentConfig, 'eyeCircleCalibration')
+          ? perImageLandmarks
+          : []
         const calibration = resolveCalibration(
           allLandmarks,
           depthCalibration,
           null,
-          perImageLandmarks,
-          pedicleCalibration,
+          eyeCircleForResolver,
+          pedicleForResolver,
           arucoResolverInput,
         )
 
@@ -1029,7 +1058,7 @@ export async function POST(request: Request) {
 
         // §4.7 Vanishing-point cross-check. Appends warnings to the resolved
         // calibration so the UI can surface them. Never overrides the primary.
-        if (calibration) {
+        if (calibration && isFeatureEnabled(experimentConfig, 'vanishingPoint')) {
           const vpWarnings = computeVanishingPointWarnings(perImageLandmarks, calibration)
           if (vpWarnings.length > 0) {
             calibration.warnings = [...calibration.warnings, ...vpWarnings]
@@ -1247,7 +1276,9 @@ export async function POST(request: Request) {
     // Does not block the response; failures are logged only.
     {
       const SHADOW_ROLLOUT_PERCENT = 10
-      const shouldShadow = Math.random() * 100 < SHADOW_ROLLOUT_PERCENT
+      const shouldShadow =
+        isFeatureEnabled(experimentConfig, 'precisionPassShadow') &&
+        Math.random() * 100 < SHADOW_ROLLOUT_PERCENT
       if (shouldShadow && userId) {
         ;(async () => {
           try {
@@ -1273,6 +1304,13 @@ export async function POST(request: Request) {
       },
       sessionId: buck.session_id,
       buckId: buck.id,
+      // Classroom: surface which features ran + the seeded/override calibration.
+      isClassroomRun,
+      experimentConfig: experimentConfig ?? null,
+      featuresUsed: experimentConfig ? resolveFeaturesUsed(experimentConfig) : null,
+      calibrationMeta: (scoringResult as any).calibrationMeta ?? null,
+      rawEstimatedScore: (scoringResult as any).rawPredictedGross ?? null,
+      rawNetScore: (scoringResult as any).rawPredictedNet ?? null,
       estimatedScore: scoringResult.predictedGross,
       netScore: scoringResult.predictedNet,
       scoreRange: {

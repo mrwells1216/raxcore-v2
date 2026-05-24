@@ -4,6 +4,10 @@ import { getServiceSupabase } from '@/lib/supabase/admin'
 import { startPrecisionPass, executePrecisionPass } from '@/lib/reverse-engineering/service'
 
 export const runtime = 'nodejs'
+// The pass is user-triggered and must complete within the request — the QStash
+// worker isn't guaranteed to drain the durable job on every deployment, which
+// previously left the UI spinning on "Analyzing hypotheses…" forever.
+export const maxDuration = 300
 
 // Check for development: NODE_ENV=development OR Vercel preview (not production deployment)
 const IS_DEV = process.env.NODE_ENV === 'development' || 
@@ -65,55 +69,47 @@ export async function POST(
       status: run.status,
     })
 
-    // DEV-ONLY: execute pipeline inline so results are available immediately
-    // without requiring a background worker process.
-    if (IS_DEV) {
-      console.log('[precision-pass] DEV: executing pipeline inline', { runId: run.id })
-      
-      try {
-        await executePrecisionPass(run.id)
-        console.log('[precision-pass] DEV: inline execution completed', { runId: run.id })
+    // Execute the pipeline inline so results are available within this request,
+    // regardless of environment. Relying on the background worker left the run
+    // permanently "queued" on deployments where QStash doesn't drain the job.
+    console.log('[precision-pass] executing pipeline inline', { runId: run.id })
 
-        // Mark the durable job as completed so it doesn't stay permanently queued
-        const adminSupabase = await getServiceSupabase()
-        await adminSupabase
-          .from('durable_jobs')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            result: { inline: true, runId: run.id },
-          })
-          .eq('id', jobId)
+    try {
+      await executePrecisionPass(run.id)
+      console.log('[precision-pass] inline execution completed', { runId: run.id })
 
-      } catch (execError) {
-        const execMsg = execError instanceof Error ? execError.message : 'Inline execution failed'
-        console.error('[precision-pass] DEV: inline execution failed', {
-          runId: run.id,
-          error: execMsg,
-          stack: execError instanceof Error ? execError.stack : undefined,
+      // Mark the durable job as completed so it doesn't stay permanently queued.
+      const adminSupabase = await getServiceSupabase()
+      await adminSupabase
+        .from('durable_jobs')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          result: { inline: true, runId: run.id },
         })
-        // Return the runId anyway — the run is now marked failed in DB,
-        // polling will surface the failure status to the UI.
-        return NextResponse.json({ 
-          runId: run.id, 
-          jobId,
-          status: 'failed',
-          devError: execMsg,
-        })
-      }
+        .eq('id', jobId)
 
-      return NextResponse.json({ 
-        runId: run.id, 
+    } catch (execError) {
+      const execMsg = execError instanceof Error ? execError.message : 'Inline execution failed'
+      console.error('[precision-pass] inline execution failed', {
+        runId: run.id,
+        error: execMsg,
+        stack: execError instanceof Error ? execError.stack : undefined,
+      })
+      // Return the runId anyway — the run is now marked failed in DB,
+      // polling will surface the failure status to the UI.
+      return NextResponse.json({
+        runId: run.id,
         jobId,
-        status: 'completed',
+        status: 'failed',
+        execError: execMsg,
       })
     }
 
-    // PRODUCTION: return queued status, worker will process asynchronously
-    return NextResponse.json({ 
-      runId: run.id, 
+    return NextResponse.json({
+      runId: run.id,
       jobId,
-      status: run.status,
+      status: 'completed',
     })
 
   } catch (e) {

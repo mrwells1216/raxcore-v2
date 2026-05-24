@@ -308,6 +308,10 @@ export interface Prediction {
    * and so the consensus engine can do median + MAD outlier rejection across images.
    */
   per_image_consensus?: PerImageConsensusResult | null
+  // Classroom (RAXam/RAXrs): run saved with experiment toggles; flagged with an asterisk in lists.
+  is_classroom_run?: boolean | null
+  experiment_config?: Record<string, unknown> | null
+  features_used?: Record<string, boolean> | null
 }
 
 /**

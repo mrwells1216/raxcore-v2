@@ -128,13 +128,18 @@ export default async function HistoryPage({
                           </div>
                           {prediction && buck.status === 'completed' ? (
                             <div className="flex items-baseline gap-2">
-                              <span 
+                              <span
                                 className="text-xl font-bold score-emboss"
                                 style={{ color: 'var(--bronze-light)' }}
                               >
                                 {prediction.predicted_gross?.toFixed(1)}&quot;
+                                {prediction.is_classroom_run && (
+                                  <span title="Classroom run — features may have been toggled" style={{ color: 'var(--bronze-mid)' }}>*</span>
+                                )}
                               </span>
-                              <span className="text-sm text-muted-foreground">gross</span>
+                              <span className="text-sm text-muted-foreground">
+                                {prediction.is_classroom_run ? 'gross (classroom)' : 'gross'}
+                              </span>
                               <span 
                                 className="text-xs px-1.5 py-0.5 rounded"
                                 style={{ background: 'rgba(90,184,80,0.15)', color: 'var(--scan-green)' }}
