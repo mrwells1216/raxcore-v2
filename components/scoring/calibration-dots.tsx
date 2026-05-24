@@ -38,10 +38,24 @@ const DEFAULT_LEFT_RATIO = { x: 0.35, y: 0.30 }
 const DEFAULT_RIGHT_RATIO = { x: 0.65, y: 0.30 }
 const KNOWN_INCHES_MIN = 2.0
 const KNOWN_INCHES_MAX = 8.0
+const DPAD_STEP = 1
+const LOUPE_SIZE = 120
+const LOUPE_ZOOM = 4
+const LOUPE_SRC_RADIUS = LOUPE_SIZE / (2 * LOUPE_ZOOM) // 15px of image space from center
+
+type DotId = 'left' | 'right'
+type DpadDir = 'up' | 'down' | 'left' | 'right'
 
 interface ContainerSize {
   width: number
   height: number
+}
+
+interface LoupeState {
+  canvasX: number
+  canvasY: number
+  imgX: number
+  imgY: number
 }
 
 function computeContainImage(
@@ -57,7 +71,6 @@ function computeContainImage(
   let renderW: number
   let renderH: number
   if (imageAR > containerAR) {
-    // letterbox — image wider than container
     renderW = container.width
     renderH = container.width / imageAR
   } else {
@@ -79,6 +92,11 @@ export function CalibrationDots({
   onChange,
 }: CalibrationDotsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  const loupeCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const dpadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
+
   const [containerSize, setContainerSize] = useState<ContainerSize>({ width: 0, height: 0 })
   const [leftImg, setLeftImg] = useState<{ x: number; y: number }>(() => ({
     x: initial?.leftPx ?? imageWidth * DEFAULT_LEFT_RATIO.x,
@@ -91,7 +109,9 @@ export function CalibrationDots({
   const [knownInches, setKnownInches] = useState<string>(
     initial?.knownInches != null ? String(initial.knownInches) : '',
   )
-  const [dragging, setDragging] = useState<'left' | 'right' | null>(null)
+  const [dragging, setDragging] = useState<DotId | null>(null)
+  const [selected, setSelected] = useState<DotId | null>(null)
+  const [loupeState, setLoupeState] = useState<LoupeState | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -104,6 +124,13 @@ export function CalibrationDots({
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()
+  }, [])
+
+  // Cleanup D-pad interval on unmount
+  useEffect(() => {
+    return () => {
+      if (dpadIntervalRef.current) clearInterval(dpadIntervalRef.current)
+    }
   }, [])
 
   const transform = useMemo(
@@ -133,10 +160,13 @@ export function CalibrationDots({
   )
 
   const onPointerDown = useCallback(
-    (which: 'left' | 'right') => (e: React.PointerEvent) => {
+    (which: DotId) => (e: React.PointerEvent) => {
       e.preventDefault()
+      e.stopPropagation()
       ;(e.target as Element).setPointerCapture(e.pointerId)
       setDragging(which)
+      const rect = containerRef.current!.getBoundingClientRect()
+      pointerDownPos.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
     },
     [],
   )
@@ -150,19 +180,129 @@ export function CalibrationDots({
       const imgPt = canvasToImg(canvasX, canvasY)
       if (dragging === 'left') setLeftImg(imgPt)
       else setRightImg(imgPt)
+      // Loupe only on touch input so it can appear offset from the finger
+      if (e.pointerType === 'touch') {
+        setLoupeState({ canvasX, canvasY, imgX: imgPt.x, imgY: imgPt.y })
+      }
     },
     [dragging, canvasToImg],
   )
 
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-    if (!dragging) return
-    try {
-      ;(e.target as Element).releasePointerCapture(e.pointerId)
-    } catch {
-      // some browsers throw if the pointer isn't captured by this element
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragging) return
+      try {
+        ;(e.target as Element).releasePointerCapture(e.pointerId)
+      } catch {
+        // safe to ignore
+      }
+      // Tap (< 8px movement) → select this dot for D-pad fine-tuning
+      if (pointerDownPos.current) {
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (rect) {
+          const dx = (e.clientX - rect.left) - pointerDownPos.current.x
+          const dy = (e.clientY - rect.top) - pointerDownPos.current.y
+          if (Math.hypot(dx, dy) < 8) setSelected(dragging)
+        }
+      }
+      pointerDownPos.current = null
+      setDragging(null)
+      setLoupeState(null)
+    },
+    [dragging],
+  )
+
+  // Draw magnification loupe whenever its state changes
+  useEffect(() => {
+    const canvas = loupeCanvasRef.current
+    if (!canvas || !loupeState) return
+    const img = imgRef.current
+    if (!img || !img.naturalWidth) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, LOUPE_SIZE, LOUPE_SIZE)
+
+    // Clip to circle
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, LOUPE_SIZE / 2, 0, Math.PI * 2)
+    ctx.clip()
+
+    // Magnified crop of the original image
+    ctx.drawImage(
+      img,
+      loupeState.imgX - LOUPE_SRC_RADIUS,
+      loupeState.imgY - LOUPE_SRC_RADIUS,
+      LOUPE_SRC_RADIUS * 2,
+      LOUPE_SRC_RADIUS * 2,
+      0, 0, LOUPE_SIZE, LOUPE_SIZE,
+    )
+    ctx.restore()
+
+    // Crosshairs
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([4, 3])
+    ctx.beginPath()
+    ctx.moveTo(LOUPE_SIZE / 2, 4)
+    ctx.lineTo(LOUPE_SIZE / 2, LOUPE_SIZE - 4)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(4, LOUPE_SIZE / 2)
+    ctx.lineTo(LOUPE_SIZE - 4, LOUPE_SIZE / 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Center amber dot
+    ctx.beginPath()
+    ctx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, 3, 0, Math.PI * 2)
+    ctx.fillStyle = '#fbbf24'
+    ctx.fill()
+
+    // Amber border ring
+    ctx.beginPath()
+    ctx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, LOUPE_SIZE / 2 - 1, 0, Math.PI * 2)
+    ctx.strokeStyle = '#fbbf24'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }, [loupeState])
+
+  // D-pad movement
+  const moveDot = useCallback(
+    (dir: DpadDir) => {
+      if (!selected) return
+      const delta: Record<DpadDir, { x: number; y: number }> = {
+        up:    { x: 0,         y: -DPAD_STEP },
+        down:  { x: 0,         y:  DPAD_STEP },
+        left:  { x: -DPAD_STEP, y: 0 },
+        right: { x:  DPAD_STEP, y: 0 },
+      }
+      const d = delta[dir]
+      const setter = selected === 'left' ? setLeftImg : setRightImg
+      setter(prev => ({
+        x: Math.max(0, Math.min(imageWidth, prev.x + d.x)),
+        y: Math.max(0, Math.min(imageHeight, prev.y + d.y)),
+      }))
+    },
+    [selected, imageWidth, imageHeight],
+  )
+
+  const startMove = useCallback(
+    (dir: DpadDir) => (e: React.PointerEvent) => {
+      e.preventDefault()
+      moveDot(dir)
+      dpadIntervalRef.current = setInterval(() => moveDot(dir), 100)
+    },
+    [moveDot],
+  )
+
+  const stopMove = useCallback(() => {
+    if (dpadIntervalRef.current) {
+      clearInterval(dpadIntervalRef.current)
+      dpadIntervalRef.current = null
     }
-    setDragging(null)
-  }, [dragging])
+  }, [])
 
   const parsedKnown = useMemo(() => {
     if (knownInches.trim() === '') return null
@@ -200,17 +340,33 @@ export function CalibrationDots({
 
   const leftCanvas = imgToCanvas(leftImg)
   const rightCanvas = imgToCanvas(rightImg)
-  const pixelDist = Math.hypot(
-    rightImg.x - leftImg.x,
-    rightImg.y - leftImg.y,
-  )
-  const referenceInches = parsedKnown != null && parsedKnown >= KNOWN_INCHES_MIN && parsedKnown <= KNOWN_INCHES_MAX
-    ? parsedKnown
-    : 3.8
+  const pixelDist = Math.hypot(rightImg.x - leftImg.x, rightImg.y - leftImg.y)
+  const referenceInches =
+    parsedKnown != null && parsedKnown >= KNOWN_INCHES_MIN && parsedKnown <= KNOWN_INCHES_MAX
+      ? parsedKnown
+      : 3.8
   const ppi = pixelDist > 0 ? pixelDist / referenceInches : 0
+
+  // Loupe position: offset from finger, clamped to container
+  let loupeLeft = 0
+  let loupeTop = 0
+  if (loupeState) {
+    let lx = loupeState.canvasX - LOUPE_SIZE - 20
+    let ly = loupeState.canvasY - LOUPE_SIZE - 20
+    if (lx < 0) lx = loupeState.canvasX + 20
+    if (ly < 0) ly = loupeState.canvasY + 20
+    loupeLeft = Math.max(0, Math.min(containerSize.width - LOUPE_SIZE, lx))
+    loupeTop = Math.max(0, Math.min(containerSize.height - LOUPE_SIZE, ly))
+  }
+
+  const dots: Array<{ id: DotId; pos: { x: number; y: number }; label: string }> = [
+    { id: 'left',  pos: leftCanvas,  label: 'L' },
+    { id: 'right', pos: rightCanvas, label: 'R' },
+  ]
 
   return (
     <div className="space-y-3">
+      {/* Image + overlay */}
       <div
         ref={containerRef}
         className="relative w-full select-none overflow-hidden rounded-lg border border-amber-500/30 bg-black"
@@ -218,47 +374,187 @@ export function CalibrationDots({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        // Tap on empty space deselects
+        onClick={(e) => {
+          const target = e.target as Element
+          if (!target.closest('[data-dot]')) setSelected(null)
+        }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          ref={imgRef}
           src={imageUrl}
           alt="Pedicle calibration target"
           className="absolute inset-0 h-full w-full object-contain"
           draggable={false}
+          crossOrigin="anonymous"
         />
+
+        {/* SVG: connecting line + dot visuals */}
         <svg
           className="absolute inset-0 h-full w-full"
           viewBox={`0 0 ${containerSize.width || 1} ${containerSize.height || 1}`}
           preserveAspectRatio="none"
+          style={{ pointerEvents: 'none' }}
         >
           {containerSize.width > 0 && (
-            <line
-              x1={leftCanvas.x}
-              y1={leftCanvas.y}
-              x2={rightCanvas.x}
-              y2={rightCanvas.y}
-              stroke="#f59e0b"
-              strokeWidth={1.5}
-              strokeDasharray="4 4"
-            />
+            <>
+              <line
+                x1={leftCanvas.x}
+                y1={leftCanvas.y}
+                x2={rightCanvas.x}
+                y2={rightCanvas.y}
+                stroke="#f59e0b"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                opacity={0.5}
+              />
+              {dots.map(({ id, pos, label }) => {
+                const isSel = selected === id
+                return (
+                  <g key={id}>
+                    {/* Crosshair lines */}
+                    <line x1={pos.x - 12} y1={pos.y} x2={pos.x + 12} y2={pos.y}
+                      stroke="#fbbf24" strokeWidth={1} opacity={0.65} />
+                    <line x1={pos.x} y1={pos.y - 12} x2={pos.x} y2={pos.y + 12}
+                      stroke="#fbbf24" strokeWidth={1} opacity={0.65} />
+                    {/* Transparent circle */}
+                    <circle cx={pos.x} cy={pos.y} r={7}
+                      fill="rgba(251,191,36,0.20)"
+                      stroke="#fbbf24"
+                      strokeWidth={isSel ? 2.5 : 1.5} />
+                    {/* Center dot */}
+                    <circle cx={pos.x} cy={pos.y} r={2} fill="#fbbf24" opacity={0.9} />
+                    {/* Label */}
+                    <text
+                      x={pos.x}
+                      y={pos.y - 14}
+                      textAnchor="middle"
+                      fontSize={10}
+                      fill="white"
+                      opacity={0.85}
+                      style={{ userSelect: 'none' }}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                )
+              })}
+            </>
           )}
         </svg>
-        <button
-          type="button"
-          aria-label="Left pedicle dot"
-          onPointerDown={onPointerDown('left')}
-          className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg touch-none"
-          style={{ left: leftCanvas.x, top: leftCanvas.y, cursor: dragging === 'left' ? 'grabbing' : 'grab' }}
-        />
-        <button
-          type="button"
-          aria-label="Right pedicle dot"
-          onPointerDown={onPointerDown('right')}
-          className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg touch-none"
-          style={{ left: rightCanvas.x, top: rightCanvas.y, cursor: dragging === 'right' ? 'grabbing' : 'grab' }}
-        />
+
+        {/* Invisible pointer-event buttons — larger hit area than the dot visual */}
+        {dots.map(({ id, pos }) => (
+          <button
+            key={id}
+            type="button"
+            data-dot={id}
+            aria-label={`${id === 'left' ? 'Left' : 'Right'} pedicle dot`}
+            onPointerDown={onPointerDown(id)}
+            className="absolute touch-none rounded-full bg-transparent"
+            style={{
+              left: pos.x,
+              top: pos.y,
+              width: 32,
+              height: 32,
+              transform: 'translate(-50%, -50%)',
+              cursor: dragging === id ? 'grabbing' : 'grab',
+            }}
+          />
+        ))}
+
+        {/* Magnification loupe (touch drag only) */}
+        {loupeState && (
+          <canvas
+            ref={loupeCanvasRef}
+            width={LOUPE_SIZE}
+            height={LOUPE_SIZE}
+            style={{
+              position: 'absolute',
+              left: loupeLeft,
+              top: loupeTop,
+              width: LOUPE_SIZE,
+              height: LOUPE_SIZE,
+              borderRadius: '50%',
+              border: '2px solid #fbbf24',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)',
+              pointerEvents: 'none',
+              zIndex: 10,
+            }}
+          />
+        )}
       </div>
 
+      {/* D-pad fine-tune control */}
+      <div className="flex items-center justify-center gap-4 py-1">
+        <span className="text-xs text-zinc-400 min-w-0 flex-1 text-right pr-2">
+          {selected
+            ? `Fine-tuning: ${selected === 'left' ? 'L' : 'R'} dot`
+            : 'Tap a dot to fine-tune'}
+        </span>
+        <div className="grid grid-cols-3 gap-1" style={{ width: 104 }}>
+          {/* Row 1: up */}
+          <div />
+          <button
+            type="button"
+            aria-label="Move up"
+            disabled={!selected}
+            onPointerDown={startMove('up')}
+            onPointerUp={stopMove}
+            onPointerLeave={stopMove}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 text-zinc-200 disabled:opacity-30 hover:bg-zinc-700 active:bg-zinc-600 touch-none select-none"
+          >
+            ▲
+          </button>
+          <div />
+          {/* Row 2: left, center indicator, right */}
+          <button
+            type="button"
+            aria-label="Move left"
+            disabled={!selected}
+            onPointerDown={startMove('left')}
+            onPointerUp={stopMove}
+            onPointerLeave={stopMove}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 text-zinc-200 disabled:opacity-30 hover:bg-zinc-700 active:bg-zinc-600 touch-none select-none"
+          >
+            ◀
+          </button>
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-900">
+            <div
+              className={`h-2.5 w-2.5 rounded-full transition-colors ${selected ? 'bg-amber-400' : 'bg-zinc-600'}`}
+            />
+          </div>
+          <button
+            type="button"
+            aria-label="Move right"
+            disabled={!selected}
+            onPointerDown={startMove('right')}
+            onPointerUp={stopMove}
+            onPointerLeave={stopMove}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 text-zinc-200 disabled:opacity-30 hover:bg-zinc-700 active:bg-zinc-600 touch-none select-none"
+          >
+            ▶
+          </button>
+          {/* Row 3: down */}
+          <div />
+          <button
+            type="button"
+            aria-label="Move down"
+            disabled={!selected}
+            onPointerDown={startMove('down')}
+            onPointerUp={stopMove}
+            onPointerLeave={stopMove}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 text-zinc-200 disabled:opacity-30 hover:bg-zinc-700 active:bg-zinc-600 touch-none select-none"
+          >
+            ▼
+          </button>
+          <div />
+        </div>
+        <div className="flex-1 pl-2" />
+      </div>
+
+      {/* Known spacing + implied scale */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="text-zinc-300">Measured pedicle spacing (inches, optional)</span>
@@ -282,10 +578,15 @@ export function CalibrationDots({
         <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
           <div className="text-zinc-400">Implied scale</div>
           <div className="mt-1 font-mono text-amber-400">
-            {pixelDist > 0 ? `${pixelDist.toFixed(0)} px / ${referenceInches.toFixed(1)}" = ${ppi.toFixed(1)} px/in` : '—'}
+            {pixelDist > 0
+              ? `${pixelDist.toFixed(0)} px / ${referenceInches.toFixed(1)}" = ${ppi.toFixed(1)} px/in`
+              : '—'}
           </div>
           <div className="mt-2 text-zinc-500">
-            Confidence: {parsedKnown != null && parsedKnown >= KNOWN_INCHES_MIN && parsedKnown <= KNOWN_INCHES_MAX
+            Confidence:{' '}
+            {parsedKnown != null &&
+            parsedKnown >= KNOWN_INCHES_MIN &&
+            parsedKnown <= KNOWN_INCHES_MAX
               ? '0.85 (user-measured)'
               : '0.68 (anatomical average)'}
           </div>
