@@ -512,6 +512,9 @@ MEASUREMENT RULES
 - Tine length ranges: G1 3-6", G2 8-12", G3 7-11", G4 4-9", G5 (if present) 2-5".
 - Circumferences (smallest point between tines): H1 4-5.5", H2 4-5", H3 4-4.5", H4 3.5-4.5".
 - Abnormal points: any point outside the typical pattern; sum lengths into abnormal_points.
+- Point qualification (B&C): a bump qualifies as a point ONLY if length >= 1 inch AND length > width measured at one inch from the tip. Sub-1" stubs and wider-than-long bumps ("stickers"/"worm holes") do NOT qualify — exclude them from tine totals AND from abnormal_points. Note borderline cases in quality_notes.
+- Broken tines: if a tine is clearly snapped, splintered, or rubbed off, report its CURRENT remaining length (not the inferred original). Add the tine key to quality_notes (e.g. "broken: g3_left"). Never invent the missing length.
+- Velvet: if the rack is in velvet, score the underlying hard-antler dimensions visible through the velvet. Do not subtract for velvet bulk and do not add a separate velvet measurement.
 - Deductions: sum |left - right| asymmetries; estimate non-typical-on-typical penalties.
 - gross_score = sum(beams) + sum(tines) + sum(H) + inside_spread + abnormal_points.
 - net_score (typical) = gross_score - abnormal_points - deductions.
@@ -531,6 +534,7 @@ PLAUSIBILITY RULES (verify EACH before returning)
 - 40 <= gross_score <= 280 for any real whitetail.
 - H1 >= H2 >= H3 >= H4 typically (mass tapers distally); violations -> note in quality_notes; do not "fix" by inventing values.
 - G2 typically >= G1 on mature bucks; sub-mature bucks may legitimately violate.
+- Any reported tine length < 1.0" is a non-qualifying point and must be excluded from tine totals and abnormal_points; if you included one, recompute.
 
 SELF-CHECK (perform before returning)
 1. Did you commit to ONE scaling tier and record it in scaling_reference_used?
@@ -538,6 +542,7 @@ SELF-CHECK (perform before returning)
 3. net_score <= gross_score? deductions >= 0? All measurements within ranges?
 4. For every value with low confidence, did you add a quality_note explaining why?
 5. If the image is too poor to measure: set confidence_percent < 40 and explain in quality_notes. Do not invent inches.
+6. Did you exclude every sub-1" bump from tine totals and abnormal_points, and flag any clearly broken tines in quality_notes?
 
 REFUSE
 If image quality fails (blur beyond recognition, obstruction, rack absent), do NOT invent numbers. Return your best honest estimate with confidence_percent < 40 and quality_notes explaining what failed.

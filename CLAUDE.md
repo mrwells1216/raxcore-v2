@@ -423,6 +423,26 @@ Files: new `lib/calibration-constants.ts`, `lib/scoring/experiment-config.ts`,
 `components/scoring/{scoring-wizard,scoring-form,landmark-overlay,precision-pass-card}.tsx`,
 `components/header.tsx`, `app/history/page.tsx`.
 
+### 3.31. Prompt-only awareness boost: B&C 1-inch rule, broken tines, velvet ✓
+Surgical, single-file addition to `buildVisionPrompt` in
+`lib/scoring/vision-scorer.ts` — no schema, no DB, no UI, no form change. The
+AI is now explicitly taught three things it previously had no language for:
+(1) **B&C point qualification**: a bump only counts as a point when length
+≥ 1" AND length > width measured at one inch from the tip; sub-1" stubs and
+wider-than-long "stickers"/"worm holes" are excluded from both tine totals
+and `abnormal_points` (3 added bullets in the MEASUREMENT RULES block).
+(2) **Broken tines**: report the CURRENT remaining length, never the inferred
+original, and flag the tine key in `quality_notes` (e.g. `broken: g3_left`).
+(3) **Velvet (lean)**: score the underlying hard-antler dimensions visible
+through the velvet; do not subtract for velvet bulk; do not add a separate
+velvet measurement. PLAUSIBILITY RULES gain a sub-1" exclusion check and
+SELF-CHECK gains a step asking the model to verify it dropped every sub-1"
+bump and flagged any broken tines. Token impact: prompt grew by ~600 chars,
+well under the existing 8000-char snapshot ceiling. A follow-up that was
+considered and **scrapped during planning**: a post-harvest shrinkage range
+sub-label on the results page (user declined). Verified Score gates and the
+output schema are unchanged. File: modified `lib/scoring/vision-scorer.ts`.
+
 ---
 
 ## 4. What is NOT built yet
