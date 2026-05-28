@@ -54,9 +54,10 @@ function baseReferenceObject() {
 function makeOutput(overrides: Record<string, unknown> = {}): VisionOutput {
   const m = baseMeasurements()
   const measurements = { ...m, ...((overrides.measurements as object) ?? {}) }
+  const landmarks = { ...baseLandmarks(), ...((overrides.landmarks as object) ?? {}) }
   return {
     measurements,
-    landmarks: baseLandmarks(),
+    landmarks,
     reference_object: baseReferenceObject(),
     gross_score: typeof overrides.gross_score === 'number' ? overrides.gross_score : 165,
     net_score: typeof overrides.net_score === 'number' ? overrides.net_score : 158,
@@ -209,6 +210,108 @@ describe('validateScoringOutput', () => {
       )
       expect(report.suggestedConfidenceAdjustments['h3_left']).toBeLessThan(0)
       expect(report.suggestedConfidenceAdjustments['h4_left']).toBeLessThan(0)
+    })
+  })
+
+  describe('spread_vs_ear_length', () => {
+    it('does nothing when ear length is missing', () => {
+      const report = validateScoringOutput(
+        makeOutput({ measurements: { inside_spread: 30 } }),
+      )
+      expect(report.violations.find(v => v.rule === 'spread_vs_ear_length')).toBeUndefined()
+    })
+
+    it('passes when spread is a normal multiple of ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { inside_spread: 20 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      expect(report.violations.find(v => v.rule === 'spread_vs_ear_length')).toBeUndefined()
+    })
+
+    it('warns when spread exceeds 3.5× ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { inside_spread: 28 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      const v = report.violations.find(r => r.rule === 'spread_vs_ear_length')
+      expect(v).toBeDefined()
+      expect(v?.severity).toBe('warning')
+    })
+
+    it('flags critical when spread exceeds 4.5× ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { inside_spread: 40 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      const v = report.violations.find(r => r.rule === 'spread_vs_ear_length')
+      expect(v).toBeDefined()
+      expect(v?.severity).toBe('critical')
+      expect(report.passed).toBe(false)
+    })
+
+    it('ignores noisy sub-4" ear length estimates', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { inside_spread: 40 },
+          landmarks: { ear_base_to_tip_estimated: 3 },
+        }),
+      )
+      expect(report.violations.find(v => v.rule === 'spread_vs_ear_length')).toBeUndefined()
+    })
+  })
+
+  describe('g2_vs_ear_length', () => {
+    it('does nothing when ear length is missing', () => {
+      const report = validateScoringOutput(
+        makeOutput({ measurements: { g2_left: 20, g2_right: 20 } }),
+      )
+      expect(report.violations.find(v => v.rule === 'g2_vs_ear_length')).toBeUndefined()
+    })
+
+    it('passes when G2 is normal relative to ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { g2_left: 10, g2_right: 10 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      expect(report.violations.find(v => v.rule === 'g2_vs_ear_length')).toBeUndefined()
+    })
+
+    it('warns when G2 exceeds 1.6× ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { g2_left: 13, g2_right: 10 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      const v = report.violations.find(
+        r => r.rule === 'g2_vs_ear_length' && r.fieldKey === 'g2_left',
+      )
+      expect(v).toBeDefined()
+      expect(v?.severity).toBe('warning')
+    })
+
+    it('flags critical when G2 exceeds 2.5× ear length', () => {
+      const report = validateScoringOutput(
+        makeOutput({
+          measurements: { g2_left: 20, g2_right: 10 },
+          landmarks: { ear_base_to_tip_estimated: 7.5 },
+        }),
+      )
+      const v = report.violations.find(
+        r => r.rule === 'g2_vs_ear_length' && r.fieldKey === 'g2_left',
+      )
+      expect(v).toBeDefined()
+      expect(v?.severity).toBe('critical')
+      expect(report.passed).toBe(false)
     })
   })
 

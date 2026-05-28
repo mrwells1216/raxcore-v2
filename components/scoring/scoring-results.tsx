@@ -1372,7 +1372,7 @@ function ScoreDisplay({ label, value, range, subtitle, isPrimary }: ScoreDisplay
       </p>
       {range ? (
         <p className="text-xs text-muted-foreground mt-1">
-          {range} range
+          Likely {range}
         </p>
       ) : value == null ? (
         <p className="text-xs text-muted-foreground mt-1">Unavailable</p>

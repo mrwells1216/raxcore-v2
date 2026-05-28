@@ -13,6 +13,8 @@ export type PlausibilityRuleId =
   | 'confidence_in_unit'
   | 'g2_ge_g1'
   | 'h_tapers_distally'
+  | 'spread_vs_ear_length'
+  | 'g2_vs_ear_length'
 
 export interface PlausibilityViolation {
   rule: PlausibilityRuleId
@@ -33,6 +35,19 @@ const ASYMMETRY_WARN = 0.35
 const ASYMMETRY_CRIT = 0.50
 const CONFIDENCE_PCT_MIN = 10
 const CONFIDENCE_PCT_MAX = 95
+
+// Field-judge anatomical cross-checks. Whitetail ear base-to-tip is typically
+// 7–8" on a mature buck. The thresholds below are scaled to that reference:
+// a 20" inside spread on a 7.5" ear is ~2.7×; a 26" booner spread is ~3.5×;
+// anything past 4.5× is anatomically implausible.
+const SPREAD_VS_EAR_WARN = 3.5
+const SPREAD_VS_EAR_CRIT = 4.5
+// G2 longer than ~1.6× ear length is rare but possible on big main-frame
+// bucks; past 2.5× ear length implies a ~19" G2 — extreme outlier territory.
+const G2_VS_EAR_WARN = 1.6
+const G2_VS_EAR_CRIT = 2.5
+// Below this ear length the estimate is too noisy to anchor a sanity check.
+const MIN_EAR_LENGTH_INCHES = 4.0
 
 const PAIRED_FIELDS: ReadonlyArray<readonly [string, string]> = [
   ['main_beam_left', 'main_beam_right'],
@@ -200,6 +215,54 @@ export function validateScoringOutput(output: VisionOutput): PlausibilityReport 
           message: `${bKey} (${bVal}") exceeds ${aKey} (${aVal}") — mass typically tapers distally.`,
         })
         applyAdjustment(adjustments, bKey, -0.05)
+      }
+    }
+  }
+
+  const earLength = output.landmarks?.ear_base_to_tip_estimated
+  if (isPositiveNumber(earLength) && earLength >= MIN_EAR_LENGTH_INCHES) {
+    if (isPositiveNumber(m.inside_spread)) {
+      const ratio = m.inside_spread / earLength
+      if (ratio > SPREAD_VS_EAR_CRIT) {
+        violations.push({
+          rule: 'spread_vs_ear_length',
+          severity: 'critical',
+          fieldKey: 'inside_spread',
+          message: `inside_spread (${m.inside_spread}") is ${ratio.toFixed(1)}× detected ear length (${earLength}") — anatomically implausible for whitetail.`,
+        })
+        applyAdjustment(adjustments, 'inside_spread', -0.30)
+      } else if (ratio > SPREAD_VS_EAR_WARN) {
+        violations.push({
+          rule: 'spread_vs_ear_length',
+          severity: 'warning',
+          fieldKey: 'inside_spread',
+          message: `inside_spread (${m.inside_spread}") is ${ratio.toFixed(1)}× detected ear length (${earLength}") — wide for whitetail; verify calibration.`,
+        })
+        applyAdjustment(adjustments, 'inside_spread', -0.10)
+      }
+    }
+
+    for (const side of ['left', 'right'] as const) {
+      const g2Key = `g2_${side}` as const
+      const g2 = m[g2Key]
+      if (!isPositiveNumber(g2)) continue
+      const ratio = g2 / earLength
+      if (ratio > G2_VS_EAR_CRIT) {
+        violations.push({
+          rule: 'g2_vs_ear_length',
+          severity: 'critical',
+          fieldKey: g2Key,
+          message: `${g2Key} (${g2}") is ${ratio.toFixed(1)}× detected ear length (${earLength}") — extreme outlier; verify calibration.`,
+        })
+        applyAdjustment(adjustments, g2Key, -0.25)
+      } else if (ratio > G2_VS_EAR_WARN) {
+        violations.push({
+          rule: 'g2_vs_ear_length',
+          severity: 'warning',
+          fieldKey: g2Key,
+          message: `${g2Key} (${g2}") is ${ratio.toFixed(1)}× detected ear length (${earLength}") — rare proportion; calibration may be off.`,
+        })
+        applyAdjustment(adjustments, g2Key, -0.10)
       }
     }
   }

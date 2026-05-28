@@ -443,6 +443,37 @@ considered and **scrapped during planning**: a post-harvest shrinkage range
 sub-label on the results page (user declined). Verified Score gates and the
 output schema are unchanged. File: modified `lib/scoring/vision-scorer.ts`.
 
+### 3.32. Field-judge cross-checks (spread / G2 vs ear length) + headline phrasing ✓
+Narrow cherry-pick from a 14-section Codex proposal to add a "Field Judging
+Intelligence Layer." Inventory showed ~75% of the proposal duplicated shipped
+infrastructure (calibration hierarchy, plausibility, vanishing-point,
+anatomical refs, point qualification, error bands, correction flywheel) and
+most of the remainder failed the §9 North-Star test (frame typology, body
+maturity from photo, hunter-style commentary — narrative that looks
+authoritative without improving measurement truth). Two surgical additions
+adopted:
+- **Two new plausibility rules** in `lib/scoring/scoring-plausibility.ts`
+  (`spread_vs_ear_length`, `g2_vs_ear_length`). Each reads
+  `output.landmarks.ear_base_to_tip_estimated` (already populated by the
+  vision call — no signature change, no new pipeline data). Spread > 3.5×
+  ear length warns; > 4.5× is critical (≈ 34"+ spread on a 7.5" ear). G2 >
+  1.6× ear warns; > 2.5× is critical (≈ 19"+ G2). Ear length < 4" is
+  ignored as too noisy to anchor. Critical findings OR into the existing
+  `selfCheckResult.triggerSecondPass`, so the second-pass solver kicks in
+  automatically when these fire — same wiring as the existing 9 rules.
+  These never unlock Verified Score (still requires `physical_reference`
+  per §8).
+- **Headline range phrasing**: `ScoreDisplay` subtitle in
+  `components/scoring/scoring-results.tsx` reads "Likely 148–155" instead
+  of "148–155 range" — the band was already shown, this matches how
+  experienced field judges actually phrase confidence.
+Tests: 9 new specs in `__tests__/scoring/scoring-plausibility.test.ts`
+covering missing ear data, normal proportions, warn/critical thresholds,
+sub-4" ear ignore, and per-side G2 fielding. Full suite passes 135/135.
+Files: modified `lib/scoring/scoring-plausibility.ts`,
+`__tests__/scoring/scoring-plausibility.test.ts`,
+`components/scoring/scoring-results.tsx`.
+
 ---
 
 ## 4. What is NOT built yet
