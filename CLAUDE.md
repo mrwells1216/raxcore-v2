@@ -474,6 +474,43 @@ Files: modified `lib/scoring/scoring-plausibility.ts`,
 `__tests__/scoring/scoring-plausibility.test.ts`,
 `components/scoring/scoring-results.tsx`.
 
+### 3.33. Benchmark run execution — measured accuracy (Phase 1) ✓
+First entry in the post-§4 accuracy/flywheel campaign. The accuracy-measurement
+machinery already existed but had no crank: `createBenchmarkRun` builds a pending
+bulk-validation run from a promoted gold-standard pack, the bulk-validation
+execute route scores every example against ground truth, and `evaluateGuardrails`
+reads the results — but the `benchmark_run` job pipeline was a `not_implemented`
+stub and nobody had run it end-to-end to produce a headline accuracy number.
+This wires it shut. (a) Extracted the bulk-validation execute route body into a
+reusable `executeBulkValidationRun(runId)` in `lib/validation/bulk-service.ts`
+(self-contained: fetches run, guards pending via new `BulkRunNotFoundError` /
+`BulkRunNotPendingError`, scores each snapshotted example with `scoreBuck`,
+persists per-example gross/net error, computes summary metrics, marks
+completed/failed). The route is now thin and gets `maxDuration = 300`. (b)
+Replaced the `benchmark_run` export-stub registration with a real
+`benchmarkRunPipeline` (`lib/jobs/pipelines/index.ts`) that chains load run →
+`executeBulkValidationRun(bulk_validation_run_id)` → `evaluateGuardrails` →
+finalize, mirroring the existing `sandbox_evaluation` pipeline structure.
+`export_*` and `offline_evaluation` remain stubs (Phase 3). (c) New inline
+trigger `POST /api/admin/benchmarks/runs/[id]/execute` (maxDuration 300, the
+§3.30 precision-pass pattern) so the headline number can be produced without a
+QStash worker, plus a `RunBenchmarkExecuteButton` client component shown on the
+run detail page when status is `pending`. (d) New `BenchmarkHeadlineMetrics`
+component surfaces MAE gross/net, median gross, within-5″/within-10″, and
+over/under counts from the bulk run's `summary_metrics.primary_model` on the run
+detail page. NOTE: the actual "run once on a real pack and record the number"
+step is a manual admin action — it needs live Supabase data, real images, and
+`OPENAI_API_KEY`, none of which exist in CI. tsc clean, build succeeds, existing
+135 tests pass (run-execution unit tests deferred — the executor is tightly
+coupled to Supabase `createClient` and `scoreBuck`, so a meaningful test needs
+DB/AI mocking; tracked for a follow-up). Files: modified
+`lib/validation/bulk-service.ts`, `lib/jobs/pipelines/index.ts`,
+`app/api/admin/bulk-validation/runs/[id]/execute/route.ts`,
+`app/admin/benchmarks/runs/[id]/page.tsx`; new
+`app/api/admin/benchmarks/runs/[id]/execute/route.ts`,
+`components/admin/run-benchmark-execute-button.tsx`,
+`components/admin/benchmark-headline-metrics.tsx`.
+
 ---
 
 ## 4. What is NOT built yet
