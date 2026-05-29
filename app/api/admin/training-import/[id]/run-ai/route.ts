@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getServiceSupabase } from '@/lib/supabase/admin'
 import { scoreBuck } from '@/lib/scoring/ai-service'
+import {
+  flattenOfficialScoreData,
+  officialGrossFromScoreData,
+} from '@/lib/training/official-measurements'
 
 export const runtime = 'nodejs'
 
@@ -56,8 +60,10 @@ export async function POST(
     rackType,
   })
 
-  // Build comparison: official vs AI per field
-  const officialMeasurements = (sheet.score_data as Record<string, number>) ?? {}
+  // Build comparison: official vs AI per field. Official sheets store a NESTED
+  // left/right shape; flatten to the same flat keys the AI scorer uses so paired
+  // fields (g2_left, h1_right, …) actually align instead of silently mismatching.
+  const officialMeasurements = flattenOfficialScoreData(sheet.score_data)
   const aiMeasurements: Record<string, number> = {}
   if (scoringResult.measurements) {
     for (const [k, v] of Object.entries(scoringResult.measurements)) {
@@ -85,7 +91,7 @@ export async function POST(
     comparisonFields.push({ field, official, ai, delta, percent_off })
   }
 
-  const officialGross = (sheet.score_data as Record<string, number>)?.gross_score ?? null
+  const officialGross = officialGrossFromScoreData(sheet.score_data)
   const aiGross = scoringResult.predictedGross ?? null
 
   const aiRunResult = {

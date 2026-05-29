@@ -84,7 +84,7 @@ If a feature looks impressive but does not improve measurement truth, do not shi
 ### 3.7. AI Learning Flywheel WI-1 through WI-6 ✓ (PR #18)
 - Supervision hooks wired: `onReversePassComplete`, `onStructuralSolverComplete`, `onIntervalMiss`, `onHighConfidenceMiss`
 - `correction_events` table + `lib/training/correction-events.ts` — unified correction capture from all 4 sources (score editor, dpad, precision pass, review sheet)
-- Prompt bias correction (`lib/scoring/prompt-bias-correction.ts`) — fires after 30+ corrections per field
+- Prompt bias correction (`lib/scoring/prompt-bias-correction.ts`) — fires at ≥10 observations per field, |mean delta| ≥ 0.5", clamped ±3" (see §3.34 for the ground-truth fusion)
 - Admin accuracy dashboard at `/admin/accuracy`
 - Roboflow seed dataset infrastructure (`/admin/seed-dataset`)
 - QStash migration: `lib/jobs/qstash-verify.ts`, scheduler + worker routes updated, `vercel.json` crons removed
@@ -510,6 +510,52 @@ DB/AI mocking; tracked for a follow-up). Files: modified
 `app/api/admin/benchmarks/runs/[id]/execute/route.ts`,
 `components/admin/run-benchmark-execute-button.tsx`,
 `components/admin/benchmark-headline-metrics.tsx`.
+
+### 3.34. Ground-truth bias fusion + official-sheet flattening fix (Phase 2) ✓
+Second entry in the accuracy/flywheel campaign — hardens the correction
+flywheel so it learns from certified score sheets, not just user guesses.
+(a) **Threshold reconciliation**: §3.7 claimed bias "fires after 30+
+corrections per field" but the code used `MIN_SAMPLE_COUNT = 10`. Doc now
+matches code (≥10 observations, |mean| ≥ 0.5", clamped ±3").
+(b) **Official-sheet flattening bug fix**: official score sheets store a
+NESTED `score_data` (`{ left: {main_beam, g1..g5, h1..h4}, right: {…},
+inside_spread, calculated_gross }`), but `app/api/admin/training-import/[id]/run-ai/route.ts`
+read it as a FLAT `Record<string, number>` — so every paired tine/beam/circ
+field silently mis-aligned (official came back null) and only
+`inside_spread`/`abnormal_points` ever compared. New
+`lib/training/official-measurements.ts` exports `flattenOfficialScoreData()`
+(nested → flat `g2_left`/`h1_right`/… keys matching the AI scorer and
+`correction_events`) and `officialGrossFromScoreData()` (reads
+`calculated_gross`, the form's actual key, with `gross_score` fallback). This
+also fixes the §3.29 AI-vs-official comparison table, which renders these
+per-field deltas.
+(c) **Ground-truth bias signal (the lever)**: `lib/scoring/prompt-bias-correction.ts`
+now fuses two sources into the per-field bias: user corrections from
+`correction_events` (delta = userValue − aiValue, weight 1) AND AI-vs-official
+deltas from `official_score_sheets.ai_run_result.fields[]` (delta = ai −
+official, sign-flipped to `official − ai`, weight 3 since certified sheets beat
+user guesses). `loadFieldBiases` and `getBiasReport` compute a weighted mean
+over the merged observations; the ±3" clamp, 0.5" magnitude floor, and ≥10
+observation count are unchanged but now count ground-truth observations too.
+No migration (reuses existing `ai_run_result` JSONB). The fused bias flows
+through the existing consumers unchanged — injected into the vision prompt
+(`vision-scorer.ts:462`) and applied additively (`ai-service.ts:973`) — so the
+loop closes on ground truth automatically. Tests: 7 new specs in
+`__tests__/scoring/prompt-bias-fusion.test.ts` (sign flip, weighting math,
+sub-count/sub-magnitude no-fire, clamp, gross/net exclusion, combined sample
+count) with a chainable Supabase mock. tsc clean, build succeeds, full suite
+142/142. Files: new `lib/training/official-measurements.ts`, new
+`__tests__/scoring/prompt-bias-fusion.test.ts`; modified
+`lib/scoring/prompt-bias-correction.ts`,
+`app/api/admin/training-import/[id]/run-ai/route.ts`, `CLAUDE.md` §3.7.
+
+Remaining campaign work (not yet built): flywheel A/B automation
+(`sandbox_evaluation` + `promoteVariant` exist; needs an auto-trigger that
+evaluates candidate prompt variants against the benchmark pack and surfaces a
+promote/reject recommendation); Phase 3 stub fills (`export_*`,
+`offline_evaluation` pipelines, maintenance no-op handlers); and the optional
+user-supplied maturity-class calibration (deferred pending real benchmark
+numbers — see plan).
 
 ---
 
