@@ -4,8 +4,11 @@ import { notFound } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { getBenchmarkRun, getPromotionReadiness } from '@/lib/benchmark/service'
+import { getBulkValidationRun } from '@/lib/validation/bulk-service'
 import { GuardrailResultsPanel } from '@/components/admin/guardrail-results-panel'
 import { PromotionReadinessPanel } from '@/components/admin/promotion-readiness-panel'
+import { RunBenchmarkExecuteButton } from '@/components/admin/run-benchmark-execute-button'
+import { BenchmarkHeadlineMetrics } from '@/components/admin/benchmark-headline-metrics'
 import { ArrowLeft, Play, CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react'
 import Link from 'next/link'
 
@@ -23,6 +26,8 @@ export default async function BenchmarkRunDetailPage({
 
   const isComplete = run.bulk_run_status === 'completed'
   const readiness = isComplete ? await getPromotionReadiness(id) : null
+  const bulkRun = isComplete ? await getBulkValidationRun(run.bulk_validation_run_id) : null
+  const headlineMetrics = bulkRun?.summary_metrics?.primary_model ?? null
 
   const getStatusBadge = () => {
     switch (run.bulk_run_status) {
@@ -142,6 +147,19 @@ export default async function BenchmarkRunDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {/* Pending — offer to run scoring */}
+      {run.bulk_run_status === 'pending' && (
+        <RunBenchmarkExecuteButton
+          benchmarkRunId={id}
+          exampleCount={run.pack_example_count ?? run.total_examples ?? 0}
+        />
+      )}
+
+      {/* Headline accuracy */}
+      {isComplete && headlineMetrics && (
+        <BenchmarkHeadlineMetrics metrics={headlineMetrics} />
+      )}
 
       {/* Guardrail Results */}
       {isComplete && run.guardrail_results && (

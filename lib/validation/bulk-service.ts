@@ -1,4 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
+import { scoreBuck } from '@/lib/scoring/ai-service'
+import { getBuckImages } from '@/lib/storage/service'
+import { getCalibrationProfileById } from '@/lib/calibration/utils'
 import type {
   BulkValidationRun,
   BulkValidationFilters,
@@ -11,6 +14,7 @@ import type {
   BulkRunExportData,
   RackType,
   SourceType,
+  AngleType,
 } from '@/lib/types'
 
 // ============================================================================
@@ -801,5 +805,322 @@ export async function getModelVersionInfo(
   return {
     id: data?.id || modelVersionId,
     name: data?.version_name || 'Unknown Model',
+  }
+}
+
+// ============================================================================
+// RUN EXECUTION
+// ============================================================================
+
+export class BulkRunNotFoundError extends Error {
+  constructor(runId: string) {
+    super(`Bulk validation run not found: ${runId}`)
+    this.name = 'BulkRunNotFoundError'
+  }
+}
+
+export class BulkRunNotPendingError extends Error {
+  constructor() {
+    super('Only pending runs can be executed')
+    this.name = 'BulkRunNotPendingError'
+  }
+}
+
+export interface ExecuteBulkRunResult {
+  processed: number
+  total: number
+  totalTimeMs: number
+  summaryMetrics: BulkRunSummaryMetrics
+}
+
+/**
+ * Execute a bulk validation run: score every snapshotted training example with
+ * the run's model(s), persist per-example errors vs ground truth, and compute
+ * summary metrics. Self-contained so it can be invoked from the HTTP route OR
+ * the `benchmark_run` job pipeline.
+ *
+ * Throws BulkRunNotFoundError / BulkRunNotPendingError for guard failures
+ * (before any mutation). Execution errors mark the run 'failed' and rethrow.
+ */
+export async function executeBulkValidationRun(
+  runId: string
+): Promise<ExecuteBulkRunResult> {
+  const run = await getBulkValidationRun(runId)
+  if (!run) throw new BulkRunNotFoundError(runId)
+  if (run.status !== 'pending') throw new BulkRunNotPendingError()
+
+  try {
+    // Mark as running
+    await updateBulkRunStatus(runId, 'running')
+
+    // Use snapshotted example IDs if available (reproducibility), otherwise fall back to filter query
+    let examples: Awaited<ReturnType<typeof getTrainingExamplesByIds>>
+
+    if (run.example_ids && run.example_ids.length > 0) {
+      examples = await getTrainingExamplesByIds(run.example_ids)
+    } else {
+      // Legacy support: fall back to filter query for older runs without snapshotted IDs
+      const filteredExamples = await getFilteredTrainingExamples(
+        run.filters as BulkValidationFilters | undefined
+      )
+      examples = filteredExamples.map((e) => ({
+        ...e,
+        ground_truth_net: null,
+        capture_device: null,
+        frame_size: null,
+        ears_fully_visible: null,
+        angle_tags: null,
+      }))
+    }
+
+    if (examples.length === 0) {
+      await updateBulkRunStatus(runId, 'failed', 'No training examples found for this run')
+      throw new Error('No training examples found for this run')
+    }
+
+    await updateBulkRunProgress(runId, examples.length, 0)
+
+    // Load calibration profiles for model comparison
+    const primaryCalibration = run.primary_calibration_profile_id
+      ? await getCalibrationProfileById(run.primary_calibration_profile_id)
+      : null
+    const comparisonCalibrations = await Promise.all(
+      (run.comparison_calibration_profile_ids || []).map((cpId: string) =>
+        getCalibrationProfileById(cpId)
+      )
+    )
+
+    // Get model version info
+    const primaryModelInfo = await getModelVersionInfo(run.primary_model_version_id)
+    const comparisonModelInfos = await Promise.all(
+      (run.comparison_model_version_ids || []).map((mvId: string) =>
+        getModelVersionInfo(mvId)
+      )
+    )
+
+    // Process each example
+    let processed = 0
+    const startTime = Date.now()
+
+    for (const example of examples) {
+      try {
+        // Check if run was cancelled
+        const currentRun = await getBulkValidationRun(runId)
+        if (currentRun?.status === 'cancelled') {
+          break
+        }
+
+        // Get images for this buck if available
+        let imageUrls = example.image_urls || []
+        if (example.buck_id && imageUrls.length === 0) {
+          const buckImages = await getBuckImages(example.buck_id)
+          imageUrls = buckImages
+            .map((img) => img.image_url)
+            .filter((u): u is string => u != null)
+        }
+
+        if (imageUrls.length === 0) {
+          // Skip examples without images
+          processed++
+          await updateBulkRunProgress(runId, examples.length, processed)
+          continue
+        }
+
+        // Score with each model version
+        const modelResults: ModelPredictionResult[] = []
+
+        // Primary model (or current active)
+        try {
+          const primaryStartTime = Date.now()
+          const primaryResult = await scoreBuck({
+            images: imageUrls.map((url, i) => ({
+              imageUrl: url,
+              angleType: (example.angle_tags?.[i] || (i === 0 ? 'front' : 'other')) as AngleType,
+              width: 1024,
+              height: 1024,
+            })),
+            state: example.state || undefined,
+            rackType: (example.rack_type || 'typical') as RackType,
+            earsFullyVisible: example.ears_fully_visible ?? true,
+            sourceType: example.source_type || undefined,
+            captureDevice: example.capture_device || undefined,
+            calibrationProfile: primaryCalibration,
+          })
+          const primaryProcessingTime = Date.now() - primaryStartTime
+
+          const primaryGross = primaryResult.predictedGross
+          const primaryNet = primaryResult.predictedNet
+          const errorGross = primaryGross - example.ground_truth_score
+          const errorNet =
+            primaryNet != null && example.ground_truth_score != null
+              ? primaryNet - example.ground_truth_score
+              : null
+
+          modelResults.push({
+            model_version_id: run.primary_model_version_id,
+            model_version_name: primaryModelInfo.name,
+            raw_vision_gross: primaryResult.rawVisionGross ?? primaryGross,
+            raw_vision_net: primaryResult.rawVisionNet ?? primaryNet,
+            normalized_gross: primaryResult.normalizedGross ?? primaryGross,
+            normalized_net: primaryResult.normalizedNet ?? primaryNet,
+            final_gross: primaryGross,
+            final_net: primaryNet,
+            error_gross: errorGross,
+            error_net: errorNet,
+            abs_error_gross: Math.abs(errorGross),
+            abs_error_net: errorNet != null ? Math.abs(errorNet) : null,
+            percent_error_gross:
+              example.ground_truth_score > 0
+                ? (errorGross / example.ground_truth_score) * 100
+                : 0,
+            percent_error_net: null,
+            confidence_percent: primaryResult.confidencePercent,
+            scoring_method: primaryResult.scoringMethod || 'vision',
+            processing_time_ms: primaryProcessingTime,
+          })
+        } catch (err) {
+          console.error(`Error scoring with primary model for example ${example.id}:`, err)
+        }
+
+        // Comparison models (for model comparison runs)
+        if (run.run_type === 'model_comparison') {
+          for (let i = 0; i < comparisonModelInfos.length; i++) {
+            const compInfo = comparisonModelInfos[i]
+            const compCalibration = comparisonCalibrations[i]
+            try {
+              const compStartTime = Date.now()
+              const compResult = await scoreBuck({
+                images: imageUrls.map((url, idx) => ({
+                  imageUrl: url,
+                  angleType: (example.angle_tags?.[idx] || (idx === 0 ? 'front' : 'other')) as AngleType,
+                  width: 1024,
+                  height: 1024,
+                })),
+                state: example.state || undefined,
+                rackType: (example.rack_type || 'typical') as RackType,
+                earsFullyVisible: example.ears_fully_visible ?? true,
+                sourceType: example.source_type || undefined,
+                captureDevice: example.capture_device || undefined,
+                calibrationProfile: compCalibration,
+              })
+              const compProcessingTime = Date.now() - compStartTime
+
+              const compGross = compResult.predictedGross
+              const compNet = compResult.predictedNet
+              const errorGross = compGross - example.ground_truth_score
+              const errorNet =
+                compNet != null && example.ground_truth_score != null
+                  ? compNet - example.ground_truth_score
+                  : null
+
+              modelResults.push({
+                model_version_id: run.comparison_model_version_ids[i],
+                model_version_name: compInfo.name,
+                raw_vision_gross: compResult.rawVisionGross ?? compGross,
+                raw_vision_net: compResult.rawVisionNet ?? compNet,
+                normalized_gross: compResult.normalizedGross ?? compGross,
+                normalized_net: compResult.normalizedNet ?? compNet,
+                final_gross: compGross,
+                final_net: compNet,
+                error_gross: errorGross,
+                error_net: errorNet,
+                abs_error_gross: Math.abs(errorGross),
+                abs_error_net: errorNet != null ? Math.abs(errorNet) : null,
+                percent_error_gross:
+                  example.ground_truth_score > 0
+                    ? (errorGross / example.ground_truth_score) * 100
+                    : 0,
+                percent_error_net: null,
+                confidence_percent: compResult.confidencePercent,
+                scoring_method: compResult.scoringMethod || 'vision',
+                processing_time_ms: compProcessingTime,
+              })
+            } catch (err) {
+              console.error(
+                `Error scoring with comparison model ${compInfo.id} for example ${example.id}:`,
+                err
+              )
+            }
+          }
+        }
+
+        // Save result
+        if (modelResults.length > 0) {
+          await createBulkValidationResult({
+            bulkRunId: runId,
+            trainingExampleId: example.id,
+            buckId: example.buck_id,
+            groundTruthGross: example.ground_truth_score,
+            groundTruthNet: null,
+            modelResults,
+            state: example.state,
+            rackType: example.rack_type as RackType | null,
+            sourceType: example.source_type as SourceType | null,
+            imageCount: imageUrls.length,
+          })
+        }
+
+        processed++
+        await updateBulkRunProgress(runId, examples.length, processed)
+      } catch (err) {
+        console.error(`Error processing example ${example.id}:`, err)
+        processed++
+        await updateBulkRunProgress(runId, examples.length, processed)
+      }
+    }
+
+    // Calculate summary metrics
+    const { data: allResults } = await getBulkValidationResults(runId, { limit: 10000 })
+
+    const primaryMetrics = calculateModelRunMetrics(
+      allResults,
+      run.primary_model_version_id,
+      primaryModelInfo.name
+    )
+
+    const comparisonMetrics = comparisonModelInfos.map((info, i) =>
+      calculateModelRunMetrics(allResults, run.comparison_model_version_ids[i], info.name)
+    )
+
+    const improvementMetrics =
+      run.run_type === 'model_comparison'
+        ? comparisonModelInfos.map((info, i) =>
+            calculateImprovementMetrics(
+              allResults,
+              run.primary_model_version_id,
+              run.comparison_model_version_ids[i],
+              info.name
+            )
+          )
+        : null
+
+    const summaryMetrics: BulkRunSummaryMetrics = {
+      primary_model: primaryMetrics,
+      comparison_models: comparisonMetrics,
+      improvement_vs_comparison: improvementMetrics,
+    }
+
+    await updateBulkRunSummary(runId, summaryMetrics)
+
+    // Check final status
+    const finalRun = await getBulkValidationRun(runId)
+    if (finalRun?.status !== 'cancelled') {
+      await updateBulkRunStatus(runId, 'completed')
+    }
+
+    return {
+      processed,
+      total: examples.length,
+      totalTimeMs: Date.now() - startTime,
+      summaryMetrics,
+    }
+  } catch (error) {
+    // Mark failed for any execution-phase error (guards already threw above).
+    await updateBulkRunStatus(
+      runId,
+      'failed',
+      error instanceof Error ? error.message : 'Unknown error'
+    ).catch(() => {})
+    throw error
   }
 }

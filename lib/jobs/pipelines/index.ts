@@ -84,7 +84,7 @@ registerPipeline('render_generate', renderStubPipeline)
 registerPipeline('render_batch', renderStubPipeline)
 
 // ============================================================================
-// EXPORT/BENCHMARK PIPELINES (STUB - not yet implemented as pipelines)
+// EXPORT PIPELINES (STUB - not yet implemented as pipelines)
 // ============================================================================
 
 export interface ExportJobPayload {
@@ -99,8 +99,102 @@ const exportStubPipeline = definePipeline<ExportJobPayload, { downloadUrl: strin
 
 registerPipeline('export_pack_compute', exportStubPipeline)
 registerPipeline('export_run', exportStubPipeline)
-registerPipeline('benchmark_run', exportStubPipeline)
 registerPipeline('offline_evaluation', exportStubPipeline)
+
+// ============================================================================
+// BENCHMARK RUN PIPELINE - REAL IMPLEMENTATION
+// ============================================================================
+// Chains the existing (real) machinery: a benchmark run already owns a pending
+// bulk-validation run (created by createBenchmarkRun) whose example IDs are
+// snapshotted from a promoted gold-standard pack. This pipeline scores every
+// example against ground truth, then evaluates regression guardrails.
+
+export interface BenchmarkRunPayload {
+  benchmarkRunId: string
+}
+
+export interface BenchmarkRunPipelineResult {
+  benchmarkRunId: string
+  bulkValidationRunId: string
+  processed: number
+  total: number
+  guardrailsPassed: boolean
+  criticalFailures: number
+}
+
+const benchmarkRunPipeline = definePipeline<BenchmarkRunPayload, BenchmarkRunPipelineResult>('benchmark_run', [
+  {
+    name: 'validate_input',
+    weight: 5,
+    execute: async (payload) => {
+      if (!payload.benchmarkRunId) throw new Error('benchmarkRunId is required')
+      return payload
+    },
+  },
+  {
+    name: 'load_run',
+    weight: 5,
+    execute: async (payload, context) => {
+      await context.updateProgress(5, 'Loading benchmark run...')
+      const { getBenchmarkRun } = await import('../../benchmark/service')
+      const run = await getBenchmarkRun(payload.benchmarkRunId)
+      if (!run) throw new Error(`Benchmark run ${payload.benchmarkRunId} not found`)
+      if (!run.bulk_validation_run_id) {
+        throw new Error(`Benchmark run ${payload.benchmarkRunId} has no bulk validation run`)
+      }
+      return { ...payload, bulkValidationRunId: run.bulk_validation_run_id }
+    },
+  },
+  {
+    name: 'execute_scoring',
+    weight: 75,
+    execute: async (payload, context) => {
+      await context.updateProgress(15, 'Scoring gold-standard examples...')
+      const { executeBulkValidationRun } = await import('../../validation/bulk-service')
+      const typed = payload as BenchmarkRunPayload & { bulkValidationRunId: string }
+      const result = await executeBulkValidationRun(typed.bulkValidationRunId)
+      return { ...typed, processed: result.processed, total: result.total }
+    },
+  },
+  {
+    name: 'evaluate_guardrails',
+    weight: 10,
+    execute: async (payload, context) => {
+      await context.updateProgress(90, 'Evaluating regression guardrails...')
+      const { evaluateGuardrails } = await import('../../benchmark/service')
+      const typed = payload as BenchmarkRunPayload & {
+        bulkValidationRunId: string
+        processed: number
+        total: number
+      }
+      const guardrails = await evaluateGuardrails(typed.benchmarkRunId)
+      return { ...typed, guardrails }
+    },
+  },
+  {
+    name: 'finalize',
+    weight: 5,
+    execute: async (payload, context) => {
+      await context.updateProgress(98, 'Finalizing benchmark run...')
+      const typed = payload as BenchmarkRunPayload & {
+        bulkValidationRunId: string
+        processed: number
+        total: number
+        guardrails: { overall_passed: boolean; critical_failures: number }
+      }
+      return {
+        benchmarkRunId: typed.benchmarkRunId,
+        bulkValidationRunId: typed.bulkValidationRunId,
+        processed: typed.processed,
+        total: typed.total,
+        guardrailsPassed: typed.guardrails.overall_passed,
+        criticalFailures: typed.guardrails.critical_failures,
+      }
+    },
+  },
+])
+
+registerPipeline('benchmark_run', benchmarkRunPipeline)
 
 // ============================================================================
 // MAINTENANCE JOB HANDLERS (Real implementations)
@@ -679,6 +773,7 @@ console.log('[Jobs] Pipeline registry initialized:')
 console.log('  - Scoring pipelines: STUB (scoring done via API)')
 console.log('  - Render pipelines: STUB (not implemented)')
 console.log('  - Export pipelines: STUB (not implemented)')
+console.log('  - Benchmark run: REAL')
 console.log('  - Sandbox evaluation: REAL')
 console.log('  - Reverse precision pass: REAL')
 console.log('  - Multi-view scoring: REAL')
