@@ -274,6 +274,9 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
       const apiFormData = new FormData()
       apiFormData.append('state', data.state ?? '')
       apiFormData.append('rack_type', data.rack_type)
+      if (data.maturity_class && data.maturity_class !== 'unknown') {
+        apiFormData.append('maturity_class', data.maturity_class)
+      }
       if (data.harvest_method) apiFormData.append('harvest_method', data.harvest_method)
       if (data.source_type) apiFormData.append('source_type', data.source_type)
       if (data.capture_device) apiFormData.append('capture_device', data.capture_device)

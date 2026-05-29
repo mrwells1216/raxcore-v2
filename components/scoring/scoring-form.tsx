@@ -38,6 +38,7 @@ const formSchema = z.object({
     'skull_cap', 'stetson', 'wide_brim',
   ]).optional().nullable(),
   rack_type: z.enum(['typical', 'non-typical'], { required_error: 'Rack type is required' }),
+  maturity_class: z.enum(['unknown', 'yearling', 'mature_2', 'mature_3plus']).optional(),
   harvest_method: z.enum(['bow', 'rifle', 'muzzleloader', 'crossbow', 'other']).optional(),
   source_type: z.enum(['live_deer', 'mounted_photo', 'european_mount', 'trail_cam', 'harvest_photo', 'other']).optional(),
   capture_device: z.enum(['iphone', 'android', 'digital_camera', 'photo_of_photo', 'vintage_photo', 'unknown']).optional(),
@@ -106,6 +107,7 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
       reference_object_ring_size: null,
       reference_object_hat_type: null,
       rack_type: 'typical',
+      maturity_class: 'unknown',
       harvest_method: undefined,
       source_type: undefined,
       capture_device: 'unknown',
@@ -314,6 +316,34 @@ export const ScoringForm = forwardRef<ScoringFormHandle, ScoringFormProps>(funct
                     ))}
                   </div>
                 </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="maturity_class"
+            render={({ field }) => (
+              <FormItem className="space-y-1">
+                <FormLabel className="text-xs">Estimated Age (optional)</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value ?? 'unknown'}>
+                  <FormControl>
+                    <SelectTrigger className="h-10 text-sm">
+                      <SelectValue placeholder="Unknown" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="unknown">Unknown / not sure</SelectItem>
+                    <SelectItem value="yearling">Yearling (1.5 yr)</SelectItem>
+                    <SelectItem value="mature_2">2.5 years</SelectItem>
+                    <SelectItem value="mature_3plus">Mature (3.5+ yr)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground leading-tight">
+                  Only refines scale when no ruler, marker, or LiDAR is available.
+                  Estimated — never affects a Verified Score.
+                </p>
                 <FormMessage />
               </FormItem>
             )}

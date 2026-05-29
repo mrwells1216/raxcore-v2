@@ -460,6 +460,8 @@ export interface PreScoringMeasurements {
 export interface ScoringFormData {
   state?: string | null
   rack_type: RackType
+  // Optional age hint — refines no-reference anatomical calibration only.
+  maturity_class?: 'unknown' | 'yearling' | 'mature_2' | 'mature_3plus'
   harvest_method?: HarvestMethod
   source_type?: SourceType
   capture_device?: CaptureDevice

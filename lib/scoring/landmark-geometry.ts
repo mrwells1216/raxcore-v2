@@ -1,5 +1,6 @@
 import { isFiniteNumber } from '@/lib/advanced-scoring/geometry'
-import { ANATOMICAL_REFERENCES } from '@/lib/constants'
+import { ANATOMICAL_REFERENCES, maturityFacialScale } from '@/lib/constants'
+import type { MaturityClass } from '@/lib/constants'
 import type {
   LandmarkDetection,
   AntlerLandmarkId,
@@ -44,6 +45,7 @@ export interface EyeCirclePpiResult {
  */
 export function eyeCircleToPixelsPerInch(
   perImage: PerImageLandmarkResult[],
+  maturityClass?: MaturityClass | null,
 ): EyeCirclePpiResult | null {
   const observations: Array<{
     ppi: number
@@ -52,7 +54,10 @@ export function eyeCircleToPixelsPerInch(
     side: 'left' | 'right'
   }> = []
 
-  const irisInches = ANATOMICAL_REFERENCES.IRIS_RADIUS
+  // Younger bucks have a slightly smaller iris; scale the reference radius down
+  // so the same pixel radius maps to the correct (smaller) real size. Adult/
+  // unknown ⇒ 1.0 (no change). Ears are never scaled (mature early).
+  const irisInches = ANATOMICAL_REFERENCES.IRIS_RADIUS * maturityFacialScale(maturityClass)
 
   for (const image of perImage) {
     if (image.failed) continue
