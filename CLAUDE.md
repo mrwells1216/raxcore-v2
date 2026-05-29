@@ -575,10 +575,9 @@ needs DB/AI mocking, tracked with the §3.33 follow-up). Files: new
 new `components/admin/ab-evaluate-panel.tsx`; modified `lib/jobs/types.ts`,
 `lib/jobs/pipelines/index.ts`, `app/admin/sandbox/page.tsx`.
 
-Remaining campaign work (not yet built): Phase 3 stub fills (`export_*`,
-`offline_evaluation` pipelines, maintenance no-op handlers); and the optional
-user-supplied maturity-class calibration (deferred pending real benchmark
-numbers — see plan).
+Remaining campaign work: the optional user-supplied maturity-class calibration
+(deferred pending real benchmark numbers — see plan). Phase 3 ("fill the stub
+pipelines") was investigated on 2026-05-29 and deliberately NOT built — see §4.
 
 ---
 
@@ -593,6 +592,34 @@ If new initiatives are scoped in the future, add them under this section
 with the same numbered structure (4.1, 4.2, …). For now, the next
 strategic frontier sits inside the existing flywheel (§3.7) rather than as
 a new feature workstream.
+
+### 4.1. Phase 3 stub pipelines — investigated, deliberately NOT built (2026-05-29)
+The accuracy/flywheel campaign's "Phase 3" was to fill the remaining
+`not_implemented` job pipelines. Investigation found there is no high-value,
+non-speculative work here, so it was intentionally skipped (per §9 — do not
+ship machinery that doesn't improve measurement truth):
+- **`export_run` / `export_pack_compute` / `offline_evaluation` / `render_*`
+  pipelines**: registered as stubs but have **no callers** anywhere in `app/`
+  or `lib/`. Export already works synchronously via routes
+  (`app/api/training/export`, `app/api/admin/training-packs/[id]/export`,
+  `exportBulkRunData`/`formatExportAsCSV` in `lib/validation/bulk-service.ts`).
+  Implementing the background pipelines now would be unused dead code. Leave
+  as documented stubs until a real batch/background caller exists.
+- **Maintenance handlers** (`lib/jobs/pipelines/index.ts`): `cleanup_stale_jobs`
+  is already real (`recoverStaleJobs` + `cleanupOldJobs`). The rest are honest
+  no-ops — either the subsystem genuinely doesn't exist yet (event logging,
+  temp-asset/blob cleanup, segment + confidence-profile caching) or it exists
+  but is sensitive/outward-facing and intentionally not auto-wired here
+  (`notification_digest`, `billing_usage_sync` — comments corrected to say so).
+  None have a scheduled `job_definitions` row driving them.
+- **`error_stability`** in `lib/health/service.ts` is hardcoded to 70 but is a
+  **cosmetic reported factor only** — it is NOT part of the `rawScore` weight
+  sum, so it affects no health decision. Computing it would be cosmetic; left
+  as-is.
+
+`render_*` remains deferred for the original §9 reason (schematic render is
+decorative). If background export/eval is ever needed, wire the existing
+route-level logic into the corresponding pipeline at that point.
 
 ---
 

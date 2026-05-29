@@ -233,14 +233,18 @@ registerJobHandler('confidence_profile_refresh', async () => {
 })
 
 registerJobHandler('notification_digest', async (payload) => {
-  // TODO: Implement notification digest when notification system is added
-  console.log('[Maintenance] notification_digest called - no-op until notifications implemented')
+  // Intentional no-op: a notifications subsystem exists (lib/notifications,
+  // /settings/notifications) but auto-sending digests is outward-facing and is
+  // not wired to this handler on purpose. No scheduled definition triggers it.
+  console.log('[Maintenance] notification_digest called - intentional no-op (not scheduled)')
   return { sent: 0, payload, status: 'no_op' }
 })
 
 registerJobHandler('billing_usage_sync', async () => {
-  // TODO: Implement billing sync when billing/usage tracking is added
-  console.log('[Maintenance] billing_usage_sync called - no-op until billing implemented')
+  // Intentional no-op: Stripe billing exists (lib/stripe, /api/webhooks/stripe)
+  // but usage sync is sensitive and runs via the Stripe webhook path, not this
+  // handler. No scheduled definition triggers it.
+  console.log('[Maintenance] billing_usage_sync called - intentional no-op (not scheduled)')
   return { synced: false, status: 'no_op' }
 })
 
