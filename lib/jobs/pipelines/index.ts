@@ -370,12 +370,25 @@ registerJobHandler('sandbox_promotion_check', async (payload) => {
   const { evaluatePromotionGates } = await import('../../sandbox/promotion-gates')
   const typedPayload = payload as { comparisonId: string }
   const evaluation = await evaluatePromotionGates(typedPayload.comparisonId)
-  return { 
+  return {
     evaluationId: evaluation.id,
     status: evaluation.overall_status,
     hardFailCount: evaluation.hard_fail_count,
     softWarningCount: evaluation.soft_warning_count,
   }
+})
+
+// REAL: End-to-end A/B auto-evaluation (candidate vs production over a pack →
+// comparison → gates → recommendation). Recommends only; never promotes.
+registerJobHandler('sandbox_ab_evaluation', async (payload) => {
+  const { runAbEvaluation } = await import('../../sandbox/ab-runner')
+  const typed = payload as {
+    candidateVariantId: string
+    benchmarkPackId: string
+    productionVariantId?: string
+    createdBy?: string
+  }
+  return runAbEvaluation(typed)
 })
 
 // ============================================================================

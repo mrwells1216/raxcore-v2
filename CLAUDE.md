@@ -549,10 +549,33 @@ count) with a chainable Supabase mock. tsc clean, build succeeds, full suite
 `lib/scoring/prompt-bias-correction.ts`,
 `app/api/admin/training-import/[id]/run-ai/route.ts`, `CLAUDE.md` §3.7.
 
-Remaining campaign work (not yet built): flywheel A/B automation
-(`sandbox_evaluation` + `promoteVariant` exist; needs an auto-trigger that
-evaluates candidate prompt variants against the benchmark pack and surfaces a
-promote/reject recommendation); Phase 3 stub fills (`export_*`,
+### 3.35. Flywheel A/B automation (Phase 2.3) ✓
+Third entry in the accuracy/flywheel campaign. The sandbox A/B pieces all
+existed but only as separate job handlers — there was no single "is this
+candidate better?" path. New `lib/sandbox/ab-runner.ts` exports
+`runAbEvaluation({ candidateVariantId, benchmarkPackId, productionVariantId? })`
+which chains the existing real functions: evaluate candidate + production
+variants against the SAME benchmark pack (`createEvaluationRun` +
+`executeEvaluationRun`), build the comparison (`generateComparison`), run the
+promotion gates (`evaluatePromotionGates`), and map `overall_status`
+(eligible/needs_review/rejected) to a single `promote | review | reject`
+recommendation. It NEVER promotes — promotion stays a deliberate human action
+via `promoteVariant()` in the Variants tab. Surfaced two ways: inline route
+`POST /api/admin/sandbox/ab-evaluate` (maxDuration 300, the §3.30 pattern) and
+a new `sandbox_ab_evaluation` job handler (added to `JobType`) for
+worker/scheduler use. New `components/admin/ab-evaluate-panel.tsx` is a
+self-contained client panel (candidate-variant + benchmark-pack selectors,
+run button, recommendation badge with hard-fail/warning counts and a link to
+the full comparison), mounted as a new "Auto A/B" tab on `/admin/sandbox`.
+Verified Score gates unchanged. tsc clean, build succeeds, full suite 142/142
+(no new unit tests — the orchestrator is pure wiring over already-tested
+functions and is tightly coupled to Supabase + scoreBuck; an integration test
+needs DB/AI mocking, tracked with the §3.33 follow-up). Files: new
+`lib/sandbox/ab-runner.ts`, new `app/api/admin/sandbox/ab-evaluate/route.ts`,
+new `components/admin/ab-evaluate-panel.tsx`; modified `lib/jobs/types.ts`,
+`lib/jobs/pipelines/index.ts`, `app/admin/sandbox/page.tsx`.
+
+Remaining campaign work (not yet built): Phase 3 stub fills (`export_*`,
 `offline_evaluation` pipelines, maintenance no-op handlers); and the optional
 user-supplied maturity-class calibration (deferred pending real benchmark
 numbers — see plan).
