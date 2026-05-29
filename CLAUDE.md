@@ -549,13 +549,35 @@ count) with a chainable Supabase mock. tsc clean, build succeeds, full suite
 `lib/scoring/prompt-bias-correction.ts`,
 `app/api/admin/training-import/[id]/run-ai/route.ts`, `CLAUDE.md` §3.7.
 
-Remaining campaign work (not yet built): flywheel A/B automation
-(`sandbox_evaluation` + `promoteVariant` exist; needs an auto-trigger that
-evaluates candidate prompt variants against the benchmark pack and surfaces a
-promote/reject recommendation); Phase 3 stub fills (`export_*`,
-`offline_evaluation` pipelines, maintenance no-op handlers); and the optional
-user-supplied maturity-class calibration (deferred pending real benchmark
-numbers — see plan).
+### 3.35. Flywheel A/B automation (Phase 2.3) ✓
+Third entry in the accuracy/flywheel campaign. The sandbox A/B pieces all
+existed but only as separate job handlers — there was no single "is this
+candidate better?" path. New `lib/sandbox/ab-runner.ts` exports
+`runAbEvaluation({ candidateVariantId, benchmarkPackId, productionVariantId? })`
+which chains the existing real functions: evaluate candidate + production
+variants against the SAME benchmark pack (`createEvaluationRun` +
+`executeEvaluationRun`), build the comparison (`generateComparison`), run the
+promotion gates (`evaluatePromotionGates`), and map `overall_status`
+(eligible/needs_review/rejected) to a single `promote | review | reject`
+recommendation. It NEVER promotes — promotion stays a deliberate human action
+via `promoteVariant()` in the Variants tab. Surfaced two ways: inline route
+`POST /api/admin/sandbox/ab-evaluate` (maxDuration 300, the §3.30 pattern) and
+a new `sandbox_ab_evaluation` job handler (added to `JobType`) for
+worker/scheduler use. New `components/admin/ab-evaluate-panel.tsx` is a
+self-contained client panel (candidate-variant + benchmark-pack selectors,
+run button, recommendation badge with hard-fail/warning counts and a link to
+the full comparison), mounted as a new "Auto A/B" tab on `/admin/sandbox`.
+Verified Score gates unchanged. tsc clean, build succeeds, full suite 142/142
+(no new unit tests — the orchestrator is pure wiring over already-tested
+functions and is tightly coupled to Supabase + scoreBuck; an integration test
+needs DB/AI mocking, tracked with the §3.33 follow-up). Files: new
+`lib/sandbox/ab-runner.ts`, new `app/api/admin/sandbox/ab-evaluate/route.ts`,
+new `components/admin/ab-evaluate-panel.tsx`; modified `lib/jobs/types.ts`,
+`lib/jobs/pipelines/index.ts`, `app/admin/sandbox/page.tsx`.
+
+Remaining campaign work: the optional user-supplied maturity-class calibration
+(deferred pending real benchmark numbers — see plan). Phase 3 ("fill the stub
+pipelines") was investigated on 2026-05-29 and deliberately NOT built — see §4.
 
 ---
 
@@ -570,6 +592,34 @@ If new initiatives are scoped in the future, add them under this section
 with the same numbered structure (4.1, 4.2, …). For now, the next
 strategic frontier sits inside the existing flywheel (§3.7) rather than as
 a new feature workstream.
+
+### 4.1. Phase 3 stub pipelines — investigated, deliberately NOT built (2026-05-29)
+The accuracy/flywheel campaign's "Phase 3" was to fill the remaining
+`not_implemented` job pipelines. Investigation found there is no high-value,
+non-speculative work here, so it was intentionally skipped (per §9 — do not
+ship machinery that doesn't improve measurement truth):
+- **`export_run` / `export_pack_compute` / `offline_evaluation` / `render_*`
+  pipelines**: registered as stubs but have **no callers** anywhere in `app/`
+  or `lib/`. Export already works synchronously via routes
+  (`app/api/training/export`, `app/api/admin/training-packs/[id]/export`,
+  `exportBulkRunData`/`formatExportAsCSV` in `lib/validation/bulk-service.ts`).
+  Implementing the background pipelines now would be unused dead code. Leave
+  as documented stubs until a real batch/background caller exists.
+- **Maintenance handlers** (`lib/jobs/pipelines/index.ts`): `cleanup_stale_jobs`
+  is already real (`recoverStaleJobs` + `cleanupOldJobs`). The rest are honest
+  no-ops — either the subsystem genuinely doesn't exist yet (event logging,
+  temp-asset/blob cleanup, segment + confidence-profile caching) or it exists
+  but is sensitive/outward-facing and intentionally not auto-wired here
+  (`notification_digest`, `billing_usage_sync` — comments corrected to say so).
+  None have a scheduled `job_definitions` row driving them.
+- **`error_stability`** in `lib/health/service.ts` is hardcoded to 70 but is a
+  **cosmetic reported factor only** — it is NOT part of the `rawScore` weight
+  sum, so it affects no health decision. Computing it would be cosmetic; left
+  as-is.
+
+`render_*` remains deferred for the original §9 reason (schematic render is
+decorative). If background export/eval is ever needed, wire the existing
+route-level logic into the corresponding pipeline at that point.
 
 ---
 

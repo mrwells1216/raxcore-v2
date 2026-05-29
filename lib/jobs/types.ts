@@ -46,6 +46,7 @@ export type JobType =
   | 'sandbox_shadow_batch'
   | 'sandbox_comparison_generate'
   | 'sandbox_promotion_check'
+  | 'sandbox_ab_evaluation'
   // Maintenance
   | 'cleanup_old_events'
   | 'cleanup_stale_jobs'

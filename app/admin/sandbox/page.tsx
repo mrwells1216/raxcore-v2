@@ -58,6 +58,7 @@ import type {
   VariantComparisonWithDetails,
   PromotionGateEvaluation,
 } from '@/lib/types'
+import { AbEvaluatePanel } from '@/components/admin/ab-evaluate-panel'
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -94,6 +95,10 @@ export default function SandboxPage() {
             <GitCompare className="h-4 w-4" />
             Comparisons
           </TabsTrigger>
+          <TabsTrigger value="ab" className="flex items-center gap-2">
+            <FlaskConical className="h-4 w-4" />
+            Auto A/B
+          </TabsTrigger>
           <TabsTrigger value="shadow" className="flex items-center gap-2">
             <Eye className="h-4 w-4" />
             Shadow Scoring
@@ -113,6 +118,10 @@ export default function SandboxPage() {
 
         <TabsContent value="comparisons" className="space-y-4">
           <ComparisonsTab />
+        </TabsContent>
+
+        <TabsContent value="ab" className="space-y-4">
+          <AbEvaluatePanel />
         </TabsContent>
 
         <TabsContent value="shadow" className="space-y-4">
