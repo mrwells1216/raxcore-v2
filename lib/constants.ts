@@ -182,6 +182,35 @@ export const ANATOMICAL_REFERENCES = {
   IRIS_RADIUS: 0.55,
 } as const
 
+/**
+ * OPTIONAL user-supplied age hint. Defaults to 'unknown' (treated as adult), so
+ * absence is identical to prior behavior.
+ */
+export type MaturityClass = 'yearling' | 'mature_2' | 'mature_3plus' | 'unknown'
+
+/**
+ * Approximate cranial/facial size of a buck relative to a mature (3.5+) adult,
+ * by age class. Male whitetail SKULL size keeps growing into adulthood, so
+ * younger bucks have proportionally smaller eye-spacing / pedicle-spacing /
+ * iris. These are ESTIMATED scale factors (not measured means) and only nudge
+ * the no-reference anatomical-prior calibration (§8 tiers 6–8); they NEVER
+ * unlock Verified Score. EARS are deliberately excluded — ears reach full size
+ * by ~1.5 yr and field judges rely on that age stability, so ear-based
+ * references are never scaled by maturity.
+ */
+export const MATURITY_FACIAL_SCALE: Record<MaturityClass, number> = {
+  yearling: 0.90,     // 1.5 yr — noticeably smaller, narrower skull
+  mature_2: 0.96,     // 2.5 yr — nearly adult facial proportions
+  mature_3plus: 1.0,  // 3.5+ yr — the shipped adult baseline
+  unknown: 1.0,       // no hint → adult baseline (no change)
+}
+
+/** Facial-size scale factor for a maturity class; 1.0 (adult) when absent. */
+export function maturityFacialScale(maturityClass?: MaturityClass | null): number {
+  if (!maturityClass) return 1.0
+  return MATURITY_FACIAL_SCALE[maturityClass] ?? 1.0
+}
+
 export const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'] as const
 export const MAX_FILE_SIZE = 20 * 1024 * 1024
 export const MAX_IMAGES = 10

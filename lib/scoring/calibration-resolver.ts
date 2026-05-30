@@ -6,7 +6,8 @@ import type { DepthCalibrationResult } from '@/lib/calibration/depth-calibration
 // copy here drifted out of sync with the per-image consensus engine and produced
 // different px/in values from the same pixel measurement (eye-to-eye was 4.3"
 // in the consensus engine but 3.5" here).
-import { ANATOMICAL_REFERENCES } from '@/lib/constants'
+import { ANATOMICAL_REFERENCES, maturityFacialScale } from '@/lib/constants'
+import type { MaturityClass } from '@/lib/constants'
 import { eyeCircleToPixelsPerInch } from './landmark-geometry'
 import type { ArucoDetection } from './aruco-types'
 import {
@@ -105,6 +106,7 @@ export function resolveCalibration(
   perImageLandmarks?: PerImageLandmarkResult[],
   pedicleCalibrations?: PedicleCalibrationInput[] | null,
   aruco?: ArucoResolverInput | null,
+  maturityClass?: MaturityClass | null,
 ): CalibrationResult | null {
   // Priority 1: LiDAR depth calibration
   if (
@@ -165,7 +167,7 @@ export function resolveCalibration(
   // anatomical_prior path. Only fires when at least one per-image result
   // reported an iris radius (model populates them via the §4.3 prompt extension).
   if (perImageLandmarks && perImageLandmarks.length > 0) {
-    const eyeCircle = eyeCircleToPixelsPerInch(perImageLandmarks)
+    const eyeCircle = eyeCircleToPixelsPerInch(perImageLandmarks, maturityClass)
     if (
       eyeCircle &&
       isFiniteNumber(eyeCircle.pixelsPerInch) &&
@@ -182,7 +184,7 @@ export function resolveCalibration(
   }
 
   // Priority 4: Anatomical priors from landmarks (legacy fallback)
-  return resolveAnatomicalPrior(landmarks)
+  return resolveAnatomicalPrior(landmarks, maturityClass)
 }
 
 /**
@@ -407,9 +409,16 @@ function resolvePedicleDots(
   }
 }
 
-function resolveAnatomicalPrior(landmarks: LandmarkDetection[]): CalibrationResult | null {
+function resolveAnatomicalPrior(
+  landmarks: LandmarkDetection[],
+  maturityClass?: MaturityClass | null,
+): CalibrationResult | null {
   const byId = new Map(landmarks.map((lm) => [lm.id, lm]))
   const estimates: { ppi: number; confidence: number; label: string }[] = []
+  // Younger bucks have smaller skulls; scale the facial reference inches down so
+  // the same pixel span yields the correct (smaller) real-world measurement.
+  // Adult/unknown ⇒ 1.0 (no change).
+  const facialScale = maturityFacialScale(maturityClass)
 
   // Eye spacing
   const eyeL = byId.get('eye_left')
@@ -424,7 +433,7 @@ function resolveAnatomicalPrior(landmarks: LandmarkDetection[]): CalibrationResu
     const dy = eyeR.py - eyeL.py
     const pixelDist = Math.sqrt(dx * dx + dy * dy)
     if (pixelDist > 10) {
-      const ppi = pixelDist / ANATOMICAL_REFERENCES.EYE_TO_EYE
+      const ppi = pixelDist / (ANATOMICAL_REFERENCES.EYE_TO_EYE * facialScale)
       estimates.push({ ppi, confidence: Math.min(eyeL.confidence, eyeR.confidence) * 0.65, label: 'eye spacing' })
     }
   }
@@ -442,7 +451,7 @@ function resolveAnatomicalPrior(landmarks: LandmarkDetection[]): CalibrationResu
     const dy = pedR.py - pedL.py
     const pixelDist = Math.sqrt(dx * dx + dy * dy)
     if (pixelDist > 10) {
-      const ppi = pixelDist / ANATOMICAL_REFERENCES.PEDICLE_SPACING
+      const ppi = pixelDist / (ANATOMICAL_REFERENCES.PEDICLE_SPACING * facialScale)
       estimates.push({ ppi, confidence: Math.min(pedL.confidence, pedR.confidence) * 0.60, label: 'pedicle spacing' })
     }
   }

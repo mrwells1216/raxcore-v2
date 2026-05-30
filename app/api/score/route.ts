@@ -153,6 +153,15 @@ export async function POST(request: Request) {
   const selectedImageAnglesRaw = formData.get('selected_image_angles') as string | null
   const captureQualitySummaryRaw = formData.get('capture_quality_summary') as string | null
   const precisionModeEnabledRaw = formData.get('precision_mode_enabled') as string | null
+  // Optional user-supplied age hint. Only nudges the no-reference anatomical
+  // calibration priors (§8 tiers 6–8); never unlocks Verified Score.
+  const maturityClassRaw = formData.get('maturity_class') as string | null
+  const maturityClass: import('@/lib/constants').MaturityClass =
+    maturityClassRaw === 'yearling' ||
+    maturityClassRaw === 'mature_2' ||
+    maturityClassRaw === 'mature_3plus'
+      ? maturityClassRaw
+      : 'unknown'
   const referenceTypeRaw = formData.get('reference_type') as string | null
   const referenceNotesRaw = formData.get('reference_notes') as string | null
   const referenceSizeValueRaw = formData.get('reference_size_value') as string | null
@@ -1036,6 +1045,7 @@ export async function POST(request: Request) {
           eyeCircleForResolver,
           pedicleForResolver,
           arucoResolverInput,
+          maturityClass,
         )
 
         // Persist pedicle calibration metadata for the learning flywheel,

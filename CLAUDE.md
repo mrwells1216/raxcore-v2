@@ -575,9 +575,43 @@ needs DB/AI mocking, tracked with the §3.33 follow-up). Files: new
 new `components/admin/ab-evaluate-panel.tsx`; modified `lib/jobs/types.ts`,
 `lib/jobs/pipelines/index.ts`, `app/admin/sandbox/page.tsx`.
 
-Remaining campaign work: the optional user-supplied maturity-class calibration
-(deferred pending real benchmark numbers — see plan). Phase 3 ("fill the stub
-pipelines") was investigated on 2026-05-29 and deliberately NOT built — see §4.
+Phase 3 ("fill the stub pipelines") was investigated on 2026-05-29 and
+deliberately NOT built — see §4. The optional user-supplied maturity-class
+calibration shipped as §3.36.
+
+### 3.36. Optional user-supplied maturity-class calibration ✓
+The honest answer to "would age help scoring?" — age does NOT change the B&C
+score (an inch is an inch), and photo-INFERRED age is rejected (circular +
+authoritative-looking narrative, fails §9). But male whitetail skulls keep
+growing into adulthood, so a younger buck scored with adult anatomical
+constants biases the no-reference calibration high. This adds an OPTIONAL,
+user-supplied age hint that nudges ONLY the anatomical-prior calibration paths
+(§8 tiers 6–8). New `MaturityClass` (`unknown | yearling | mature_2 |
+mature_3plus`) and `MATURITY_FACIAL_SCALE` / `maturityFacialScale()` in
+`lib/constants.ts` — estimated cranial/facial scale factors (yearling 0.90,
+2.5 0.96, adult 1.0) applied to `EYE_TO_EYE`, `PEDICLE_SPACING`, and
+`IRIS_RADIUS` so the same pixel span maps to the correct (smaller) real size.
+EARS are deliberately never scaled — ears reach full size by ~1.5 yr and field
+judges rely on that age stability. The scale threads through
+`resolveCalibration` (new trailing optional `maturityClass` arg →
+`resolveAnatomicalPrior` + `eyeCircleToPixelsPerInch`); absent ⇒ 1.0 ⇒
+identical to prior behavior. Verified Score gates UNCHANGED — maturity only
+touches the estimated no-reference priors, never `physical_reference`, and any
+run with a ruler / ArUco / LiDAR / reference object is unaffected (higher tiers
+win first). Form: optional "Estimated Age" select in Rack Info with copy
+stating it only refines scale when no reference exists and never affects a
+Verified Score; threaded through `scoring-wizard.tsx` (`maturity_class`
+FormData field, only sent when not 'unknown') → `app/api/score/route.ts`
+(parsed, defaults to 'unknown'). Scale factors are ESTIMATES (not measured
+means) — labeled as such in code and copy. Tests: 6 new specs in
+`__tests__/scoring/maturity-calibration.test.ts` (scale monotonicity,
+adult/unknown/absent equivalence, yearling ppi inflation, anatomical_prior
+source preserved, reference-object unaffected). tsc clean, build succeeds,
+full suite 148/148. Files: modified `lib/constants.ts`,
+`lib/scoring/calibration-resolver.ts`, `lib/scoring/landmark-geometry.ts`,
+`app/api/score/route.ts`, `lib/types.ts`,
+`components/scoring/scoring-wizard.tsx`, `components/scoring/scoring-form.tsx`;
+new `__tests__/scoring/maturity-calibration.test.ts`.
 
 ---
 
@@ -746,6 +780,11 @@ Build:        pnpm exec tsc --noEmit clean
 | — | None | `none` | 0.25 | Pure AI guess |
 
 **Verified Score requires `physical_reference`.** Nothing else unlocks it alone.
+
+An optional user-supplied maturity class (§3.36) scales the facial reference
+sizes used by tiers 6–8 only (eye/pedicle/iris; never ears, never the higher
+reference tiers). It is an estimated modifier, not a new source, and never
+unlocks Verified Score.
 
 ---
 
