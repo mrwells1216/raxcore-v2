@@ -584,22 +584,29 @@ Reworked `components/map/map-viewer.tsx` per request. (a) **US + Canada only**:
 dropped the world-atlas country layer and the North-America ISO filter (Mexico /
 Central America / Caribbean / Greenland are gone). (b) **Correct state &
 province lines**: now renders admin-1 boundaries from two GeoJSON
-FeatureCollections — `click_that_hood` `united-states.geojson` (50 states) and
-`canada.geojson` (provinces/territories), both keyed by `properties.name` and
-served with permissive CORS by jsdelivr. Each region is its own polygon, so
-internal state/province borders render naturally. Two `<Geographies>` layers;
-the shared d3 projection is captured from the first for click→lng/lat
-inversion (unchanged). (c) **Minimal pin highlight**: a new self-contained
-`geometryContains()` (lng/lat ray-casting over Polygon/MultiPolygon, including
-hole handling) — kept local so we avoid adding `d3-geo` as a direct dep (pnpm
-doesn't expose it from app code). The state/province under a pending pin gets a
-subtle amber wash (`highlightFill` 0.16 alpha) + slightly heavier stroke;
-everything else stays the neutral land fill. Projection re-framed for the two
-countries (geoMercator, center `[-96, 53]`, scale `430` — visually tunable).
-Public API preserved: `{ pins, onPinClick, onMapClick, selectedPinId }`,
-`LOCATION_TYPE_COLORS`, `LOCATION_TYPE_LABELS`; heat-mode, pending-pin
-confirmation panel, and legend unchanged. tsc clean, build succeeds. File:
-`components/map/map-viewer.tsx`.
+FeatureCollections — `click_that_hood` `united-states.geojson` (49: contiguous
+48 + DC; Alaska/Hawaii absent, fine for Mercator framing + whitetail range) and
+`canada.geojson` (13 provinces/territories), both keyed by `properties.name`
+and served with permissive CORS by jsdelivr (data verified as valid
+multi-feature collections). Each region is its own polygon, so internal
+state/province borders render naturally. Two `<Geographies>` layers; the shared
+d3 projection is captured from the first for click→lng/lat inversion
+(unchanged). (c) **Visible borders (the actual fix in the revamp)**: the first
+cut stroked borders at 0.4px low-contrast, which read as "country outline only,
+no state lines." Borders are now a brighter warm tan (`#9c8568`) at 0.7px
+(`STROKE` constants) with `vector-effect: non-scaling-stroke` so they stay
+crisp at any size, over a darker land fill (`#231d18`) for contrast;
+hover/pressed lift the stroke to amber. (d) **Minimal pin highlight**: a
+self-contained `geometryContains()` (lng/lat ray-casting over
+Polygon/MultiPolygon, including hole handling) — kept local so we avoid adding
+`d3-geo` as a direct dep (pnpm doesn't expose it from app code). The
+state/province under a pending pin gets an amber wash (`highlightFill` 0.20
+alpha) + heavier stroke; everything else stays the neutral land fill.
+Projection framed for the two countries (geoMercator, center `[-96, 53]`, scale
+`430` — visually tunable). Public API preserved: `{ pins, onPinClick,
+onMapClick, selectedPinId }`, `LOCATION_TYPE_COLORS`, `LOCATION_TYPE_LABELS`;
+heat-mode, pending-pin confirmation panel, and legend unchanged. tsc clean,
+build succeeds. File: `components/map/map-viewer.tsx`.
 
 ---
 
