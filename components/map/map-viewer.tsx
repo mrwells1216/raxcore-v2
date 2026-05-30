@@ -53,14 +53,24 @@ const CANADA_PROVINCES_URL =
   'https://cdn.jsdelivr.net/gh/codeforamerica/click_that_hood@master/public/data/canada.geojson'
 
 const MAP_COLORS = {
-  background: '#1a1612',
-  landFill: '#2d2520',
-  landFillHover: '#3a3026',
-  landStroke: '#6b5d52',
-  ocean: '#0e0a07',
-  // Minimal highlight for the state/province under a pending pin.
-  highlightFill: 'rgba(251,191,36,0.16)',
-  highlightStroke: 'rgba(251,191,36,0.7)',
+  background: '#16110d',
+  // Land fills sit a touch darker than the borders so state/province lines
+  // clearly stand out (the old 0.4px low-contrast stroke read as invisible).
+  landFill: '#231d18',
+  landFillHover: '#36291d',
+  // Bright, warm border so internal state/province lines are unmistakable.
+  landStroke: '#9c8568',
+  ocean: '#0b0805',
+  // Highlight for the state/province under a pending pin.
+  highlightFill: 'rgba(251,191,36,0.20)',
+  highlightStroke: 'rgba(251,191,36,0.95)',
+}
+
+// Border stroke widths. Kept as non-scaling strokes so lines stay crisp.
+const STROKE = {
+  border: 0.7,
+  hover: 1.1,
+  highlight: 1.4,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,22 +249,29 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
                   <Geography
                     key={geo.rsmKey}
                     geography={geo}
+                    vectorEffect="non-scaling-stroke"
                     style={{
                       default: {
                         fill: isHighlighted ? MAP_COLORS.highlightFill : MAP_COLORS.landFill,
                         stroke: isHighlighted ? MAP_COLORS.highlightStroke : MAP_COLORS.landStroke,
-                        strokeWidth: isHighlighted ? 0.9 : 0.4,
+                        strokeWidth: isHighlighted ? STROKE.highlight : STROKE.border,
+                        vectorEffect: 'non-scaling-stroke',
                         outline: 'none',
+                        transition: 'fill 120ms ease',
                       },
                       hover: {
                         fill: MAP_COLORS.landFillHover,
-                        stroke: MAP_COLORS.landStroke,
-                        strokeWidth: 0.5,
+                        stroke: MAP_COLORS.highlightStroke,
+                        strokeWidth: STROKE.hover,
+                        vectorEffect: 'non-scaling-stroke',
                         outline: 'none',
                         cursor: 'crosshair',
                       },
                       pressed: {
                         fill: MAP_COLORS.landFillHover,
+                        stroke: MAP_COLORS.highlightStroke,
+                        strokeWidth: STROKE.hover,
+                        vectorEffect: 'non-scaling-stroke',
                         outline: 'none',
                       },
                     }}
