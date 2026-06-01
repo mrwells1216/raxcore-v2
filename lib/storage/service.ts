@@ -644,45 +644,72 @@ export async function createPrediction(params: CreatePredictionParams): Promise<
         ? result.stateCalibration
         : null
 
-  const { data, error } = await supabase
+  // Core columns — present in the base schema since the project's first
+  // migration. These must persist or scoring has genuinely failed.
+  const corePayload: Record<string, unknown> = {
+    buck_id: params.buckId,
+    model_version_id: params.modelVersionId || null,
+    predicted_gross: predictedGross,
+    predicted_net: predictedNet,
+    confidence_percent: confidencePercent,
+    error_band_low: scoreRangeLow,
+    error_band_high: scoreRangeHigh,
+    measurements: meas,
+    landmarks,
+    state_calibration: stateCalibration,
+    processing_time_ms: safeNumeric(pred.processing_time_ms) ?? safeNumeric(result.processingTimeMs),
+    images_used: safeNumeric(pred.images_used) ?? safeNumeric(result.imagesUsed),
+    angle_diversity_score: safeNumeric(pred.angle_diversity_score) ?? safeNumeric(result.angleDiversityScore),
+    estimated_score: predictedGross,
+    score_range_low: scoreRangeLow,
+    score_range_high: scoreRangeHigh,
+    confidence: normalizedConfidence,
+    main_beam_left: safeNumeric(meas?.main_beam_left),
+    main_beam_right: safeNumeric(meas?.main_beam_right),
+    inside_spread: safeNumeric(meas?.inside_spread),
+    points_left: safeNumeric(meas?.g1_left),
+    points_right: safeNumeric(meas?.g1_right),
+    mass_estimate: safeNumeric(meas?.h1_left),
+    tine_lengths: null,
+    circumferences: null,
+    raw_ai_response: params.rawResponse || null,
+    intake_quality: params.intakeQuality || null,
+  }
+
+  // Optional columns — each added by a later migration (crop box §3.13,
+  // user measurements §3.15, per-image consensus §3.18, classroom §3.30).
+  // If the production DB hasn't applied a migration yet, PostgREST rejects
+  // the whole insert with a "schema cache" error. Rather than 503 the entire
+  // (already-successful) scoring request, retry with only the core columns —
+  // same defensive pattern as createBuck and createTrainingExample.
+  const optionalPayload: Record<string, unknown> = {
+    crop_box_metadata: params.cropBoxMetadata ?? null,
+    user_measurements_metadata: params.userMeasurementsMetadata ?? null,
+    per_image_consensus: params.perImageConsensus ?? null,
+    is_classroom_run: params.isClassroomRun ?? false,
+    experiment_config: params.experimentConfig ?? null,
+    features_used: params.featuresUsed ?? null,
+  }
+
+  let { data, error } = await supabase
     .from('predictions')
-    .insert({
-      buck_id: params.buckId,
-      model_version_id: params.modelVersionId || null,
-      predicted_gross: predictedGross,
-      predicted_net: predictedNet,
-      confidence_percent: confidencePercent,
-      error_band_low: scoreRangeLow,
-      error_band_high: scoreRangeHigh,
-      measurements: meas,
-      landmarks,
-      state_calibration: stateCalibration,
-      processing_time_ms: safeNumeric(pred.processing_time_ms) ?? safeNumeric(result.processingTimeMs),
-      images_used: safeNumeric(pred.images_used) ?? safeNumeric(result.imagesUsed),
-      angle_diversity_score: safeNumeric(pred.angle_diversity_score) ?? safeNumeric(result.angleDiversityScore),
-      estimated_score: predictedGross,
-      score_range_low: scoreRangeLow,
-      score_range_high: scoreRangeHigh,
-      confidence: normalizedConfidence,
-      main_beam_left: safeNumeric(meas?.main_beam_left),
-      main_beam_right: safeNumeric(meas?.main_beam_right),
-      inside_spread: safeNumeric(meas?.inside_spread),
-      points_left: safeNumeric(meas?.g1_left),
-      points_right: safeNumeric(meas?.g1_right),
-      mass_estimate: safeNumeric(meas?.h1_left),
-      tine_lengths: null,
-      circumferences: null,
-      raw_ai_response: params.rawResponse || null,
-      intake_quality: params.intakeQuality || null,
-      crop_box_metadata: params.cropBoxMetadata ?? null,
-      user_measurements_metadata: params.userMeasurementsMetadata ?? null,
-      per_image_consensus: params.perImageConsensus ?? null,
-      is_classroom_run: params.isClassroomRun ?? false,
-      experiment_config: params.experimentConfig ?? null,
-      features_used: params.featuresUsed ?? null,
-    })
+    .insert({ ...corePayload, ...optionalPayload })
     .select()
     .single()
+
+  if (error && isOptionalTableError(error)) {
+    console.warn(
+      '[createPrediction] Optional columns rejected by schema cache; retrying with core columns only. Apply pending migrations to restore:',
+      error.message
+    )
+    const retry = await supabase
+      .from('predictions')
+      .insert(corePayload)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) throw new Error(`Failed to create prediction: ${error.message}`)
   return data

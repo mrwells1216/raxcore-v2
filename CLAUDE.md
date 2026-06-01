@@ -613,6 +613,30 @@ full suite 148/148. Files: modified `lib/constants.ts`,
 `components/scoring/scoring-wizard.tsx`, `components/scoring/scoring-form.tsx`;
 new `__tests__/scoring/maturity-calibration.test.ts`.
 
+### 3.38. createPrediction schema-cache resilience (prod 503 fix) ✓
+Production `/api/score` was returning **503** ("temporarily unavailable due to
+a database configuration issue") on every scoring run. Vercel runtime logs
+showed detection + image upload completing, then the request failing with a
+PostgREST *"…column of 'predictions' in the schema cache"* error. Root cause:
+`createPrediction` (`lib/storage/service.ts`) did a single `predictions` insert
+that included columns from migrations not yet applied to the live DB
+(`crop_box_metadata`, `user_measurements_metadata`, `per_image_consensus`,
+`is_classroom_run`, `experiment_config`, `features_used`). Unlike `createBuck`
+(§ optional-update guard) and `createTrainingExample` (fallback retry), it had
+no defense and threw, which `app/api/score/route.ts:1469` maps to 503. Fix:
+split the insert into a `corePayload` (base-schema columns) + `optionalPayload`
+(migration-added columns); on an `isOptionalTableError` (matches `'schema
+cache'`), warn and retry with core columns only so an already-successful
+scoring run still persists instead of 503-ing. The optional feature fields
+silently won't store until the pending migrations are applied — apply
+`20260517_crop_box_metadata`, `20260518_user_measurements_metadata`,
+`20260520_per_image_consensus`, `20260524_classroom_predictions`,
+`20260524_pedicle_calibration_metadata` to fully restore them. The three
+sibling update writers (`updatePredictionPerImageConsensus`,
+`updatePredictionPedicleCalibration`, `updateBuckImageLandmarks`) were already
+non-blocking and needed no change. tsc clean, build succeeds. File: modified
+`lib/storage/service.ts`.
+
 ---
 
 ## 4. What is NOT built yet
