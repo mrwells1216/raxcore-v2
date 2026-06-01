@@ -43,36 +43,87 @@ const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
 // Switch to heat-map visualization once total pin count reaches this.
 const HEAT_PIN_THRESHOLD = 20
 
-// CDN-hosted world country outlines (~80KB). We filter to North America below.
-const WORLD_TOPO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
-
-// ISO numeric codes for North American countries we want to render.
-const NORTH_AMERICA_ISO_CODES = new Set([
-  '840', // United States
-  '124', // Canada
-  '484', // Mexico
-  '320', // Guatemala
-  '084', // Belize
-  '188', // Costa Rica
-  '222', // El Salvador
-  '340', // Honduras
-  '558', // Nicaragua
-  '591', // Panama
-  '044', // Bahamas
-  '192', // Cuba
-  '214', // Dominican Republic
-  '332', // Haiti
-  '388', // Jamaica
-  '630', // Puerto Rico
-  '304', // Greenland
-])
+// Admin-1 boundaries (state / province lines) for the two countries we render.
+// Both are GeoJSON FeatureCollections keyed by `properties.name`, served with
+// permissive CORS by jsdelivr. Using GeoJSON (not TopoJSON) avoids any
+// object-selection ambiguity in react-simple-maps.
+const US_STATES_URL =
+  'https://cdn.jsdelivr.net/gh/codeforamerica/click_that_hood@master/public/data/united-states.geojson'
+const CANADA_PROVINCES_URL =
+  'https://cdn.jsdelivr.net/gh/codeforamerica/click_that_hood@master/public/data/canada.geojson'
 
 const MAP_COLORS = {
-  background: '#1a1612',
-  landFill: '#2d2520',
-  landFillHover: '#3a3026',
-  landStroke: '#6b5d52',
-  ocean: '#0e0a07',
+  background: '#16110d',
+  // Land fills sit a touch darker than the borders so state/province lines
+  // clearly stand out (the old 0.4px low-contrast stroke read as invisible).
+  landFill: '#231d18',
+  landFillHover: '#36291d',
+  // Bright, warm border so internal state/province lines are unmistakable.
+  landStroke: '#9c8568',
+  ocean: '#0b0805',
+  // Highlight for the state/province under a pending pin.
+  highlightFill: 'rgba(251,191,36,0.20)',
+  highlightStroke: 'rgba(251,191,36,0.95)',
+}
+
+// Border stroke widths. Kept as non-scaling strokes so lines stay crisp.
+const STROKE = {
+  border: 0.7,
+  hover: 1.1,
+  highlight: 1.4,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GEOMETRY — self-contained point-in-polygon (lng/lat ray casting). Kept local
+// so we don't need d3-geo as a direct dependency (it's only a transitive dep of
+// react-simple-maps and isn't resolvable from app code under pnpm).
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Ring = [number, number][]
+
+function pointInRing(lng: number, lat: number, ring: Ring): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0]
+    const yi = ring[i][1]
+    const xj = ring[j][0]
+    const yj = ring[j][1]
+    const intersect =
+      yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+// Handles GeoJSON Polygon ([ring0, holes...]) and MultiPolygon ([polygon...]).
+// A point counts as contained when it is inside an outer ring and not inside a
+// hole of that same polygon.
+function geometryContains(
+  lng: number,
+  lat: number,
+  geometry: { type?: string; coordinates?: unknown } | null | undefined
+): boolean {
+  if (!geometry || !Array.isArray(geometry.coordinates)) return false
+  const polys =
+    geometry.type === 'Polygon'
+      ? [geometry.coordinates as Ring[]]
+      : geometry.type === 'MultiPolygon'
+        ? (geometry.coordinates as Ring[][])
+        : []
+  for (const poly of polys) {
+    if (!poly.length) continue
+    if (pointInRing(lng, lat, poly[0])) {
+      let inHole = false
+      for (let k = 1; k < poly.length; k++) {
+        if (pointInRing(lng, lat, poly[k])) {
+          inHole = true
+          break
+        }
+      }
+      if (!inHole) return true
+    }
+  }
+  return false
 }
 
 interface MapViewerProps {
@@ -154,8 +205,10 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
       <ComposableMap
         projection="geoMercator"
         projectionConfig={{
-          scale: 520,
-          center: [-95, 48],
+          // Framed to fit the contiguous US through southern/central Canada.
+          // Mercator stretches the far north, so center sits a bit above the US.
+          scale: 430,
+          center: [-96, 53],
         }}
         width={980}
         height={620}
@@ -174,38 +227,60 @@ export function MapViewer({ pins, onPinClick, onMapClick, selectedPinId }: MapVi
           </radialGradient>
         </defs>
 
-        <Geographies geography={WORLD_TOPO_URL}>
-          {({ geographies, projection }) => {
-            projectionRef.current = projection as typeof projectionRef.current
-            return geographies
-              .filter(geo => NORTH_AMERICA_ISO_CODES.has(geo.id as string))
-              .map(geo => (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  style={{
-                    default: {
-                      fill: MAP_COLORS.landFill,
-                      stroke: MAP_COLORS.landStroke,
-                      strokeWidth: 0.5,
-                      outline: 'none',
-                    },
-                    hover: {
-                      fill: MAP_COLORS.landFillHover,
-                      stroke: MAP_COLORS.landStroke,
-                      strokeWidth: 0.5,
-                      outline: 'none',
-                      cursor: 'crosshair',
-                    },
-                    pressed: {
-                      fill: MAP_COLORS.landFillHover,
-                      outline: 'none',
-                    },
-                  }}
-                />
-              ))
-          }}
-        </Geographies>
+        {/* Admin-1 boundaries: US states + Canadian provinces. Each region is
+            its own polygon, so internal state/province lines render naturally.
+            The province/state under a pending pin gets a minimal amber wash. */}
+        {[US_STATES_URL, CANADA_PROVINCES_URL].map((geoUrl, layerIndex) => (
+          <Geographies key={geoUrl} geography={geoUrl}>
+            {({ geographies, projection }) => {
+              // Capture the shared d3 projection once (for click → lng/lat).
+              if (layerIndex === 0) {
+                projectionRef.current = projection as typeof projectionRef.current
+              }
+              return geographies.map(geo => {
+                const isHighlighted =
+                  !!pendingPin &&
+                  geometryContains(
+                    pendingPin.lng,
+                    pendingPin.lat,
+                    geo.geometry as { type?: string; coordinates?: unknown }
+                  )
+                return (
+                  <Geography
+                    key={geo.rsmKey}
+                    geography={geo}
+                    vectorEffect="non-scaling-stroke"
+                    style={{
+                      default: {
+                        fill: isHighlighted ? MAP_COLORS.highlightFill : MAP_COLORS.landFill,
+                        stroke: isHighlighted ? MAP_COLORS.highlightStroke : MAP_COLORS.landStroke,
+                        strokeWidth: isHighlighted ? STROKE.highlight : STROKE.border,
+                        vectorEffect: 'non-scaling-stroke',
+                        outline: 'none',
+                        transition: 'fill 120ms ease',
+                      },
+                      hover: {
+                        fill: MAP_COLORS.landFillHover,
+                        stroke: MAP_COLORS.highlightStroke,
+                        strokeWidth: STROKE.hover,
+                        vectorEffect: 'non-scaling-stroke',
+                        outline: 'none',
+                        cursor: 'crosshair',
+                      },
+                      pressed: {
+                        fill: MAP_COLORS.landFillHover,
+                        stroke: MAP_COLORS.highlightStroke,
+                        strokeWidth: STROKE.hover,
+                        vectorEffect: 'non-scaling-stroke',
+                        outline: 'none',
+                      },
+                    }}
+                  />
+                )
+              })
+            }}
+          </Geographies>
+        ))}
 
         {/* Heat layer — additive blurred blobs at harvest densities */}
         {isHeatMode && (
