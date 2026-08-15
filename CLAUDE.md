@@ -691,6 +691,28 @@ models, same gating). Verified Score gates untouched. tsc clean, build
 succeeds, full suite 148/148. Files: modified
 `lib/detection/detect-rack-with-openai.ts`, `app/api/score/route.ts`.
 
+### 3.40. Scoring latency round 2: maxDuration + parallel I/O phases ✓
+Follow-up to §3.39 targeting the non-AI serial phases of `/api/score`.
+Four edits, all behavior-preserving: (a) **`export const maxDuration = 300`**
+on the score route — it runs three GPT-4o rounds but was the only
+long-running route without an explicit duration pin (precision-pass,
+benchmark execute, A/B evaluate all pin 300). (b) **Parallel storage
+uploads** — the per-image Supabase upload loop was serial; now all uploads
+run via `Promise.all` and outcomes are walked in index order afterward so
+failure handling (including the OpenAI hard-fail 500 on the first failed
+image) is unchanged. (c) **Parallel crop-box pipeline** — each image's
+fetch→sharp-crop→upload chain was serial per image; now concurrent, with
+identical per-image fallback-to-original semantics. (d) **LiDAR depth
+extraction overlapped with detection** — the first-image fetch + HEIC depth
++ EXIF parse ran serially before the detection round despite its result
+first being consumed post-scoring; now kicked off as a never-throwing
+promise before detection and awaited after the detection gate. Net with
+§3.39: upload, crop, depth, detection, landmarks, and ArUco all overlap
+maximally; the serial spine is roughly `upload + detect + score` for a
+typical run. No new calls, no model changes, Verified Score gates
+untouched. tsc clean, build succeeds, full suite 148/148. File: modified
+`app/api/score/route.ts`.
+
 ---
 
 ## 4. What is NOT built yet

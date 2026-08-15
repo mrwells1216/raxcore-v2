@@ -102,6 +102,11 @@ function getClientKey(request: Request): string {
   return `ip:${ip}`
 }
 
+// Three GPT-4o rounds (admission, scoring, landmarks) run inside this route.
+// Sibling long-running routes (precision-pass, benchmark execute) already pin
+// 300s; without this the deployment's default duration cap applies.
+export const maxDuration = 300
+
 export async function POST(request: Request) {
   // Verify env vars before any scoring logic using shared validator
   const envCheck = hasRequiredServerEnv()
@@ -411,41 +416,53 @@ export async function POST(request: Request) {
       provider: isOpenAI ? 'openai' : 'heuristic',
     })
 
-    for (let i = 0; i < pendingImages.length; i++) {
-      const p = pendingImages[i]
-      let imageUrl: string
-
-      if (p.dataUrl) {
+    // All storage uploads run concurrently; results are then walked in index
+    // order so failure handling (including the OpenAI hard-fail 500) picks
+    // the same first-failing image the old serial loop would have.
+    const uploadOutcomes = await Promise.all(
+      pendingImages.map(async (p, i): Promise<{ imageUrl: string } | { failedMsg: string; dataUrl: string }> => {
+        if (!p.dataUrl) {
+          return { imageUrl: p.url || '' }
+        }
         try {
-          imageUrl = await uploadBuckImage(buck.id, p.dataUrl, i)
+          const imageUrl = await uploadBuckImage(buck.id, p.dataUrl, i)
           console.log(`[score] image ${i} uploaded to storage: ${imageUrl.substring(0, 80)}`)
+          return { imageUrl }
         } catch (uploadErr) {
           const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
-
-          if (isOpenAI) {
-            // Hard fail — OpenAI cannot accept data: URLs. Surface the exact error.
-            console.error(`[score] image ${i} upload failed and provider is OpenAI — cannot proceed with data: URL`, errMsg)
-            return NextResponse.json(
-              {
-                error: 'Image storage upload failed. OpenAI vision requires https:// image URLs.',
-                detail: errMsg,
-                bucket,
-                fix: `Create a Supabase Storage bucket named exactly "${bucket}" and set it to Public, or check that your service-role key has storage.write permissions.`,
-              },
-              { status: 500 }
-            )
-          }
-
-          // Non-OpenAI path (heuristic fallback already handles data: URLs)
-          console.warn(`[score] image ${i} upload failed, using data URL (non-OpenAI path):`, errMsg)
-          imageUrl = p.dataUrl
+          return { failedMsg: errMsg, dataUrl: p.dataUrl }
         }
+      }),
+    )
+
+    for (let i = 0; i < uploadOutcomes.length; i++) {
+      const outcome = uploadOutcomes[i]
+      let imageUrl: string
+
+      if ('failedMsg' in outcome) {
+        if (isOpenAI) {
+          // Hard fail — OpenAI cannot accept data: URLs. Surface the exact error.
+          console.error(`[score] image ${i} upload failed and provider is OpenAI — cannot proceed with data: URL`, outcome.failedMsg)
+          return NextResponse.json(
+            {
+              error: 'Image storage upload failed. OpenAI vision requires https:// image URLs.',
+              detail: outcome.failedMsg,
+              bucket,
+              fix: `Create a Supabase Storage bucket named exactly "${bucket}" and set it to Public, or check that your service-role key has storage.write permissions.`,
+            },
+            { status: 500 }
+          )
+        }
+
+        // Non-OpenAI path (heuristic fallback already handles data: URLs)
+        console.warn(`[score] image ${i} upload failed, using data URL (non-OpenAI path):`, outcome.failedMsg)
+        imageUrl = outcome.dataUrl
       } else {
-        imageUrl = p.url || ''
+        imageUrl = outcome.imageUrl
       }
 
       storedImageUrls.push(imageUrl)
-      resolvedImages.push({ imageUrl, angleType: p.angle, width: 1920, height: 1080 })
+      resolvedImages.push({ imageUrl, angleType: pendingImages[i].angle, width: 1920, height: 1080 })
     }
 
     // Store the resolved URLs (always the originals — never the cropped variants)
@@ -466,64 +483,73 @@ export async function POST(request: Request) {
     const scoringImageUrls: string[] = [...storedImageUrls]
     const cropMetadata: Record<string, Omit<CropResult, 'croppedBuffer'> | null> = {}
 
-    for (let i = 0; i < storedImageUrls.length; i++) {
-      const key = String(i)
-      const region = cropRegions[key] ?? null
-      if (!region) {
-        cropMetadata[key] = null
-        continue
-      }
-
-      try {
-        const originalUrl = storedImageUrls[i]
-        const imgRes = await fetch(originalUrl)
-        if (!imgRes.ok) {
-          console.warn(`[crop-box] fetch failed for image ${i} (status ${imgRes.status}) — using original`)
+    // Each image's fetch→crop→upload chain is independent — run them all
+    // concurrently. Per-image failure semantics unchanged (warn + fall back
+    // to the original URL for that image only).
+    await Promise.all(
+      storedImageUrls.map(async (originalUrl, i) => {
+        const key = String(i)
+        const region = cropRegions[key] ?? null
+        if (!region) {
           cropMetadata[key] = null
-          continue
-        }
-        const imgBuf = Buffer.from(await imgRes.arrayBuffer())
-        const cropped = await cropImageToRegion(imgBuf, region)
-        if (!cropped) {
-          console.warn(`[crop-box] crop rejected for image ${i} — using original`)
-          cropMetadata[key] = null
-          continue
+          return
         }
 
-        const croppedUrl = await uploadCroppedBuckImage(buck.id, cropped.croppedBuffer, i)
-        scoringImageUrls[i] = croppedUrl
-
-        // Strip the buffer before serializing to JSONB
-        const { croppedBuffer: _unused, ...metaForStorage } = cropped
-        void _unused
-        cropMetadata[key] = metaForStorage
-        resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
-      } catch (err) {
-        console.warn(`[crop-box] crop failed for image ${i}, using original:`, err)
-        cropMetadata[key] = null
-      }
-    }
-
-    // P1: LiDAR depth auto-calibration — extract from first image if HEIC
-    let depthCalibration: DepthCalibrationResult | null = null
-    try {
-      const firstImageUrl = storedImageUrls[0]
-      if (firstImageUrl) {
-        const imgRes = await fetch(firstImageUrl)
-        if (imgRes.ok) {
+        try {
+          const imgRes = await fetch(originalUrl)
+          if (!imgRes.ok) {
+            console.warn(`[crop-box] fetch failed for image ${i} (status ${imgRes.status}) — using original`)
+            cropMetadata[key] = null
+            return
+          }
           const imgBuf = Buffer.from(await imgRes.arrayBuffer())
-          const [depthResult, exifResult] = await Promise.all([
-            extractDepthFromHEIC(imgBuf),
-            extractExifCalibration(imgBuf),
-          ])
-          if (depthResult && exifResult) {
-            depthCalibration = computeDepthCalibration(depthResult, exifResult)
+          const cropped = await cropImageToRegion(imgBuf, region)
+          if (!cropped) {
+            console.warn(`[crop-box] crop rejected for image ${i} — using original`)
+            cropMetadata[key] = null
+            return
+          }
+
+          const croppedUrl = await uploadCroppedBuckImage(buck.id, cropped.croppedBuffer, i)
+          scoringImageUrls[i] = croppedUrl
+
+          // Strip the buffer before serializing to JSONB
+          const { croppedBuffer: _unused, ...metaForStorage } = cropped
+          void _unused
+          cropMetadata[key] = metaForStorage
+          resolvedImages[i] = { ...resolvedImages[i], imageUrl: croppedUrl, hasCropBox: true }
+        } catch (err) {
+          console.warn(`[crop-box] crop failed for image ${i}, using original:`, err)
+          cropMetadata[key] = null
+        }
+      }),
+    )
+
+    // P1: LiDAR depth auto-calibration — extract from first image if HEIC.
+    // Kicked off as a promise so the fetch + sharp decode overlap the
+    // detection round below; awaited after the detection gate. First use of
+    // the result is post-scoring (confidence engine + calibration resolver).
+    const depthCalibrationPromise: Promise<DepthCalibrationResult | null> = (async () => {
+      try {
+        const firstImageUrl = storedImageUrls[0]
+        if (firstImageUrl) {
+          const imgRes = await fetch(firstImageUrl)
+          if (imgRes.ok) {
+            const imgBuf = Buffer.from(await imgRes.arrayBuffer())
+            const [depthResult, exifResult] = await Promise.all([
+              extractDepthFromHEIC(imgBuf),
+              extractExifCalibration(imgBuf),
+            ])
+            if (depthResult && exifResult) {
+              return computeDepthCalibration(depthResult, exifResult)
+            }
           }
         }
+      } catch (depthErr) {
+        console.warn('[score] depth extraction failed (non-blocking):', depthErr)
       }
-    } catch (depthErr) {
-      console.warn('[score] depth extraction failed (non-blocking):', depthErr)
-    }
+      return null
+    })()
 
     // Update status to processing
     await updateBuckStatus(buck.id, 'processing')
@@ -567,6 +593,10 @@ export async function POST(request: Request) {
       // Detection failed but we can continue with scoring as fallback
       console.error('[score] detection phase failed, continuing with scoring:', detectionError)
     }
+
+    // Depth extraction has been running since before the detection round —
+    // by now it has usually finished. Never throws (errors resolve to null).
+    const depthCalibration = await depthCalibrationPromise
 
     // Latency: kick off per-image landmark + ArUco detection NOW so their
     // GPT-4o calls run concurrently with the main scoring call below. Results
