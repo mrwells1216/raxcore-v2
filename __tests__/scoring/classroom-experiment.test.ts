@@ -111,11 +111,17 @@ describe('applyCalibration', () => {
     confidence_multiplier: 1,
   }
 
-  it('applies the seeded default offset when no profile exists', () => {
+  it('passes the score through untouched when no profile exists', () => {
+    // The seeded global default is held at 0 — a flat offset guessed from a
+    // couple of photos was making every score worse. With no learned profile
+    // the raw estimate must survive unchanged, and calibrationApplied must
+    // report false because nothing actually was applied.
+    expect(DEFAULT_GLOBAL_GROSS_BIAS).toBe(0)
     const r = applyCalibration({ rawGross: 160, rawNet: 155, rawConfidence: 65, profile: null })
-    expect(r.calibratedGross).toBe(160 + DEFAULT_GLOBAL_GROSS_BIAS)
+    expect(r.calibratedGross).toBe(160)
+    expect(r.calibratedNet).toBe(155)
     expect(r.calibrationMeta.source).toBe('default')
-    expect(r.calibrationApplied).toBe(true)
+    expect(r.calibrationApplied).toBe(false)
   })
 
   it('uses the learned profile bias when present', () => {

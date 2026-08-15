@@ -111,8 +111,9 @@ export interface VisionScoringInput {
   preAiScoringContext?: PreAiScoringContext | null
   /** Phase 39: optional correlation ID inherited from the parent score request */
   traceId?: string
-  /** Known field biases from correction_events — injected into prompt so AI can pre-compensate */
-  fieldBiases?: Record<string, number>
+  // NOTE: there is deliberately no `fieldBiases` here. Learned biases are
+  // applied once, arithmetically, after scoring (ai-service STAGE 2.5).
+  // Passing them into the prompt as well double-applied the correction.
   /** Classroom: extra instruction appended to the prompt. Never replaces the contract. */
   customPromptOverride?: string | null
 }
@@ -458,16 +459,10 @@ Estimate all unmeasured fields based on these confirmed anchors.
 `
     : ''
 
-  const biasBlock = (() => {
-    const biases = input.fieldBiases
-    if (!biases || Object.keys(biases).length === 0) return ''
-    const lines = Object.entries(biases)
-      .map(([field, delta]) =>
-        `  - ${field}: historically estimated ${delta > 0 ? 'LOW' : 'HIGH'} by ~${Math.abs(delta).toFixed(1)}" — lean ${delta > 0 ? 'higher' : 'lower'}`,
-      )
-      .join('\n')
-    return `\nKNOWN BIASES (pre-compensate)\nStatistically significant biases from user corrections (>=10 samples each):\n${lines}\n`
-  })()
+  // Learned field biases are intentionally absent from this prompt. They are
+  // applied once, arithmetically, after the model returns (ai-service STAGE
+  // 2.5). Asking the model to pre-compensate here as well applied the same
+  // correction twice. Do not re-add a bias block.
 
   const customPromptBlock = input.customPromptOverride?.trim()
     ? `\nADDITIONAL OPERATOR INSTRUCTION (experimental — does not override the rules above)\n${input.customPromptOverride.trim()}\n`
@@ -546,7 +541,7 @@ SELF-CHECK (perform before returning)
 
 REFUSE
 If image quality fails (blur beyond recognition, obstruction, rack absent), do NOT invent numbers. Return your best honest estimate with confidence_percent < 40 and quality_notes explaining what failed.
-${biasBlock}${customPromptBlock}
+${customPromptBlock}
 Respond with structured JSON matching the required schema.`
 }
 

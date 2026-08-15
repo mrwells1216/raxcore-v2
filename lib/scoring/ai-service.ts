@@ -776,13 +776,12 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
   const angleDiversity = calculateAngleDiversity(angles)
   const stateCalibration = getStateCalibration(input.state ?? 'unknown')
 
-  // Load field biases early so they can be injected into the vision prompt
-  // (also used later in stage 2.5 for post-hoc measurement correction).
-  // Classroom can disable this via the promptBiasCorrection flag.
-  const biasCorrectionEnabled = input.experiment?.promptBiasCorrection !== false
-  const preloadedFieldBiases = biasCorrectionEnabled
-    ? await loadFieldBiases().catch(() => ({} as Record<string, number>))
-    : {}
+  // NOTE: learned field biases are deliberately NOT injected into the vision
+  // prompt. They are applied exactly once, arithmetically, in STAGE 2.5 below.
+  // Doing both told the model to pre-compensate AND then added the same
+  // inches to its answer, landing the correction twice — the more correction
+  // events accumulated, the further scores drifted. Arithmetic-only is
+  // deterministic, auditable, and testable; prompt compliance is neither.
 
   // Try vision scoring first (with Phase 24 runtime hardening)
   const visionResult = await scoreWithVision({
@@ -799,7 +798,6 @@ export async function scoreBuck(input: ScoringInput): Promise<ScoringOutput> {
     referenceObject: input.referenceObject ?? undefined,
     preAiScoringContext: input.preAiScoringContext ?? null,
     traceId: input.traceId,  // Phase 39: propagate trace ID
-    fieldBiases: Object.keys(preloadedFieldBiases).length > 0 ? preloadedFieldBiases : undefined,
     customPromptOverride: input.experiment?.customPrompt ?? undefined,
   })
 

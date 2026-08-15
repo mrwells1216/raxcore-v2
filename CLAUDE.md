@@ -762,6 +762,64 @@ Files: new `components/scoring/redaction-pen.tsx`, new
 `__tests__/scoring/redaction-pen.test.ts`; modified
 `components/scoring/scoring-wizard.tsx`.
 
+### 3.42. Accuracy regression fix: bias double-application + seeded +6 ✓
+Root-cause fix for "AI scoring has only gotten worse." Two compounding
+score-inflation bugs, both of which grew over time — which is why the
+degradation was gradual rather than present from day one.
+
+(a) **Learned bias was applied TWICE.** `scoreBuck` called `loadFieldBiases()`
+at `ai-service.ts:784` and passed the result to the vision prompt as
+`fieldBiases` (`vision-scorer.ts` `biasBlock` → *"g2_left: historically
+estimated LOW by ~2.1" — lean higher"*), instructing the model to
+pre-compensate. It then called `loadFieldBiases()` **again** at
+`ai-service.ts:970` and `applyBiasCorrections` ADDED the same inches to the
+model's output (STAGE 2.5). When the model complied with the instruction, the
+correction landed twice. Because bias only fires at ≥10 observations per
+field (§3.7), almost nothing double-counted early on and progressively more
+did as `correction_events` accumulated — and the resulting over-correction
+generated *new* corrections in the opposite direction, so the flywheel
+oscillated instead of converging. Fix: biases are now applied **exactly once,
+arithmetically, after scoring**. The prompt injection is removed, the
+`fieldBiases` field is deleted from `VisionScoringInput` (with a comment
+explaining why it must not come back), and `buildVisionPrompt` ignores a
+`fieldBiases`-shaped property if one is ever passed again. Arithmetic-only
+was chosen over prompt-only because it is deterministic, auditable, and
+unit-testable, whereas "did the model actually obey the instruction" is none
+of those and varies run to run.
+
+(b) **`DEFAULT_GLOBAL_GROSS_BIAS` / `NET_BIAS` 6 → 0.** The +6" was inferred
+in §3.30 from two photos (IMG_6534/IMG_6535) reading low — n=2 — then applied
+as a flat offset to every buck regardless of size, angle, or calibration
+tier, stacked on top of (a). Held at 0 with a comment directing future
+tuning to a measured MAE from a benchmark pack (§3.33) rather than eyeballed
+runs. `applyCalibration` correctly now reports `calibrationApplied: false`
+for the no-profile path, because nothing is applied — reporting `true` for a
+no-op would violate the §5 provenance rule. The classroom test was updated
+to assert the pass-through identity instead of the old +6 behavior.
+
+KNOWN DATA CONTAMINATION (not fixed in code, needs an operator decision): the
+per-field biases currently stored in `correction_events` — and the AI-vs-
+official deltas in `official_score_sheets.ai_run_result` fused per §3.34 —
+were all recorded while (a) was live, so they encode compensation for the
+doubling. After this fix they will under-correct until enough clean
+observations outweigh them. Options: wipe `correction_events`, add a
+learned-from cutoff timestamp, or let new events gradually dominate (slowest;
+the ±3" clamp bounds the damage either way).
+
+Deliberately NOT changed pending measured evidence: the soft pull toward
+"typical" ranges in `normalization.ts` (regresses exceptional racks toward
+average on every field — a real suspect, but removing it without a benchmark
+baseline repeats the mistake that produced the +6), and the four overlapping
+learned correctors (measurement-level §Phase 21, segmented §Phase 41,
+learning correction §Phase 10, global calibration). Tests: 3 new regression
+guards in `__tests__/scoring/prompt-snapshots.test.ts` asserting the prompt
+contains no bias block, never says "lean higher/lower", and is byte-identical
+when a `fieldBiases` property is passed. tsc clean, build succeeds, full
+suite 156/156. Files: modified `lib/scoring/ai-service.ts`,
+`lib/scoring/vision-scorer.ts`, `lib/calibration-constants.ts`,
+`__tests__/scoring/prompt-snapshots.test.ts`,
+`__tests__/scoring/classroom-experiment.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

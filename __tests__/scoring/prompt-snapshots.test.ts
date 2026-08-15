@@ -122,3 +122,33 @@ describe('DETECTION_SYSTEM_PROMPT', () => {
     expect(DETECTION_SYSTEM_PROMPT.length).toBeLessThan(2400)
   })
 })
+
+describe('learned bias is never injected into the vision prompt', () => {
+  // Regression guard. Learned per-field biases used to be BOTH described in
+  // the prompt ("historically estimated LOW by ~2.1" — lean higher") AND added
+  // arithmetically to the model's output in ai-service STAGE 2.5. When the
+  // model complied with the instruction, the correction landed twice, and the
+  // drift grew as more correction_events accumulated. Biases are now applied
+  // exactly once, arithmetically, after scoring.
+  const prompt = buildVisionPrompt(makeMinimalVisionInput())
+
+  it('has no bias pre-compensation section', () => {
+    expect(prompt).not.toContain('KNOWN BIASES')
+    expect(prompt).not.toContain('pre-compensate')
+  })
+
+  it('never tells the model to lean a measurement higher or lower', () => {
+    expect(prompt).not.toMatch(/lean (higher|lower)/i)
+    expect(prompt).not.toMatch(/historically estimated/i)
+  })
+
+  it('ignores a fieldBiases-shaped property if one is ever passed again', () => {
+    const withBiases = {
+      ...makeMinimalVisionInput(),
+      fieldBiases: { g2_left: 2.1, main_beam_right: -1.4 },
+    } as VisionScoringInput
+    const biased = buildVisionPrompt(withBiases)
+    expect(biased).toBe(prompt)
+    expect(biased).not.toContain('g2_left')
+  })
+})
