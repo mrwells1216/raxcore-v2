@@ -713,6 +713,55 @@ typical run. No new calls, no model changes, Verified Score gates
 untouched. tsc clean, build succeeds, full suite 148/148. File: modified
 `app/api/score/route.ts`.
 
+### 3.41. Blackout pen (pre-scoring redaction) ✓
+Field-test-driven feature: photos routinely contain a second deer, a wall
+of mounted racks, or a truck-bed pile behind the subject, and the AI has no
+way to know which rack it is supposed to score. The user can now black out
+anything the model shouldn't see, at the same stage as the antler crop box.
+New `components/scoring/redaction-pen.tsx` exports `RedactionStroke`
+(normalized 0–1 points + `size` as a fraction of image width, so strokes
+replay identically at any resolution), three pen sizes (`PEN_SIZES`: S/M/L
+at 0.03/0.065/0.13 of image width), the `RedactionPen` overlay component,
+`estimateRedactionCoverage()` (rasterizes to a 96×96 offscreen canvas and
+counts opaque pixels), and `bakeRedactionsIntoDataUrl()`.
+
+The critical property is **the redaction is destructive before upload**:
+`bakeRedactionsIntoDataUrl` draws the source image to a canvas at natural
+resolution, strokes solid black over it, and re-encodes. That baked data URL
+is what gets POSTed, so the blacked-out pixels never reach Supabase storage,
+the detection gate, the vision scorer, the landmark round, or the stored
+image the results page displays. There is no "original" copy to leak. No
+strokes ⇒ the data URL passes through byte-identical, so the 99% path is
+unchanged.
+
+Failure semantics are deliberately strict: if preprocessing throws for an
+image that has strokes, the wizard **aborts the submission** with an
+actionable message rather than taking the existing raw-`File` fallback path,
+because that fallback would upload the unredacted photo the user explicitly
+marked up. `handleAnalyze`'s catch now surfaces `error.message` instead of
+always showing the generic "Analysis failed" toast, so that abort (and API
+`userMessage`s) actually reach the user.
+
+UI is a collapsible card ("Blackout Pen (Optional)") between the crop
+section and the Pedicle Calibration card, mirroring the existing card
+pattern. Canvas overlay is DPR-aware and `ResizeObserver`-driven; drawing is
+RAF-throttled; pointer capture makes drags work on touch. Per-photo Undo /
+Clear, a live stroke + coverage readout, and an amber warning above 50%
+coverage ("make sure the rack itself is untouched").
+
+Known limitation (documented, not a bug): the debounced `/api/detect`
+pre-check banner runs on the raw `gridImages` and does not see redactions,
+so its advisory feedback can still mention a blacked-out subject. The real
+scoring path is fully redacted; re-running detection post-redaction would
+add API cost for an advisory-only banner. Verified Score gates unchanged —
+redaction touches pixels, never calibration or provenance. Tests: 5 new
+specs in `__tests__/scoring/redaction-pen.test.ts` (no-stroke pass-through
+identity, empty-stroke resolve, zero coverage, non-DOM graceful degradation,
+pen-size ordering/sanity). tsc clean, build succeeds, full suite 153/153.
+Files: new `components/scoring/redaction-pen.tsx`, new
+`__tests__/scoring/redaction-pen.test.ts`; modified
+`components/scoring/scoring-wizard.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

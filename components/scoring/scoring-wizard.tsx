@@ -10,6 +10,7 @@ import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
 import { AntlerCropBox, type CropRegion } from './antler-crop-box'
+import { RedactionPen, bakeRedactionsIntoDataUrl, type RedactionStroke } from './redaction-pen'
 import { CalibrationDots, type PedicleDotPlacement } from './calibration-dots'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
@@ -68,6 +69,8 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
   const [cropSkipped, setCropSkipped] = useState<Record<number, boolean>>({})
   const [pedicleDots, setPedicleDots] = useState<Record<number, PedicleDotPlacement | null>>({})
   const [pedicleCalibrationOpen, setPedicleCalibrationOpen] = useState(false)
+  const [redactionStrokes, setRedactionStrokes] = useState<Record<number, RedactionStroke[]>>({})
+  const [redactionOpen, setRedactionOpen] = useState(false)
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -427,16 +430,31 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
 
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
+        const strokes = redactionStrokes[index] ?? []
         try {
           const source = img.file || img.url
           const processed = await preprocessImage(source, {
             maxDimension: 1200,
             quality: 0.7,
           })
-          apiFormData.append(`image_data_${index}`, processed.dataUrl)
+          // Burn blackout strokes into the pixels before upload so every
+          // downstream consumer (detection, scoring, landmarks) sees the
+          // redacted image. No strokes ⇒ dataUrl passes through untouched.
+          // A bake failure throws — we never silently send an unredacted
+          // image the user marked up.
+          const finalDataUrl = strokes.length > 0
+            ? await bakeRedactionsIntoDataUrl(processed.dataUrl, strokes)
+            : processed.dataUrl
+          apiFormData.append(`image_data_${index}`, finalDataUrl)
           apiFormData.append(`angle_${index}`, img.angleType)
         } catch (preprocessError) {
           console.error(`Failed to preprocess image ${index}:`, preprocessError)
+          if (strokes.length > 0) {
+            // The raw-file fallback would bypass the blackout. Abort instead.
+            throw new Error(
+              `Couldn't apply the blackout pen to photo ${index + 1}. Clear its strokes or re-add the photo, then try again.`,
+            )
+          }
           if (img.file) {
             apiFormData.append(`image_${index}`, img.file)
           } else {
@@ -468,7 +486,10 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
       onComplete(result, data)
     } catch (error) {
       console.error('Scoring error:', error)
-      toast.error('Analysis failed. Please try again.')
+      // Surface the specific message when we have one (API userMessage,
+      // redaction abort) instead of swallowing it behind a generic toast.
+      const message = error instanceof Error && error.message ? error.message : null
+      toast.error(message ?? 'Analysis failed. Please try again.')
     } finally {
       setIsAnalyzing(false)
     }
@@ -714,6 +735,57 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
             </div>
           </div>
         </Section>
+      )}
+
+      {/* ── 5a-ii. Blackout pen (optional, per image) ───────────────────── */}
+      {gridImages.length > 0 && (
+        <div
+          className="rounded overflow-hidden"
+          style={{
+            border: '1px solid var(--bronze-dark)',
+            background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setRedactionOpen(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
+            aria-expanded={redactionOpen}
+          >
+            <div>
+              <span
+                className="text-[10px] font-black tracking-[0.22em] uppercase"
+                style={{ color: 'var(--bronze-light)' }}
+              >
+                Blackout Pen (Optional)
+              </span>
+              <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                Draw over other deer, wall racks, or anything the AI shouldn&apos;t score.
+                Blacked-out areas are removed before analysis.
+              </p>
+            </div>
+            {redactionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          {redactionOpen && (
+            <div className="px-5 pb-5 space-y-5">
+              {gridImages.map((img, index) => (
+                <RedactionPen
+                  key={img.id}
+                  imageUrl={img.url}
+                  label={`Photo ${index + 1} — ${img.angleType}`}
+                  strokes={redactionStrokes[index] ?? []}
+                  onChange={(strokes) => {
+                    setRedactionStrokes(prev => ({ ...prev, [index]: strokes }))
+                  }}
+                />
+              ))}
+              <p className="text-[10px] font-mono text-muted-foreground">
+                The black ink is burned into the photo the AI receives — it can never
+                see what&apos;s underneath. Keep the rack you&apos;re scoring fully visible.
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       {gridImages.length > 0 && (
