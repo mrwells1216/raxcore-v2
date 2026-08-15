@@ -666,6 +666,31 @@ sibling update writers (`updatePredictionPerImageConsensus`,
 non-blocking and needed no change. tsc clean, build succeeds. File: modified
 `lib/storage/service.ts`.
 
+### 3.39. Scoring latency: parallel detection + overlapped landmark round ✓
+Wall-clock fix for the "/api/score takes forever" complaint. The pipeline has
+three GPT-4o rounds (admission detection, main vision scoring, per-image
+landmarks+ArUco — the two-pass "solver" is deterministic, not an AI call) and
+all three ran back-to-back. Two changes, zero behavior/accuracy change:
+(a) **`detectRackWithOpenAI` parallelized** — was a serial `for` loop with one
+awaited GPT-4o call per image (3 images = 3× detection latency before scoring
+even started). Now `Promise.all` over an indexed map; result order and
+throw semantics identical (any single failure rejects the batch, the route
+already catches and continues to scoring).
+(b) **Landmark + ArUco round overlapped with scoring** — the P2 per-image
+landmark and ArUco calls only need `storedImageUrls` + angle types, all final
+before scoring, but ran only after `scoreBuck` returned. The kickoff is now
+hoisted in `app/api/score/route.ts` to immediately after the detection gate
+passes (so rejected 422 submissions still never pay for these calls), and the
+existing P2 block awaits the stored promises — which by then have been running
+concurrently with the main vision call. `.catch` handlers on the kicked-off
+promises return empty results (same degradation as before) and prevent an
+early failure from becoming an unhandled rejection while `scoreBuck` awaits.
+Net: wall clock drops from `N×detect + score + landmarks` to roughly
+`detect + max(score, landmarks)`. Cost per run unchanged (same calls, same
+models, same gating). Verified Score gates untouched. tsc clean, build
+succeeds, full suite 148/148. Files: modified
+`lib/detection/detect-rack-with-openai.ts`, `app/api/score/route.ts`.
+
 ---
 
 ## 4. What is NOT built yet

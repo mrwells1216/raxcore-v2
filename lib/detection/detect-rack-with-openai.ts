@@ -132,62 +132,61 @@ g3_right_tip, g4_right_tip.
 export async function detectRackWithOpenAI(
   imageUrls: string[],
 ): Promise<DetectionImageAnalysis[]> {
-  const results: DetectionImageAnalysis[] = []
+  // One admission call per image, all in flight at once. Order is preserved
+  // by index; any single failure rejects the whole batch (same semantics as
+  // the previous serial loop — the caller catches and continues to scoring).
+  return Promise.all(
+    imageUrls.map(async (imageUrl, i): Promise<DetectionImageAnalysis> => {
+      const response = await generateObject({
+        model: openai('gpt-4o'),
+        schema: detectionSchema,
+        system: DETECTION_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text:
+                  'Analyze this image for deer subject validity, rack visibility, view angle, and antler landmarks. Be strict. Reject non-deer and weak frames.',
+              },
+              {
+                type: 'image',
+                image: imageUrl,
+              },
+            ],
+          },
+        ],
+      })
 
-  for (let i = 0; i < imageUrls.length; i += 1) {
-    const imageUrl = imageUrls[i]
+      const obj = response.object
 
-    const response = await generateObject({
-      model: openai('gpt-4o'),
-      schema: detectionSchema,
-      system: DETECTION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text:
-                'Analyze this image for deer subject validity, rack visibility, view angle, and antler landmarks. Be strict. Reject non-deer and weak frames.',
-            },
-            {
-              type: 'image',
-              image: imageUrl,
-            },
-          ],
-        },
-      ],
-    })
+      const accepted =
+        (obj.subjectType === 'deer' ||
+          obj.subjectType === 'mounted_deer' ||
+          obj.subjectType === 'shed_antlers') &&
+        obj.antlerPresenceConfidence >= 0.45 &&
+        obj.usableFrameScore >= 0.45
 
-    const obj = response.object
-
-    const accepted =
-      (obj.subjectType === 'deer' ||
-        obj.subjectType === 'mounted_deer' ||
-        obj.subjectType === 'shed_antlers') &&
-      obj.antlerPresenceConfidence >= 0.45 &&
-      obj.usableFrameScore >= 0.45
-
-    results.push({
-      imageIndex: i,
-      subjectType: obj.subjectType,
-      subjectConfidence: clamp01(obj.subjectConfidence),
-      antlerPresenceConfidence: clamp01(obj.antlerPresenceConfidence),
-      rackVisibilityConfidence: clamp01(obj.rackVisibilityConfidence),
-      usableFrameScore: clamp01(obj.usableFrameScore),
-      view: obj.view,
-      mounted: obj.mounted,
-      occlusionScore: clamp01(obj.occlusionScore),
-      blurScore: clamp01(obj.blurScore),
-      lightingScore: clamp01(obj.lightingScore),
-      rackBox: obj.rackBox,
-      leftRackBox: obj.leftRackBox,
-      rightRackBox: obj.rightRackBox,
-      landmarks: normalizeLandmarks(obj.landmarks, i),
-      issues: normalizeIssues(obj.issues),
-      accepted,
-    })
-  }
-
-  return results
+      return {
+        imageIndex: i,
+        subjectType: obj.subjectType,
+        subjectConfidence: clamp01(obj.subjectConfidence),
+        antlerPresenceConfidence: clamp01(obj.antlerPresenceConfidence),
+        rackVisibilityConfidence: clamp01(obj.rackVisibilityConfidence),
+        usableFrameScore: clamp01(obj.usableFrameScore),
+        view: obj.view,
+        mounted: obj.mounted,
+        occlusionScore: clamp01(obj.occlusionScore),
+        blurScore: clamp01(obj.blurScore),
+        lightingScore: clamp01(obj.lightingScore),
+        rackBox: obj.rackBox,
+        leftRackBox: obj.leftRackBox,
+        rightRackBox: obj.rightRackBox,
+        landmarks: normalizeLandmarks(obj.landmarks, i),
+        issues: normalizeIssues(obj.issues),
+        accepted,
+      }
+    }),
+  )
 }

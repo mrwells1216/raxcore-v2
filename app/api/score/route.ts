@@ -568,6 +568,39 @@ export async function POST(request: Request) {
       console.error('[score] detection phase failed, continuing with scoring:', detectionError)
     }
 
+    // Latency: kick off per-image landmark + ArUco detection NOW so their
+    // GPT-4o calls run concurrently with the main scoring call below. Results
+    // are awaited in the P2 block after scoring — same behavior, overlapped
+    // wall clock. Kickoff sits AFTER the detection gate so rejected (422)
+    // submissions never pay for these calls. The .catch handlers keep an
+    // early failure from becoming an unhandled rejection while scoring is
+    // still awaiting; failures degrade to empty results exactly as before.
+    const landmarksEnabled = isFeatureEnabled(experimentConfig, 'landmarks')
+    const landmarkAngleTypes = resolvedImages.map((img) => {
+      const a = img.angleType
+      return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
+    }) as Array<'front' | 'left' | 'right' | 'unknown'>
+    const arucoEnabled =
+      landmarksEnabled &&
+      isFeatureEnabled(experimentConfig, 'arucoCalibration') &&
+      referenceTypeRaw === 'aruco_marker' &&
+      referenceSizeValueRaw != null &&
+      Number(referenceSizeValueRaw) >= ARUCO_SIDE_MIN_INCHES &&
+      Number(referenceSizeValueRaw) <= ARUCO_SIDE_MAX_INCHES
+    const arucoSideInches = arucoEnabled ? Number(referenceSizeValueRaw) : null
+    const perImageLandmarksPromise: Promise<PerImageLandmarkResult[]> = landmarksEnabled
+      ? detectLandmarkPositionsPerImage(storedImageUrls, landmarkAngleTypes).catch((err) => {
+          console.warn('[score] per-image landmark detection failed (non-blocking):', err)
+          return [] as PerImageLandmarkResult[]
+        })
+      : Promise.resolve([] as PerImageLandmarkResult[])
+    const arucoDetectionsPromise = arucoEnabled
+      ? detectArucoMarkersPerImage(storedImageUrls).catch((err) => {
+          console.warn('[score] ArUco detection failed (non-blocking):', err)
+          return []
+        })
+      : Promise.resolve([])
+
     // Log capture quality metadata
     if (selectedImageAnglesRaw || captureQualitySummaryRaw) {
       let captureQualityData: any = {}
@@ -961,38 +994,17 @@ export async function POST(request: Request) {
     // P2: Per-image landmark detection — best-effort, never blocks response.
     // Each image gets its own GPT-4o call so per-reference outlier detection
     // and angle-aware distortion penalties have unambiguous per-image inputs.
+    // The calls were kicked off before scoring (see kickoff above the
+    // scoreBuck call) so by now they have been running concurrently with the
+    // main vision call — this await usually resolves instantly.
     let landmarkDetectionResult: LandmarkDetectionResult | null = null
     let landmarkScoreResult: LandmarkScoreResult | null = null
     let perImageLandmarks: PerImageLandmarkResult[] = []
     let perImageConsensus: ReturnType<typeof computePerImageConsensus> | null = null
     try {
-      // Classroom feature gates — all default ON in production.
-      const landmarksEnabled = isFeatureEnabled(experimentConfig, 'landmarks')
-      const angleTypes = resolvedImages.map((img) => {
-        const a = img.angleType
-        return a === 'front' || a === 'left' || a === 'right' ? a : 'unknown'
-      }) as Array<'front' | 'left' | 'right' | 'unknown'>
-
-      // Detect landmarks and ArUco markers in parallel. ArUco only runs when
-      // the user declared an ArUco marker is present AND supplied a sane side
-      // length — otherwise we skip the API call to keep cost flat for the
-      // 99% case that doesn't print markers.
-      const arucoEnabled =
-        landmarksEnabled &&
-        isFeatureEnabled(experimentConfig, 'arucoCalibration') &&
-        referenceTypeRaw === 'aruco_marker' &&
-        referenceSizeValueRaw != null &&
-        Number(referenceSizeValueRaw) >= ARUCO_SIDE_MIN_INCHES &&
-        Number(referenceSizeValueRaw) <= ARUCO_SIDE_MAX_INCHES
-      const arucoSideInches = arucoEnabled ? Number(referenceSizeValueRaw) : null
-
       const [landmarksResult, arucoDetections] = await Promise.all([
-        landmarksEnabled
-          ? detectLandmarkPositionsPerImage(storedImageUrls, angleTypes)
-          : Promise.resolve([] as PerImageLandmarkResult[]),
-        arucoEnabled
-          ? detectArucoMarkersPerImage(storedImageUrls)
-          : Promise.resolve([]),
+        perImageLandmarksPromise,
+        arucoDetectionsPromise,
       ])
       perImageLandmarks = landmarksResult
       const usable = perImageLandmarks.filter((r) => !r.failed)
