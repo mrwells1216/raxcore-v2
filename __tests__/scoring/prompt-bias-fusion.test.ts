@@ -10,6 +10,8 @@ function makeDb(data: Record<string, unknown[]>) {
       const builder: Record<string, unknown> = {
         select: () => builder,
         not: () => builder,
+        // The loaders narrow correction_events by created_at >= cutoff.
+        gte: () => builder,
         limit: () => Promise.resolve(result),
       }
       return builder
@@ -27,12 +29,22 @@ function userRows(field: string, delta: number, n: number) {
   return Array.from({ length: n }, () => ({ field_key: field, delta }))
 }
 
-function gtSheet(fields: Array<{ field: string; delta: number }>) {
-  return { ai_run_result: { fields } }
+// Cutoff used by these tests. Set explicitly so the suite does not depend on
+// the shipped DEFAULT_BIAS_LEARNING_CUTOFF constant moving.
+const TEST_CUTOFF = '2026-01-01T00:00:00Z'
+const AFTER_CUTOFF = '2026-06-01T00:00:00Z'
+const BEFORE_CUTOFF = '2025-06-01T00:00:00Z'
+
+function gtSheet(
+  fields: Array<{ field: string; delta: number }>,
+  runAt: string = AFTER_CUTOFF,
+) {
+  return { ai_run_result: { run_at: runAt, fields } }
 }
 
 beforeEach(() => {
   mockData = {}
+  process.env.BIAS_LEARNING_CUTOFF = TEST_CUTOFF
 })
 
 describe('prompt bias fusion', () => {
@@ -109,5 +121,53 @@ describe('prompt bias fusion', () => {
     const report = await getBiasReport()
     const g4 = report.fields.find((f) => f.fieldKey === 'g4_left')
     expect(g4?.sampleCount).toBe(10)
+  })
+})
+
+describe('bias learning cutoff', () => {
+  // Observations recorded before the cutoff were learned while the bias
+  // double-application (§3.42) was live, so they describe a bias that no
+  // longer exists. Feeding them back in pushes every score low.
+  it('ignores ground-truth comparisons run before the cutoff', async () => {
+    mockData = {
+      correction_events: [],
+      official_score_sheets: Array.from({ length: 20 }, () =>
+        gtSheet([{ field: 'g2_left', delta: 2 }], BEFORE_CUTOFF)
+      ),
+    }
+    expect(await loadFieldBiases()).toEqual({})
+  })
+
+  it('treats an undated comparison as pre-cutoff', async () => {
+    mockData = {
+      correction_events: [],
+      official_score_sheets: Array.from({ length: 20 }, () => ({
+        ai_run_result: { fields: [{ field: 'g2_left', delta: 2 }] },
+      })),
+    }
+    expect(await loadFieldBiases()).toEqual({})
+  })
+
+  it('still learns from comparisons run after the cutoff', async () => {
+    mockData = {
+      correction_events: [],
+      official_score_sheets: Array.from({ length: 10 }, () =>
+        gtSheet([{ field: 'g2_left', delta: 2 }], AFTER_CUTOFF)
+      ),
+    }
+    const biases = await loadFieldBiases()
+    expect(biases.g2_left).toBeCloseTo(-2, 5)
+  })
+
+  it('learns from all history when the cutoff is cleared', async () => {
+    process.env.BIAS_LEARNING_CUTOFF = ''
+    mockData = {
+      correction_events: [],
+      official_score_sheets: Array.from({ length: 10 }, () =>
+        gtSheet([{ field: 'g2_left', delta: 2 }], BEFORE_CUTOFF)
+      ),
+    }
+    const biases = await loadFieldBiases()
+    expect(biases.g2_left).toBeCloseTo(-2, 5)
   })
 })

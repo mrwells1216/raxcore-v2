@@ -797,14 +797,27 @@ for the no-profile path, because nothing is applied — reporting `true` for a
 no-op would violate the §5 provenance rule. The classroom test was updated
 to assert the pass-through identity instead of the old +6 behavior.
 
-KNOWN DATA CONTAMINATION (not fixed in code, needs an operator decision): the
-per-field biases currently stored in `correction_events` — and the AI-vs-
-official deltas in `official_score_sheets.ai_run_result` fused per §3.34 —
-were all recorded while (a) was live, so they encode compensation for the
-doubling. After this fix they will under-correct until enough clean
-observations outweigh them. Options: wipe `correction_events`, add a
-learned-from cutoff timestamp, or let new events gradually dominate (slowest;
-the ±3" clamp bounds the damage either way).
+(c) **Bias learning cutoff (added after field testing).** With (a) and (b)
+fixed, scores came back closer but still read LOW — the true score landed
+above the high end of the band on 2–3 bucks. Cause: the biases stored in
+`correction_events` (and the AI-vs-official deltas in
+`official_score_sheets.ai_run_result`) were all recorded while (a) was live.
+The doubling made scores run hot, users corrected them back down, and those
+downward deltas were stored as if they were the model's true bias. With the
+doubling fixed and the +6 removed, that accumulated negative correction is no
+longer offset by anything, so it drags every score down — and at ±3" per
+field across ~20 fields, it dominates any other effect in the pipeline.
+`loadUserCorrectionDeltas` now filters `created_at >= cutoff` and
+`loadGroundTruthDeltas` filters on `ai_run_result.run_at` (undated rows are
+treated as pre-cutoff). `DEFAULT_BIAS_LEARNING_CUTOFF = '2026-08-15T00:00:00Z'`,
+overridable via the optional `BIAS_LEARNING_CUTOFF` env var; an empty string
+learns from all history again. This is a FILTER, not a delete — rows remain
+for audit, they simply stop training the corrector, and the decision is
+reversible by changing one env var. `getBiasReport` reuses the same loaders,
+so `/admin/accuracy` shows exactly what is being applied. Pre-cutoff official
+sheets can be cleaned by re-running
+`/api/admin/training-import/[id]/run-ai`, which regenerates `ai_run_result`
+against the fixed pipeline.
 
 Deliberately NOT changed pending measured evidence: the soft pull toward
 "typical" ranges in `normalization.ts` (regresses exceptional racks toward
@@ -814,11 +827,15 @@ learned correctors (measurement-level §Phase 21, segmented §Phase 41,
 learning correction §Phase 10, global calibration). Tests: 3 new regression
 guards in `__tests__/scoring/prompt-snapshots.test.ts` asserting the prompt
 contains no bias block, never says "lean higher/lower", and is byte-identical
-when a `fieldBiases` property is passed. tsc clean, build succeeds, full
-suite 156/156. Files: modified `lib/scoring/ai-service.ts`,
-`lib/scoring/vision-scorer.ts`, `lib/calibration-constants.ts`,
+when a `fieldBiases` property is passed; 4 cutoff specs in
+`__tests__/scoring/prompt-bias-fusion.test.ts` (pre-cutoff ignored, undated
+treated as pre-cutoff, post-cutoff still learns, cleared cutoff learns from
+all history). tsc clean, build succeeds, full suite 160/160. Files: modified
+`lib/scoring/ai-service.ts`, `lib/scoring/vision-scorer.ts`,
+`lib/calibration-constants.ts`, `lib/scoring/prompt-bias-correction.ts`,
 `__tests__/scoring/prompt-snapshots.test.ts`,
-`__tests__/scoring/classroom-experiment.test.ts`.
+`__tests__/scoring/classroom-experiment.test.ts`,
+`__tests__/scoring/prompt-bias-fusion.test.ts`.
 
 ---
 
@@ -919,6 +936,7 @@ route-level logic into the corresponding pipeline at that point.
 | `QSTASH_CURRENT_SIGNING_KEY` | QStash verification | **server-only** |
 | `QSTASH_NEXT_SIGNING_KEY` | QStash verification | **server-only** |
 | `CRON_SECRET` | Local dev job trigger | **server-only** |
+| `BIAS_LEARNING_CUTOFF` | Bias corrector (§3.42c) | optional ISO 8601; ignore correction observations older than this. Absent ⇒ `DEFAULT_BIAS_LEARNING_CUTOFF`. Empty string ⇒ learn from all history |
 | `LUMA_API_KEY` | Reconstruction | **server-only**; absent ⇒ manual fallback |
 | `LUMA_RECON_SUBMIT_URL` | Reconstruction | absent ⇒ manual fallback |
 | `LUMA_RECON_STATUS_URL` | Reconstruction | absent ⇒ manual fallback |

@@ -29,6 +29,29 @@ const USER_CORRECTION_WEIGHT = 1
 // Ground-truth (AI vs certified score sheet) deltas beat user guesses.
 const GROUND_TRUTH_WEIGHT = 3
 
+/**
+ * Observations recorded before this instant are ignored.
+ *
+ * Everything learned before §3.42 was recorded while the bias
+ * double-application bug was live: the correction was described in the vision
+ * prompt AND added to the model's output, so scores ran hot, users corrected
+ * them back down, and those downward deltas were stored as if they were the
+ * model's true bias. Feeding them back in now — with the doubling fixed and
+ * the seeded +6 removed — pushes every score low.
+ *
+ * This is a filter, not a delete: the rows stay for audit, they simply stop
+ * training the corrector. Override with BIAS_LEARNING_CUTOFF (ISO 8601), or
+ * set it to an empty string to learn from all history again.
+ */
+const DEFAULT_BIAS_LEARNING_CUTOFF = '2026-08-15T00:00:00Z'
+
+function biasLearningCutoff(): string | null {
+  const raw = process.env.BIAS_LEARNING_CUTOFF ?? DEFAULT_BIAS_LEARNING_CUTOFF
+  if (!raw.trim()) return null
+  const parsed = new Date(raw)
+  return Number.isNaN(parsed.getTime()) ? DEFAULT_BIAS_LEARNING_CUTOFF : parsed.toISOString()
+}
+
 export interface FieldBias {
   fieldKey: string
   meanDelta: number
@@ -70,12 +93,19 @@ function weightedStats(deltas: WeightedDelta[]): { mean: number; sampleCount: nu
 async function loadUserCorrectionDeltas(): Promise<Record<string, WeightedDelta[]>> {
   try {
     const db = await getServiceSupabase()
-    const { data, error } = await db
+    const cutoff = biasLearningCutoff()
+    let query = db
       .from('correction_events')
       .select('field_key, delta')
       .not('delta', 'is', null)
-      .limit(10000)
-    if (error || !data) return {}
+    if (cutoff) query = query.gte('created_at', cutoff)
+    const { data, error } = await query.limit(10000)
+    if (error || !data) {
+      // Degrades to "no learned bias", which is the safe direction: the raw
+      // estimate is used rather than one nudged by an unverified correction.
+      if (error) console.warn('[prompt-bias] user-correction load failed:', error.message)
+      return {}
+    }
 
     const groups: Record<string, WeightedDelta[]> = {}
     for (const row of data) {
@@ -103,10 +133,24 @@ async function loadGroundTruthDeltas(): Promise<Record<string, WeightedDelta[]>>
       .limit(10000)
     if (error || !data) return {}
 
+    const cutoff = biasLearningCutoff()
+    const cutoffMs = cutoff ? new Date(cutoff).getTime() : null
+
     const groups: Record<string, WeightedDelta[]> = {}
     for (const row of data) {
-      const fields = (row.ai_run_result as { fields?: Array<{ field?: string; delta?: number }> } | null)
-        ?.fields
+      const runResult = row.ai_run_result as {
+        run_at?: string
+        fields?: Array<{ field?: string; delta?: number }>
+      } | null
+      // Comparisons produced before the cutoff scored against the buggy
+      // pipeline, so their deltas describe a bias that no longer exists.
+      // Re-run the sheet via /api/admin/training-import/[id]/run-ai to
+      // regenerate a clean comparison. Undated rows are treated as old.
+      if (cutoffMs != null) {
+        const runAt = runResult?.run_at ? new Date(runResult.run_at).getTime() : NaN
+        if (!Number.isFinite(runAt) || runAt < cutoffMs) continue
+      }
+      const fields = runResult?.fields
       if (!Array.isArray(fields)) continue
       for (const f of fields) {
         if (!f || typeof f.field !== 'string') continue
