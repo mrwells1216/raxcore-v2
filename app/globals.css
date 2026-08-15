@@ -323,3 +323,64 @@
     transition: fill 0.2s ease-in-out, stroke 0.2s ease-in-out;
   }
 }
+
+/* ── Touch-friendly range slider (crop fine-tuning) ──────────────────────────
+   The default range control renders an ~8px track with a small thumb, which is
+   very hard to grab and drag accurately on a phone. `.rax-range` gives it a
+   chunky thumb and a taller hit area while keeping the visible track slim. */
+.rax-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 34px;              /* generous touch target */
+  background: transparent;   /* the track is drawn by the pseudo-elements */
+  touch-action: none;
+  cursor: pointer;
+}
+
+.rax-range::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--bronze-dark, #4a3a22);
+}
+.rax-range::-moz-range-track {
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--bronze-dark, #4a3a22);
+}
+
+.rax-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -10px;         /* centers the thumb on the 10px track */
+  border-radius: 9999px;
+  background: var(--bronze-light, #d4a84b);
+  border: 2px solid #0d0a06;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+.rax-range::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: var(--bronze-light, #d4a84b);
+  border: 2px solid #0d0a06;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+
+.rax-range:active::-webkit-slider-thumb {
+  background: #f0c368;
+  transform: scale(1.08);
+}
+.rax-range:active::-moz-range-thumb {
+  background: #f0c368;
+  transform: scale(1.08);
+}
+
+.rax-range:focus-visible {
+  outline: 2px solid var(--bronze-light, #d4a84b);
+  outline-offset: 4px;
+}

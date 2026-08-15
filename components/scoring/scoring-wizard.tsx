@@ -9,8 +9,9 @@ import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
 import { EditableImageCarousel } from './editable-image-carousel'
-import { AntlerCropBox, type CropRegion } from './antler-crop-box'
-import { RedactionPen, bakeRedactionsIntoDataUrl, type RedactionStroke } from './redaction-pen'
+import { type CropRegion } from './antler-crop-box'
+import { bakeRedactionsIntoDataUrl, type RedactionStroke } from './redaction-pen'
+import { PhotoEditor, DEFAULT_TOOL_FLAGS, type PhotoToolFlags } from './photo-editor'
 import { CalibrationDots, type PedicleDotPlacement } from './calibration-dots'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
@@ -66,11 +67,10 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
   const [isDetecting, setIsDetecting] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
   const [cropRegions, setCropRegions] = useState<Record<number, CropRegion | null>>({})
-  const [cropSkipped, setCropSkipped] = useState<Record<number, boolean>>({})
+  // Per-photo tool enablement (crop / blackout / pedicle). Absent ⇒ DEFAULT_TOOL_FLAGS.
+  const [photoTools, setPhotoTools] = useState<Record<number, PhotoToolFlags>>({})
   const [pedicleDots, setPedicleDots] = useState<Record<number, PedicleDotPlacement | null>>({})
-  const [pedicleCalibrationOpen, setPedicleCalibrationOpen] = useState(false)
   const [redactionStrokes, setRedactionStrokes] = useState<Record<number, RedactionStroke[]>>({})
-  const [redactionOpen, setRedactionOpen] = useState(false)
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toCapturedImages = (imgs: GridImage[]): CapturedImage[] =>
@@ -401,12 +401,14 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
         }
       }
 
-      // Antler crop regions — null where the user skipped that image
+      // Each tool only contributes for photos where the user switched it on.
+      const toolsFor = (index: number): PhotoToolFlags => photoTools[index] ?? DEFAULT_TOOL_FLAGS
+
+      // Antler crop regions — null where crop is off for that image
       const cropRegionsPayload: Record<string, CropRegion | null> = {}
       for (let index = 0; index < images.length; index++) {
         const region = cropRegions[index]
-        const skipped = cropSkipped[index]
-        cropRegionsPayload[String(index)] = skipped || !region ? null : region
+        cropRegionsPayload[String(index)] = toolsFor(index).crop && region ? region : null
       }
       apiFormData.append('crop_regions', JSON.stringify(cropRegionsPayload))
 
@@ -422,7 +424,7 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
       }> = []
       for (let index = 0; index < images.length; index++) {
         const placement = pedicleDots[index]
-        if (placement) pedicleDotsPayload.push(placement)
+        if (toolsFor(index).pedicle && placement) pedicleDotsPayload.push(placement)
       }
       if (pedicleDotsPayload.length > 0) {
         apiFormData.append('pedicle_calibration', JSON.stringify(pedicleDotsPayload))
@@ -430,7 +432,7 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
 
       for (let index = 0; index < images.length; index++) {
         const img = images[index]
-        const strokes = redactionStrokes[index] ?? []
+        const strokes = toolsFor(index).blackout ? (redactionStrokes[index] ?? []) : []
         try {
           const source = img.file || img.url
           const processed = await preprocessImage(source, {
@@ -687,160 +689,52 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
         />
       )}
 
-      {/* ── 5a. Antler crop boxes (optional, per image) ─────────────────── */}
+      {/* ── 5a. Per-photo editor: crop + blackout + pedicle ─────────────── */}
       {gridImages.length > 0 && (
-        <Section label="Crop to Antlers (Optional)">
+        <Section label="Edit Photos (Optional)">
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-mono text-muted-foreground">
-                Tighten the amber box around each rack to give the AI 4–8× more detail.
-                Each photo is independent — skip any you don&apos;t want to crop.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  const skipAll: Record<number, boolean> = {}
-                  for (let i = 0; i < gridImages.length; i++) skipAll[i] = true
-                  setCropSkipped(skipAll)
-                }}
-                className="shrink-0 text-[10px] font-black tracking-widest uppercase text-muted-foreground hover:text-foreground"
-              >
-                Skip all crops
-              </button>
-            </div>
+            <p className="text-[11px] font-mono text-muted-foreground">
+              Each photo has its own tools — use any combination, or none. Only the
+              tool you&apos;re viewing is active, so the crop box and pedicle dots can
+              never fight over the same drag.
+            </p>
 
             <div className="space-y-4">
               {gridImages.map((img, index) => (
-                <AntlerCropBox
+                <PhotoEditor
                   key={img.id}
                   imageUrl={img.url}
-                  region={cropRegions[index] ?? null}
-                  skipped={!!cropSkipped[index]}
+                  imageIndex={index}
+                  imageWidth={img.width || 1024}
+                  imageHeight={img.height || 768}
                   label={`Photo ${index + 1} — ${img.angleType}`}
-                  onChange={(region) => {
+                  flags={photoTools[index] ?? DEFAULT_TOOL_FLAGS}
+                  onFlagsChange={(flags) => {
+                    setPhotoTools(prev => ({ ...prev, [index]: flags }))
+                  }}
+                  cropRegion={cropRegions[index] ?? null}
+                  onCropChange={(region) => {
                     setCropRegions(prev => ({ ...prev, [index]: region }))
                   }}
-                  onSkip={() => {
-                    setCropSkipped(prev => ({ ...prev, [index]: true }))
-                  }}
-                  onUnskip={() => {
-                    setCropSkipped(prev => {
-                      const next = { ...prev }
-                      delete next[index]
-                      return next
-                    })
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-        </Section>
-      )}
-
-      {/* ── 5a-ii. Blackout pen (optional, per image) ───────────────────── */}
-      {gridImages.length > 0 && (
-        <div
-          className="rounded overflow-hidden"
-          style={{
-            border: '1px solid var(--bronze-dark)',
-            background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setRedactionOpen(v => !v)}
-            className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
-            aria-expanded={redactionOpen}
-          >
-            <div>
-              <span
-                className="text-[10px] font-black tracking-[0.22em] uppercase"
-                style={{ color: 'var(--bronze-light)' }}
-              >
-                Blackout Pen (Optional)
-              </span>
-              <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                Draw over other deer, wall racks, or anything the AI shouldn&apos;t score.
-                Blacked-out areas are removed before analysis.
-              </p>
-            </div>
-            {redactionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </button>
-          {redactionOpen && (
-            <div className="px-5 pb-5 space-y-5">
-              {gridImages.map((img, index) => (
-                <RedactionPen
-                  key={img.id}
-                  imageUrl={img.url}
-                  label={`Photo ${index + 1} — ${img.angleType}`}
                   strokes={redactionStrokes[index] ?? []}
-                  onChange={(strokes) => {
+                  onStrokesChange={(strokes) => {
                     setRedactionStrokes(prev => ({ ...prev, [index]: strokes }))
                   }}
+                  pedicle={pedicleDots[index] ?? null}
+                  onPedicleChange={(placement) => {
+                    setPedicleDots(prev => ({ ...prev, [index]: placement }))
+                  }}
                 />
               ))}
-              <p className="text-[10px] font-mono text-muted-foreground">
-                The black ink is burned into the photo the AI receives — it can never
-                see what&apos;s underneath. Keep the rack you&apos;re scoring fully visible.
-              </p>
             </div>
-          )}
-        </div>
-      )}
 
-      {gridImages.length > 0 && (
-        <div
-          className="rounded overflow-hidden"
-          style={{
-            border: '1px solid var(--bronze-dark)',
-            background: 'linear-gradient(180deg, #1e1b18 0%, #1a1714 100%)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setPedicleCalibrationOpen(v => !v)}
-            className="w-full flex items-center justify-between px-5 py-4 text-left touch-manipulation"
-            aria-expanded={pedicleCalibrationOpen}
-          >
-            <div>
-              <span
-                className="text-[10px] font-black tracking-[0.22em] uppercase"
-                style={{ color: 'var(--bronze-light)' }}
-              >
-                Pedicle Calibration (Optional)
-              </span>
-              <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                Drag the amber dots onto the burr bases. Adds a 0.68–0.85 confidence scale source.
-              </p>
-            </div>
-            {pedicleCalibrationOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </button>
-          {pedicleCalibrationOpen && (
-            <div className="px-5 pb-5 space-y-5">
-              {gridImages.map((img, index) => (
-                <div key={img.id} className="space-y-2">
-                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-                    Photo {index + 1} — {img.angleType}
-                  </div>
-                  <CalibrationDots
-                    imageUrl={img.url}
-                    imageIndex={index}
-                    imageWidth={img.width || 1024}
-                    imageHeight={img.height || 768}
-                    initial={pedicleDots[index] ?? null}
-                    onChange={(placement) => {
-                      setPedicleDots(prev => ({ ...prev, [index]: placement }))
-                    }}
-                  />
-                </div>
-              ))}
-              <p className="text-[10px] font-mono text-muted-foreground">
-                Per §8 of the calibration hierarchy, dots-with-known-spacing rank
-                above ArUco/eye-circle/anatomical priors but never unlock Verified Score.
-              </p>
-            </div>
-          )}
-        </div>
+            <p className="text-[10px] font-mono text-muted-foreground">
+              Blackout ink is burned into the photo before upload — the AI never sees
+              what&apos;s underneath. Pedicle dots add a scale source (§8) but never
+              unlock a Verified Score.
+            </p>
+          </div>
+        </Section>
       )}
 
       {/* ── 5b. Scan validation banner ──────────────────────────────────── */}

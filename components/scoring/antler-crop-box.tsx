@@ -17,6 +17,13 @@ interface AntlerCropBoxProps {
   onSkip: () => void
   onUnskip?: () => void
   label?: string
+  /**
+   * Hide the built-in "Skip - use full photo" control. Set by PhotoEditor,
+   * where enabling/disabling the crop is owned by the per-photo tool switch
+   * and a second control here would just be a conflicting way to say the
+   * same thing.
+   */
+  hideSkipControl?: boolean
 }
 
 type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -51,6 +58,7 @@ export function AntlerCropBox({
   onSkip,
   onUnskip,
   label,
+  hideSkipControl,
 }: AntlerCropBoxProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragMode>({ kind: 'none' })
@@ -505,7 +513,7 @@ export function AntlerCropBox({
             ? 'Skipped - original photo will be sent to scoring.'
             : 'Drag the amber box to move it. Pinch with two fingers to resize, or use the edge sliders.'}
         </p>
-        {!skipped && (
+        {!skipped && !hideSkipControl && (
           <button
             type="button"
             onClick={onSkip}
@@ -518,6 +526,9 @@ export function AntlerCropBox({
     </div>
   )
 }
+
+/** One nudge press moves an edge by this fraction of the image. */
+const NUDGE_STEP = 0.005
 
 function EdgeSlider({
   label,
@@ -534,23 +545,76 @@ function EdgeSlider({
   percent: number
   onChange: (v: number) => void
 }) {
+  const clamped = Math.min(Math.max(value, min), max)
+  const nudge = (delta: number) => {
+    onChange(Math.min(max, Math.max(min, clamped + delta)))
+  }
+
   return (
-    <label className="flex flex-col gap-1">
+    <div className="flex flex-col gap-0.5">
       <span className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         <span>{label}</span>
         <span className="tabular-nums text-foreground/70">{percent}%</span>
       </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={0.001}
-        value={Math.min(Math.max(value, min), max)}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(parseFloat(e.target.value))}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-black/40 accent-[var(--bronze-light)]"
-        style={{ touchAction: 'none' }}
-      />
-    </label>
+      <div className="flex items-center gap-1.5">
+        <NudgeButton
+          ariaLabel={`Move ${label} edge back`}
+          disabled={clamped <= min}
+          onPress={() => nudge(-NUDGE_STEP)}
+        >
+          −
+        </NudgeButton>
+        <input
+          type="range"
+          aria-label={`${label} edge`}
+          min={min}
+          max={max}
+          step={0.001}
+          value={clamped}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(parseFloat(e.target.value))}
+          className="rax-range min-w-0 flex-1"
+        />
+        <NudgeButton
+          ariaLabel={`Move ${label} edge forward`}
+          disabled={clamped >= max}
+          onPress={() => nudge(NUDGE_STEP)}
+        >
+          +
+        </NudgeButton>
+      </div>
+    </div>
+  )
+}
+
+function NudgeButton({
+  children,
+  ariaLabel,
+  disabled,
+  onPress,
+}: {
+  children: React.ReactNode
+  ariaLabel: string
+  disabled: boolean
+  onPress: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={onPress}
+      className="grid shrink-0 place-items-center rounded-md text-base leading-none transition-colors disabled:opacity-30"
+      style={{
+        width: 34,
+        height: 34,
+        touchAction: 'manipulation',
+        border: '1px solid var(--bronze-dark)',
+        background: 'rgba(0,0,0,0.35)',
+        color: 'var(--bronze-light)',
+      }}
+    >
+      {children}
+    </button>
   )
 }
 

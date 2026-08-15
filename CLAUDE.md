@@ -837,6 +837,46 @@ all history). tsc clean, build succeeds, full suite 160/160. Files: modified
 `__tests__/scoring/classroom-experiment.test.ts`,
 `__tests__/scoring/prompt-bias-fusion.test.ts`.
 
+### 3.43. Unified per-photo editor + touch-friendly crop sliders ✓
+Field-test UX pass. Crop, Blackout, and Pedicle each had their own wizard
+section that looped over every photo, so (a) tools could not be chosen per
+photo — it was all photos or none, and (b) the crop handles and the pedicle
+dots were mounted over the same image simultaneously and stole each other's
+drags.
+
+New `components/scoring/photo-editor.tsx` gives each photo one card with a
+three-way tool tab strip (Crop / Blackout / Pedicle). **Only the selected
+tool's overlay is mounted**, which structurally eliminates the pointer
+interference — there is no second interaction layer to fight with, so no
+explicit "hide" toggle is needed. Each tool has an independent per-photo
+on/off switch (`PhotoToolFlags`); the tab strip shows each tool's live state
+(`off` / `on` / `2 strokes` / `placed`) so the whole photo's configuration is
+readable at a glance. Switching tabs is non-destructive: every tool's data
+lives in wizard state and survives while off-screen.
+
+`DEFAULT_TOOL_FLAGS` has crop ON, blackout/pedicle OFF, and the section
+renders un-collapsed, preserving the previous behavior where every photo
+received a default centered crop region unless opted out. Submit now gates
+all three payloads on the per-photo flags: crop regions serialize `null` when
+crop is off, pedicle placements are skipped when pedicle is off, and
+redaction strokes are treated as empty when blackout is off (so the data URL
+passes through byte-identical rather than being needlessly re-encoded).
+`AntlerCropBox` gained `hideSkipControl` so its built-in "Skip - use full
+photo" button doesn't duplicate the new switch. Wizard state
+`cropSkipped` / `redactionOpen` / `pedicleCalibrationOpen` are replaced by the
+single `photoTools` record.
+
+Crop fine-tuning sliders were an 8px track with a default thumb — nearly
+undraggable on a phone. New `.rax-range` class in `app/globals.css` gives a
+28px thumb over a 10px track inside a 34px touch target (with `:active`
+feedback and a visible focus ring), and each `EdgeSlider` gained −/+ nudge
+buttons (34px targets, 0.5% per press) for precision that dragging can't
+achieve on a small screen. Scoring/calibration logic and API contracts are
+untouched. tsc clean, lint 0 errors, build succeeds, full suite 160/160.
+Files: new `components/scoring/photo-editor.tsx`; modified
+`components/scoring/scoring-wizard.tsx`,
+`components/scoring/antler-crop-box.tsx`, `app/globals.css`.
+
 ---
 
 ## 4. What is NOT built yet
