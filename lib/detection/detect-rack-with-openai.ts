@@ -140,6 +140,8 @@ export async function detectRackWithOpenAI(
       const response = await generateObject({
         model: openai('gpt-4o'),
         schema: detectionSchema,
+        // Deterministic: the same photo must pass or fail the gate consistently.
+        temperature: 0,
         system: DETECTION_SYSTEM_PROMPT,
         messages: [
           {

@@ -8,11 +8,10 @@ import { ScanValidationBanner } from './ScanValidationBanner'
 import { IntakeQualityDisplay } from './intake-quality-display'
 import { PhotoGridUploader, type GridImage } from './photo-grid-uploader'
 import { GuidedUploadPanel } from './guided-upload-panel'
-import { EditableImageCarousel } from './editable-image-carousel'
 import { type CropRegion } from './antler-crop-box'
 import { bakeRedactionsIntoDataUrl, type RedactionStroke } from './redaction-pen'
 import { PhotoEditor, DEFAULT_TOOL_FLAGS, type PhotoToolFlags } from './photo-editor'
-import { CalibrationDots, type PedicleDotPlacement } from './calibration-dots'
+import { type PedicleDotPlacement } from './calibration-dots'
 import { ScanModePanel } from '@/components/scanning/scan-mode-panel'
 import { computeIntakeQuality, type IntakeQualityAssessment } from '@/lib/scoring/intake-quality'
 import { buildCaptureQualitySummary, type CaptureAngle } from '@/lib/scoring/capture-quality'
@@ -675,18 +674,6 @@ export function ScoringWizard({ initialMode, userId, onComplete, experimentConfi
             />
           )}
         </Section>
-      )}
-
-      {/* ── 5. Editable carousel ────────────────────────────────────────── */}
-      {gridImages.length > 0 && (
-        <EditableImageCarousel
-          images={gridImages}
-          onImageEdit={(index, newUrl) => {
-            setGridImages(prev => prev.map((img, i) =>
-              i === index ? { ...img, url: newUrl, file: undefined } : img
-            ))
-          }}
-        />
       )}
 
       {/* ── 5a. Per-photo editor: crop + blackout + pedicle ─────────────── */}

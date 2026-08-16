@@ -96,6 +96,8 @@ export async function detectArucoMarker(args: {
   try {
     const { object } = await generateObject({
       model: openai('gpt-4o'),
+      // Deterministic: marker corners must not shift between runs.
+      temperature: 0,
       schema: ArucoResponseSchema,
       messages: [
         {

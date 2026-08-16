@@ -877,6 +877,40 @@ Files: new `components/scoring/photo-editor.tsx`; modified
 `components/scoring/scoring-wizard.tsx`,
 `components/scoring/antler-crop-box.tsx`, `app/globals.css`.
 
+### 3.44. Scoring determinism (temperature 0) + editor cleanup ✓
+(a) **The real cause of "same buck, same photos, different score."** None of
+the four GPT-4o calls set `temperature`, so all of them ran at the OpenAI
+default of **1.0** — full sampling randomness. Two identical submissions
+could differ by several inches from sampling noise alone. That is corrosive
+well beyond the visible number: it is indistinguishable from genuine
+measurement error, it makes any A/B or benchmark comparison unreliable
+(§3.33 MAE would partly measure noise), and every re-score users corrected
+fed phantom deltas into `correction_events`, training the bias corrector on
+randomness. `temperature: 0` is now set on the main vision scorer
+(`vision-scorer.ts`), per-image landmark detection, the admission detector
+(`detect-rack-with-openai.ts`), and the ArUco corner detector. Scoring is a
+measurement task — greedy decoding is the correct setting; sampling
+diversity has no value here. NOTE: this makes runs *near*-deterministic, not
+bit-identical — GPT-4o retains minor nondeterminism from batching/floating
+point, so small residual variation is expected and is not a bug. Genuinely
+different inputs (extra criteria, pre-scoring measurements, reference object,
+maturity class) still legitimately change the result.
+(b) **Crop sliders reworked.** The −/+ nudge buttons added in §3.43 were
+removed as clutter, and the four edge sliders moved from `grid-cols-2` to a
+single full-width column. The short half-width rail was the actual cause of
+the "too touchy" feel — a full-width rail roughly doubles travel distance, so
+the same finger movement changes the crop half as much. Slider `step`
+loosened 0.001 → 0.002.
+(c) **Removed the redundant `EditableImageCarousel`** from the wizard (its
+former crop role is fully covered by the §3.43 per-photo editor). The
+component file is retained but no longer mounted; this also removes a
+pre-existing display bug where its counter read "4 / 2".
+tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
+`lib/scoring/vision-scorer.ts`, `lib/detection/detect-rack-with-openai.ts`,
+`lib/calibration/aruco-detector.ts`,
+`components/scoring/antler-crop-box.tsx`,
+`components/scoring/scoring-wizard.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

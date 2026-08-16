@@ -470,7 +470,10 @@ export function AntlerCropBox({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+          {/* Single column: a full-width rail gives roughly twice the travel
+              distance per edge, so a given finger movement changes the crop
+              half as much. Short rails were the reason these felt touchy. */}
+          <div className="grid grid-cols-1 gap-y-1">
             <EdgeSlider
               label="Top"
               value={activeRegion.y}
@@ -527,9 +530,6 @@ export function AntlerCropBox({
   )
 }
 
-/** One nudge press moves an edge by this fraction of the image. */
-const NUDGE_STEP = 0.005
-
 function EdgeSlider({
   label,
   value,
@@ -546,75 +546,24 @@ function EdgeSlider({
   onChange: (v: number) => void
 }) {
   const clamped = Math.min(Math.max(value, min), max)
-  const nudge = (delta: number) => {
-    onChange(Math.min(max, Math.max(min, clamped + delta)))
-  }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col">
       <span className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         <span>{label}</span>
         <span className="tabular-nums text-foreground/70">{percent}%</span>
       </span>
-      <div className="flex items-center gap-1.5">
-        <NudgeButton
-          ariaLabel={`Move ${label} edge back`}
-          disabled={clamped <= min}
-          onPress={() => nudge(-NUDGE_STEP)}
-        >
-          −
-        </NudgeButton>
-        <input
-          type="range"
-          aria-label={`${label} edge`}
-          min={min}
-          max={max}
-          step={0.001}
-          value={clamped}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(parseFloat(e.target.value))}
-          className="rax-range min-w-0 flex-1"
-        />
-        <NudgeButton
-          ariaLabel={`Move ${label} edge forward`}
-          disabled={clamped >= max}
-          onPress={() => nudge(NUDGE_STEP)}
-        >
-          +
-        </NudgeButton>
-      </div>
+      <input
+        type="range"
+        aria-label={`${label} edge`}
+        min={min}
+        max={max}
+        step={0.002}
+        value={clamped}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(parseFloat(e.target.value))}
+        className="rax-range w-full"
+      />
     </div>
-  )
-}
-
-function NudgeButton({
-  children,
-  ariaLabel,
-  disabled,
-  onPress,
-}: {
-  children: React.ReactNode
-  ariaLabel: string
-  disabled: boolean
-  onPress: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={onPress}
-      className="grid shrink-0 place-items-center rounded-md text-base leading-none transition-colors disabled:opacity-30"
-      style={{
-        width: 34,
-        height: 34,
-        touchAction: 'manipulation',
-        border: '1px solid var(--bronze-dark)',
-        background: 'rgba(0,0,0,0.35)',
-        color: 'var(--bronze-light)',
-      }}
-    >
-      {children}
-    </button>
   )
 }
 

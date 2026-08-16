@@ -920,6 +920,12 @@ export async function scoreWithVision(input: VisionScoringInput): Promise<Vision
           ],
         },
       ],
+      // Greedy decoding. This is a measurement task: the same photos must
+      // produce the same inches. Without this the OpenAI default (1.0) is
+      // used, so identical submissions came back several inches apart purely
+      // from sampling noise, which is indistinguishable from real measurement
+      // error and poisons the correction flywheel with phantom deltas.
+      temperature: 0,
       // Note: AI SDK has its own retry logic, but we wrap it for timeout/monitoring
       maxRetries: 1,
     })
@@ -1349,6 +1355,8 @@ async function detectLandmarksForOneImage(args: {
     const { object } = await generateObject({
       model: openai('gpt-4o'),
       schema: LandmarkDetectionSchema,
+      // Deterministic: landmark pixel coordinates must not wander between runs.
+      temperature: 0,
       messages: [
         {
           role: 'user',
