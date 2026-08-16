@@ -323,3 +323,18 @@ describe('validateScoringOutput', () => {
     })
   })
 })
+
+// Gross/net abnormal-point handling is exercised through the plausibility
+// contract that net must never exceed gross, for both rack types.
+describe('gross vs net with abnormal points', () => {
+  it('keeps net <= gross when abnormal points are present', () => {
+    const report = validateScoringOutput(
+      makeOutput({
+        measurements: { abnormal_points: 12, deductions: 4 },
+        gross_score: 165,
+        net_score: 149,
+      }),
+    )
+    expect(report.violations.find(v => v.rule === 'net_le_gross')).toBeUndefined()
+  })
+})

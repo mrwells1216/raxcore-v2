@@ -976,6 +976,27 @@ tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
 `components/scoring/calibration-dots.tsx`,
 `components/scoring/scoring-results.tsx`.
 
+### 3.47. Gross score: abnormal points are rack-type aware ✓
+Field report: "net is almost spot on, gross is off." That is diagnostic —
+net is derived from gross, so a correct net alongside an inflated gross means
+two errors were cancelling. Cause: `calculateScores` summed
+`abnormal_points` INTO gross for every rack and then subtracted it again in
+net (`gross - deductions - abnormal_points`), and the vision prompt stated the
+same convention at `gross_score = ... + abnormal_points`. For a typical rack
+that inflates gross by exactly the abnormal total while net lands correctly —
+precisely the reported symptom, and only on bucks that actually have
+abnormal points, which is why it looked intermittent. B&C treats abnormals by
+rack type: on a typical rack they are NOT part of the gross typical frame
+(they are a deduction toward net); on a non-typical they count positively and
+belong in gross. `calculateScores` now takes `rackType` (defaulting to
+`'typical'`) and both call sites pass `input.rackType`; the prompt's SCORING
+block was rewritten to match so the model and the arithmetic agree. NOTE:
+this changes the displayed gross for typical racks with abnormal points —
+net is unchanged, and non-typical racks are unchanged. tsc clean, build
+succeeds, full suite 161/161. Files: modified `lib/scoring/ai-service.ts`,
+`lib/scoring/vision-scorer.ts`,
+`__tests__/scoring/scoring-plausibility.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

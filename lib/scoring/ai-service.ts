@@ -746,8 +746,25 @@ function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibr
   }
 }
 
-function calculateScores(measurements: Measurements) {
-  const vals = [
+/**
+ * Gross and net from a measurement set.
+ *
+ * Abnormal points are handled by rack type, which is how B&C actually works
+ * and was the source of a reported "net is spot on but gross reads high"
+ * discrepancy: abnormal inches used to be added into gross for every rack and
+ * then subtracted again in net, so net came out right while gross was
+ * inflated by exactly the abnormal total on any buck that had them.
+ *
+ *  - typical:     gross is the typical frame only. Abnormal points are not
+ *                 part of it; they are a deduction on the way to net.
+ *  - non-typical: abnormal points count positively, so they belong in gross
+ *                 and are not subtracted again.
+ */
+function calculateScores(
+  measurements: Measurements,
+  rackType: 'typical' | 'non-typical' = 'typical',
+) {
+  const frame = [
     measurements.inside_spread,
     measurements.main_beam_left, measurements.main_beam_right,
     measurements.g1_left, measurements.g1_right,
@@ -759,10 +776,16 @@ function calculateScores(measurements: Measurements) {
     measurements.h2_left, measurements.h2_right,
     measurements.h3_left, measurements.h3_right,
     measurements.h4_left, measurements.h4_right,
-    measurements.abnormal_points,
   ].filter((v): v is number => v !== null)
-  const gross = vals.reduce((sum, v) => sum + v, 0)
-  const net = gross - (measurements.deductions || 0) - (measurements.abnormal_points || 0)
+
+  const frameTotal = frame.reduce((sum, v) => sum + v, 0)
+  const abnormal = measurements.abnormal_points || 0
+  const deductions = measurements.deductions || 0
+
+  const isNonTypical = rackType === 'non-typical'
+  const gross = isNonTypical ? frameTotal + abnormal : frameTotal
+  const net = isNonTypical ? gross - deductions : gross - deductions - abnormal
+
   return { gross: Number(gross.toFixed(1)), net: Number(net.toFixed(1)) }
 }
 
@@ -1156,7 +1179,7 @@ async function buildVisionScoringOutput(
   }
 
   // Calculate first-pass scores from corrected measurements
-  const { gross: rawGross, net: rawNet } = calculateScores(correctedMeasurements)
+  const { gross: rawGross, net: rawNet } = calculateScores(correctedMeasurements, input.rackType)
 
   // Apply remaining overall score corrections (reduced since measurement-level already applied)
   // Scale down the learning correction since measurement corrections already applied
@@ -1681,7 +1704,7 @@ function buildHeuristicScoringOutput(
   explanations.push(...learned.notes)
 
   const measurements = generateMeasurements(input, stateCalibration, confidencePercent)
-  let { gross, net } = calculateScores(measurements)
+  let { gross, net } = calculateScores(measurements, input.rackType)
 
   gross = Number((gross + learned.grossBias).toFixed(1))
   net   = Number((net   + learned.netBias).toFixed(1))
