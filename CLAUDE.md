@@ -946,6 +946,36 @@ tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
 `components/scoring/antler-crop-box.tsx`,
 `components/scoring/precision-pass-card.tsx`.
 
+### 3.46. Editor layout-shift fix, static square loupe, results overflow ✓
+(a) **Photo shifted when switching tools.** `CalibrationDots` wrapped its
+image in a container with a forced `aspectRatio` (falling back to `4 / 3`)
+plus `object-contain`, while `AntlerCropBox` and `RedactionPen` size to the
+image's natural aspect. Switching tabs therefore re-laid-out the photo. Worse,
+the aspect came from the `imageWidth`/`imageHeight` props, which the wizard
+fills with placeholders (`img.width || 1024`) — so a portrait photo was being
+letterboxed into a landscape box, which ALSO skewed the pixel→image mapping
+used to place the dots. `CalibrationDots` now measures the real size from the
+loaded `<img>` (`naturalWidth`/`naturalHeight`, same class of fix as §3.45)
+and uses it for the aspect box, the contain-transform, and coordinate
+clamping; the wrapper's border/radius now match the other two tools exactly.
+(b) **Loupe** pinned to a fixed top-right corner instead of chasing the
+dragged dot (a window that moves while you read it defeats the purpose),
+switched from a circle to a square, and zoom pulled back 2.25× → 1.5×.
+(c) **Results overflow**: the key-measurement row was `grid-cols-3` with no
+`min-w-0`, so a long label set each track's min-content width and pushed the
+row past the viewport on narrow phones. Cards gained `min-w-0` + wrapping
+labels + slightly smaller mobile type; the tine row drops to 2 columns below
+`sm`. NOTE: only real Tailwind breakpoints are used — this project defines no
+`xs`, so an `xs:` variant silently never applies.
+Still open, needs info: the 3D view symptom (blank / error / stuck loading is
+unknown — `Scene3D` is dynamically imported and renders nothing when it has no
+geometry or points, so the likely cause is missing reconstruction data rather
+than a crash), and whether the reported horizontal overflow is this grid or
+the intentionally `overflow-x-auto` score-sheet table.
+tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
+`components/scoring/calibration-dots.tsx`,
+`components/scoring/scoring-results.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

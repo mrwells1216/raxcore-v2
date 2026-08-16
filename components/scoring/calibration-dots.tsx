@@ -39,11 +39,14 @@ const DEFAULT_RIGHT_RATIO = { x: 0.65, y: 0.30 }
 const KNOWN_INCHES_MIN = 2.0
 const KNOWN_INCHES_MAX = 8.0
 const DPAD_STEP = 1
-const LOUPE_SIZE = 132
-// 4x was tight enough that the burr filled the loupe with no surrounding
-// context, so it was hard to tell what you were even looking at. 2.25x keeps
-// the pedicle readable while showing enough of the skull to orient by.
-const LOUPE_ZOOM = 2.25
+const LOUPE_SIZE = 140
+// Pulled back again: at higher zoom the burr filled the window with no
+// surrounding skull to orient against. 1.5x is enough to place a dot
+// precisely while still showing what you are looking at.
+const LOUPE_ZOOM = 1.5
+// The loupe is pinned to a fixed corner rather than chasing the dot — a
+// window that moves while you drag is harder to read than one that stays put.
+const LOUPE_MARGIN = 8
 const LOUPE_SRC_RADIUS = LOUPE_SIZE / (2 * LOUPE_ZOOM) // 15px of image space from center
 
 type DotId = 'left' | 'right'
@@ -101,6 +104,13 @@ export function CalibrationDots({
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null)
 
   const [containerSize, setContainerSize] = useState<ContainerSize>({ width: 0, height: 0 })
+  // True pixel size read off the loaded image. The imageWidth/imageHeight
+  // props are frequently placeholder values (the wizard defaults to 1024x768),
+  // and a wrong aspect here both letterboxes the photo — shifting it when you
+  // switch tools — and skews the pixel→image coordinate mapping for the dots.
+  const [naturalSize, setNaturalSize] = useState<ContainerSize | null>(null)
+  const aspectW = naturalSize?.width || imageWidth
+  const aspectH = naturalSize?.height || imageHeight
   const [leftImg, setLeftImg] = useState<{ x: number; y: number }>(() => ({
     x: initial?.leftPx ?? imageWidth * DEFAULT_LEFT_RATIO.x,
     y: initial?.leftPy ?? imageHeight * DEFAULT_LEFT_RATIO.y,
@@ -137,8 +147,8 @@ export function CalibrationDots({
   }, [])
 
   const transform = useMemo(
-    () => computeContainImage(containerSize, imageWidth, imageHeight),
-    [containerSize, imageWidth, imageHeight],
+    () => computeContainImage(containerSize, aspectW, aspectH),
+    [containerSize, aspectW, aspectH],
   )
 
   const imgToCanvas = useCallback(
@@ -155,11 +165,11 @@ export function CalibrationDots({
       const xImg = (canvasX - transform.offsetX) / transform.scale
       const yImg = (canvasY - transform.offsetY) / transform.scale
       return {
-        x: Math.max(0, Math.min(imageWidth, xImg)),
-        y: Math.max(0, Math.min(imageHeight, yImg)),
+        x: Math.max(0, Math.min(aspectW, xImg)),
+        y: Math.max(0, Math.min(aspectH, yImg)),
       }
     },
-    [transform, imageWidth, imageHeight],
+    [transform, aspectW, aspectH],
   )
 
   const onPointerDown = useCallback(
@@ -229,7 +239,7 @@ export function CalibrationDots({
     // Clip to circle
     ctx.save()
     ctx.beginPath()
-    ctx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, LOUPE_SIZE / 2, 0, Math.PI * 2)
+    ctx.rect(0, 0, LOUPE_SIZE, LOUPE_SIZE)
     ctx.clip()
 
     // Magnified crop of the original image
@@ -265,7 +275,7 @@ export function CalibrationDots({
 
     // Amber border ring
     ctx.beginPath()
-    ctx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, LOUPE_SIZE / 2 - 1, 0, Math.PI * 2)
+    ctx.rect(0.5, 0.5, LOUPE_SIZE - 1, LOUPE_SIZE - 1)
     ctx.strokeStyle = '#fbbf24'
     ctx.lineWidth = 2
     ctx.stroke()
@@ -354,12 +364,10 @@ export function CalibrationDots({
   let loupeLeft = 0
   let loupeTop = 0
   if (loupeState) {
-    let lx = loupeState.canvasX - LOUPE_SIZE - 20
-    let ly = loupeState.canvasY - LOUPE_SIZE - 20
-    if (lx < 0) lx = loupeState.canvasX + 20
-    if (ly < 0) ly = loupeState.canvasY + 20
-    loupeLeft = Math.max(0, Math.min(containerSize.width - LOUPE_SIZE, lx))
-    loupeTop = Math.max(0, Math.min(containerSize.height - LOUPE_SIZE, ly))
+    // Fixed top-right corner. Previously this tracked the dragged dot, so the
+    // window jumped around exactly when you were trying to read it.
+    loupeLeft = Math.max(0, containerSize.width - LOUPE_SIZE - LOUPE_MARGIN)
+    loupeTop = LOUPE_MARGIN
   }
 
   const dots: Array<{ id: DotId; pos: { x: number; y: number }; label: string }> = [
@@ -372,8 +380,15 @@ export function CalibrationDots({
       {/* Image + overlay */}
       <div
         ref={containerRef}
-        className="relative w-full select-none overflow-hidden rounded-lg border border-amber-500/30 bg-black"
-        style={{ aspectRatio: imageWidth && imageHeight ? `${imageWidth} / ${imageHeight}` : '4 / 3' }}
+        className="relative w-full select-none overflow-hidden rounded bg-black"
+        style={{
+          // Match the crop/blackout wrappers exactly (same border, radius, and
+          // natural aspect) so switching tools in PhotoEditor doesn't resize
+          // or shift the photo. Falling back to 4/3 when dimensions were
+          // unknown was the main cause of the jump.
+          border: '1px solid var(--bronze-dark)',
+          aspectRatio: aspectW && aspectH ? `${aspectW} / ${aspectH}` : undefined,
+        }}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
@@ -386,6 +401,12 @@ export function CalibrationDots({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           ref={imgRef}
+          onLoad={(e) => {
+            const el = e.currentTarget
+            if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+              setNaturalSize({ width: el.naturalWidth, height: el.naturalHeight })
+            }
+          }}
           src={imageUrl}
           alt="Pedicle calibration target"
           className="absolute inset-0 h-full w-full object-contain"
@@ -479,7 +500,7 @@ export function CalibrationDots({
               top: loupeTop,
               width: LOUPE_SIZE,
               height: LOUPE_SIZE,
-              borderRadius: '50%',
+              borderRadius: 6,
               border: '2px solid #fbbf24',
               boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)',
               pointerEvents: 'none',

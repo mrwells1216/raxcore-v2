@@ -1393,8 +1393,8 @@ interface MeasurementsGridProps {
 function MeasurementsGrid({ measurements }: MeasurementsGridProps) {
   return (
     <div className="space-y-4">
-      {/* Key Measurements */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Key Measurements — 3 across overflowed narrow phones; stack first. */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <MeasurementCard 
           label="Inside Spread" 
           value={measurements.inside_spread}
@@ -1415,7 +1415,7 @@ function MeasurementsGrid({ measurements }: MeasurementsGridProps) {
         <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Tine Lengths
         </h4>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {['g1', 'g2', 'g3', 'g4'].map((g) => {
             const left = measurements[`${g}_left` as keyof typeof measurements] as number | null
             const right = measurements[`${g}_right` as keyof typeof measurements] as number | null
@@ -1489,12 +1489,15 @@ interface MeasurementCardProps {
 function MeasurementCard({ label, value, highlight }: MeasurementCardProps) {
   return (
     <div className={cn(
-      "text-center p-3 rounded-lg",
+      // min-w-0 lets the card shrink inside its grid track; without it a long
+      // label sets the track's min-content width and pushes the row past the
+      // viewport edge.
+      "min-w-0 text-center p-2 sm:p-3 rounded-lg",
       highlight ? "bg-primary/10 border border-primary/20" : "bg-secondary/50"
     )}>
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      <p className="text-[11px] sm:text-xs text-muted-foreground mb-1 break-words">{label}</p>
       <p className={cn(
-        "text-xl font-bold tabular-nums",
+        "text-lg sm:text-xl font-bold tabular-nums",
         highlight && "text-primary"
       )}>
         {value?.toFixed(1) || '-'}&quot;
