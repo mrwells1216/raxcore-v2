@@ -39,8 +39,11 @@ const DEFAULT_RIGHT_RATIO = { x: 0.65, y: 0.30 }
 const KNOWN_INCHES_MIN = 2.0
 const KNOWN_INCHES_MAX = 8.0
 const DPAD_STEP = 1
-const LOUPE_SIZE = 120
-const LOUPE_ZOOM = 4
+const LOUPE_SIZE = 132
+// 4x was tight enough that the burr filled the loupe with no surrounding
+// context, so it was hard to tell what you were even looking at. 2.25x keeps
+// the pedicle readable while showing enough of the skull to orient by.
+const LOUPE_ZOOM = 2.25
 const LOUPE_SRC_RADIUS = LOUPE_SIZE / (2 * LOUPE_ZOOM) // 15px of image space from center
 
 type DotId = 'left' | 'right'

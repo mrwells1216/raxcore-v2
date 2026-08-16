@@ -911,6 +911,41 @@ tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
 `components/scoring/antler-crop-box.tsx`,
 `components/scoring/scoring-wizard.tsx`.
 
+### 3.45. Landmark placement fix (real image dimensions) + editor polish ✓
+(a) **"Landmarks are way off" — root cause.** `detectLandmarksForOneImage`
+passed `imageWidth: 0, imageHeight: 0` into `buildLandmarkDetectionPrompt`,
+which switches the prompt to *"Report the actual image's pixel dimensions in
+the imageWidth and imageHeight fields"* — i.e. **the model guessed the canvas
+size**, and that guess was stored as `PerImageLandmarkResult.imageWidth`.
+`LandmarkOverlay` then computes `scaleX = drawWidth / imageWidth`, so any
+error in the guess displaced every dot proportionally (a model reporting
+1024×1024 for a 1200×800 image throws the dots off by ~17% / ~30%). GPT-4o is
+not reliable at reporting exact pixel dimensions and never should have been
+the source of truth for a denominator. New `probeImageDimensions()` fetches
+each image and reads true `width`/`height` via `sharp` (dynamically imported
+so the module stays importable from tests), runs once per image in parallel
+inside `detectLandmarkPositionsPerImage`, states the real size in the prompt,
+and stores the measured value — the model's self-report is now only a
+fallback when the probe fails. This also improves the geometry paths that
+consume these dims (eye-circle, pedicle, per-image consensus), not just the
+overlay.
+(b) **Pedicle loupe** `LOUPE_ZOOM` 4 → 2.25 (and size 120 → 132). At 4× the
+burr filled the loupe with no surrounding context, so it was hard to tell
+what you were looking at.
+(c) **Crop scales** tightened vertically (`gap-y-1` → none) now that the four
+edge sliders are stacked full-width.
+(d) **Precision pass poll cap** `MAX_POLLS` 60 → 200. The route runs the pass
+inline with `maxDuration = 300`, but the card gave up polling after ~90s
+(60 × 1.5s) and left the UI showing "Analyzing hypotheses" while the server
+was still legitimately working. 200 × 1.5s = 300s now matches the server
+budget. NOTE: this fixes the client-side give-up only. If a pass still hangs,
+the remaining suspect is `executePrecisionPass` itself, which needs live logs
+from a fresh run to diagnose — nothing conclusive was in the retention window.
+tsc clean, lint 0 errors, build succeeds, full suite 160/160. Files: modified
+`lib/scoring/vision-scorer.ts`, `components/scoring/calibration-dots.tsx`,
+`components/scoring/antler-crop-box.tsx`,
+`components/scoring/precision-pass-card.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

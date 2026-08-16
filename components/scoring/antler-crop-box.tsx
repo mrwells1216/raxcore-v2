@@ -473,7 +473,7 @@ export function AntlerCropBox({
           {/* Single column: a full-width rail gives roughly twice the travel
               distance per edge, so a given finger movement changes the crop
               half as much. Short rails were the reason these felt touchy. */}
-          <div className="grid grid-cols-1 gap-y-1">
+          <div className="grid grid-cols-1">
             <EdgeSlider
               label="Top"
               value={activeRegion.y}

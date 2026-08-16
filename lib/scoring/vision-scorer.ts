@@ -1318,8 +1318,13 @@ async function detectLandmarksForOneImage(args: {
   imageUrl: string
   imageIndex: number
   angleType: 'front' | 'left' | 'right' | 'unknown'
+  /** True pixel size measured server-side. 0 ⇒ unknown (legacy behavior). */
+  knownWidth?: number
+  knownHeight?: number
 }): Promise<PerImageLandmarkResult> {
   const { imageUrl, imageIndex, angleType } = args
+  const knownWidth = args.knownWidth ?? 0
+  const knownHeight = args.knownHeight ?? 0
 
   const fail = (reason: string): PerImageLandmarkResult => ({
     imageIndex,
@@ -1341,12 +1346,12 @@ async function detectLandmarksForOneImage(args: {
 
   const landmarkList = LANDMARK_IDS.join(', ')
 
-  // Image dimensions are not always known up front (we may rely on the model
-  // to report them). Pass 0/0 as a sentinel — the prompt builder uses them as
-  // context but the schema captures the model's own measurement separately.
+  // Real dimensions measured server-side are stated in the prompt so the
+  // model anchors its coordinates to the actual pixel grid. 0/0 falls back to
+  // the old "you tell us the size" wording only when the probe failed.
   const prompt = buildLandmarkDetectionPrompt({
-    imageWidth: 0,
-    imageHeight: 0,
+    imageWidth: knownWidth,
+    imageHeight: knownHeight,
     angleType,
     landmarkList,
   })
@@ -1413,8 +1418,11 @@ async function detectLandmarksForOneImage(args: {
       imageUrl,
       angleType,
       landmarks,
-      imageWidth: object.imageWidth,
-      imageHeight: object.imageHeight,
+      // Measured size wins. The model's self-reported dimensions are only a
+      // fallback for the rare case the probe failed — trusting its guess is
+      // what put every landmark dot in the wrong place.
+      imageWidth: knownWidth > 0 ? knownWidth : object.imageWidth,
+      imageHeight: knownHeight > 0 ? knownHeight : object.imageHeight,
       modelUsed: 'gpt-4o',
       detectionTimestamp: new Date().toISOString(),
       locatedCount,
@@ -1444,15 +1452,47 @@ export async function detectLandmarkPositionsPerImage(
 ): Promise<PerImageLandmarkResult[]> {
   if (!imageUrls || imageUrls.length === 0) return []
 
+  // Measure each image's true pixel size before asking for coordinates.
+  // Previously the prompt told the model to report imageWidth/imageHeight
+  // itself, and that guess became the denominator the overlay divides by —
+  // so whenever the model guessed wrong (it usually does), every landmark
+  // was drawn at the wrong place. Reading the real size costs one HEAD-ish
+  // fetch per image and runs in parallel with nothing else blocking on it.
+  const dims = await Promise.all(imageUrls.map(probeImageDimensions))
+
   const tasks = imageUrls.map((imageUrl, imageIndex) =>
     detectLandmarksForOneImage({
       imageUrl,
       imageIndex,
       angleType: angleTypes?.[imageIndex] ?? 'unknown',
+      knownWidth: dims[imageIndex]?.width ?? 0,
+      knownHeight: dims[imageIndex]?.height ?? 0,
     }),
   )
 
   return Promise.all(tasks)
+}
+
+/**
+ * True pixel dimensions of a remote image, or null when it can't be read.
+ * sharp is imported dynamically so this module stays importable from tests
+ * (and any non-node context) that never call it.
+ */
+async function probeImageDimensions(
+  imageUrl: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const res = await fetch(imageUrl)
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    const { default: sharp } = await import('sharp')
+    const meta = await sharp(buf).metadata()
+    if (!meta.width || !meta.height) return null
+    return { width: meta.width, height: meta.height }
+  } catch (err) {
+    console.warn('[vision-scorer] image dimension probe failed:', err)
+    return null
+  }
 }
 
 /**

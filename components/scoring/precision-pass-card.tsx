@@ -42,10 +42,12 @@ export function PrecisionPassCard({
   // Guard: fire onPrecisionPassComplete at most once per runId regardless of
   // how many times the parent re-renders or the effect re-evaluates.
   const firedRunIdRef = useRef<string | null>(null)
-  // Safety net: stop polling after ~90s so the UI can never spin forever if the
-  // run never reaches a terminal state.
+  // Safety net so the UI can never spin forever. This has to outlast the
+  // server: the route runs the pass inline with maxDuration = 300, and the old
+  // 90s cap gave up while the pass was still legitimately working, leaving the
+  // card stuck on "Analyzing hypotheses". 200 polls x 1.5s = 300s, matching it.
   const pollCountRef = useRef(0)
-  const MAX_POLLS = 60
+  const MAX_POLLS = 200
 
   // Stop polling once completed or failed — no need to keep hitting the API
   const shouldPoll =
