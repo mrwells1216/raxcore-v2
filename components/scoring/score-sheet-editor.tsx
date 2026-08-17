@@ -228,7 +228,7 @@ function MeasurementInput({
 
   return (
     <div className="border-b border-border/50 last:border-0">
-      <div className="grid grid-cols-[1fr_auto_80px_100px_60px] gap-2 items-center py-1.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_56px_72px_44px] sm:grid-cols-[minmax(0,1fr)_auto_80px_100px_60px] gap-1.5 sm:gap-2 items-center py-1.5">
         <div className="flex items-center gap-1.5 min-w-0">
           <Label className="text-sm font-medium truncate">{label}</Label>
           {isHumanReviewed && (
@@ -691,9 +691,13 @@ export function ScoreSheetEditor({
           <Separator />
 
           {/* Column headers */}
-          <div className="grid grid-cols-[1fr_80px_100px_60px] gap-2 text-xs font-medium text-muted-foreground">
-            <div>Measurement</div>
-            <div className="text-right">AI Value</div>
+          {/* Must use the SAME template as MeasurementRow below (including the
+              auto badge column) or every header label lands over the wrong
+              body column. */}
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_56px_72px_44px] sm:grid-cols-[minmax(0,1fr)_auto_80px_100px_60px] gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-medium text-muted-foreground">
+            <div className="min-w-0">Measurement</div>
+            <div aria-hidden />
+            <div className="text-right">AI</div>
             <div>Corrected</div>
             <div className="text-right">Diff</div>
           </div>

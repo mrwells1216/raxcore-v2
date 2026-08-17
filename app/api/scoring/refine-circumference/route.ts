@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: prediction, error: predictionError } = await supabase
     .from('predictions')
-    .select('id, buck_id, measurements, predicted_gross, predicted_net, user_measurements_metadata')
+    .select('id, buck_id, measurements, raw_ai_response, predicted_gross, predicted_net, user_measurements_metadata')
     .eq('id', body.predictionId)
     .single()
 
@@ -59,9 +59,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'prediction_not_found' }, { status: 404 })
   }
 
-  const existing = (prediction.measurements as Measurements | null) ?? null
+  // The results page renders measurements from whichever source is populated,
+  // so requiring the `measurements` column alone made Apply Taper fail with
+  // no_measurements on rows where the sheet was clearly showing numbers.
+  // Fall back to the raw AI response before giving up.
+  const rawAi = prediction.raw_ai_response as { measurements?: unknown } | null
+  const existing =
+    (prediction.measurements as Measurements | null) ??
+    ((rawAi?.measurements as Measurements | undefined) ?? null)
+
   if (!existing) {
-    return NextResponse.json({ error: 'no_measurements' }, { status: 422 })
+    return NextResponse.json(
+      {
+        error: 'no_measurements',
+        message:
+          'This prediction has no stored measurements to taper from. Re-score the buck, then apply the taper.',
+      },
+      { status: 422 },
+    )
   }
 
   const updated = applyTaperToMeasurements(existing, derived)

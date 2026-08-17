@@ -997,6 +997,35 @@ succeeds, full suite 161/161. Files: modified `lib/scoring/ai-service.ts`,
 `lib/scoring/vision-scorer.ts`,
 `__tests__/scoring/scoring-plausibility.test.ts`.
 
+### 3.48. Score-sheet grid alignment, taper fallback, persistent loupe ✓
+(a) **Score Sheet Review overlap + overflow.** `MeasurementRow` used
+`grid-cols-[1fr_auto_80px_100px_60px]` (5 tracks — the `auto` is the
+provenance badge) while the column header used
+`grid-cols-[1fr_80px_100px_60px]` (4 tracks). Every header label therefore
+sat over the wrong body column, which is the "Corrected" badge colliding with
+the label in the report. The fixed tracks also summed past a phone viewport.
+Both now share one template, `1fr` is `minmax(0,1fr)` so the label can
+actually shrink, and the fixed columns narrow below `sm`.
+(b) **"Apply taper" returned `no_measurements`.** `refine-circumference`
+required `predictions.measurements`, but the results UI renders from
+whichever source is populated — so a row could show numbers on screen while
+that column was null, and the taper failed on a buck that visibly had
+measurements. It now falls back to `raw_ai_response.measurements` and, if
+both are genuinely empty, returns an actionable message instead of a bare
+error code. NOTE: this error was surfacing in the UI directly beneath the
+Precision Pass card, which made it look like a precision-pass failure; it was
+always the taper request.
+(c) **Loupe** `LOUPE_SIZE` 140 → 104 (smaller window, zoom held at 1.5× since
+that level was right) and it is now **always visible**, pinned top-right,
+tracking the dragged dot → else the selected dot → else the left dot.
+Previously `loupeState` was only set during a touch drag, so the window
+disappeared the instant you lifted your finger — exactly when you want to
+check placement.
+tsc clean, lint 0 errors, build succeeds, full suite 161/161. Files: modified
+`components/scoring/score-sheet-editor.tsx`,
+`app/api/scoring/refine-circumference/route.ts`,
+`components/scoring/calibration-dots.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

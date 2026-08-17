@@ -39,13 +39,15 @@ const DEFAULT_RIGHT_RATIO = { x: 0.65, y: 0.30 }
 const KNOWN_INCHES_MIN = 2.0
 const KNOWN_INCHES_MAX = 8.0
 const DPAD_STEP = 1
-const LOUPE_SIZE = 140
+const LOUPE_SIZE = 104
 // Pulled back again: at higher zoom the burr filled the window with no
 // surrounding skull to orient against. 1.5x is enough to place a dot
 // precisely while still showing what you are looking at.
 const LOUPE_ZOOM = 1.5
 // The loupe is pinned to a fixed corner rather than chasing the dot — a
 // window that moves while you drag is harder to read than one that stays put.
+// It stays visible the whole time the tool is open (not just mid-drag) so it
+// reads as a fixed instrument rather than something that flickers in and out.
 const LOUPE_MARGIN = 8
 const LOUPE_SRC_RADIUS = LOUPE_SIZE / (2 * LOUPE_ZOOM) // 15px of image space from center
 
@@ -150,6 +152,26 @@ export function CalibrationDots({
     () => computeContainImage(containerSize, aspectW, aspectH),
     [containerSize, aspectW, aspectH],
   )
+
+  // Keep the loupe pointed at whichever dot is in play — the one being
+  // dragged, else the selected one, else the left dot. Previously this was
+  // only populated during a touch drag, so the window vanished the moment you
+  // lifted your finger, which is exactly when you want to check placement.
+  const loupeFocus = dragging ?? selected ?? 'left'
+  const loupeImgPoint = loupeFocus === 'right' ? rightImg : leftImg
+  useEffect(() => {
+    if (!containerSize.width || !containerSize.height) return
+    const canvasPt = {
+      x: transform.offsetX + loupeImgPoint.x * transform.scale,
+      y: transform.offsetY + loupeImgPoint.y * transform.scale,
+    }
+    setLoupeState({
+      canvasX: canvasPt.x,
+      canvasY: canvasPt.y,
+      imgX: loupeImgPoint.x,
+      imgY: loupeImgPoint.y,
+    })
+  }, [loupeImgPoint.x, loupeImgPoint.y, transform, containerSize.width, containerSize.height])
 
   const imgToCanvas = useCallback(
     (pt: { x: number; y: number }) => ({
@@ -363,12 +385,12 @@ export function CalibrationDots({
   // Loupe position: offset from finger, clamped to container
   let loupeLeft = 0
   let loupeTop = 0
-  if (loupeState) {
-    // Fixed top-right corner. Previously this tracked the dragged dot, so the
-    // window jumped around exactly when you were trying to read it.
-    loupeLeft = Math.max(0, containerSize.width - LOUPE_SIZE - LOUPE_MARGIN)
-    loupeTop = LOUPE_MARGIN
-  }
+  // Fixed top-right corner, always on. Previously this tracked the dragged dot
+  // and only appeared mid-touch-drag, so it both jumped around and vanished
+  // exactly when you wanted to check your placement.
+  loupeLeft = Math.max(0, containerSize.width - LOUPE_SIZE - LOUPE_MARGIN)
+  loupeTop = LOUPE_MARGIN
+
 
   const dots: Array<{ id: DotId; pos: { x: number; y: number }; label: string }> = [
     { id: 'left',  pos: leftCanvas,  label: 'L' },
