@@ -5,6 +5,7 @@ import { scoreBuck } from '@/lib/scoring/ai-service'
 import {
   flattenOfficialScoreData,
   officialGrossFromScoreData,
+  officialImageTypeToAngle,
 } from '@/lib/training/official-measurements'
 
 export const runtime = 'nodejs'
@@ -42,13 +43,15 @@ export async function POST(
   if (!images?.length) return NextResponse.json({ error: 'No images attached to this sheet' }, { status: 400 })
 
   // Build scoring input
-  const imageInputs = images.map((img: { image_url: string; image_type?: string }) => {
-    const rawAngle = img.image_type?.includes('side')
-      ? (img.image_type?.includes('right') ? 'right' : 'left')
-      : 'front'
-    const angleType = rawAngle as import('@/lib/types').AngleType
-    return { imageUrl: img.image_url, angleType, width: 1024, height: 768 }
-  })
+  // Shared mapping — the old inline version only recognised 'side', so
+  // 'angled', 'rear', 'live', 'mounted', 'harvest' and 'trail_cam' all
+  // silently became 'front'.
+  const imageInputs = images.map((img: { image_url: string; image_type?: string }) => ({
+    imageUrl: img.image_url,
+    angleType: officialImageTypeToAngle(img.image_type) as import('@/lib/types').AngleType,
+    width: 1024,
+    height: 768,
+  }))
 
   const rawRackType = (sheet.score_data as Record<string, string>)?.rack_type ?? 'typical'
   const rackType: 'typical' | 'non-typical' = rawRackType === 'non-typical' ? 'non-typical' : 'typical'

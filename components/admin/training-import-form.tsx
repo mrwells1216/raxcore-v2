@@ -38,15 +38,26 @@ const SCORING_SYSTEMS = [
   { value: 'PY_NONTYPICAL',  label: 'P&Y Non-Typical' },
 ]
 
+// Angle positions first, then context types. The angle values are what the
+// per-angle accuracy run buckets by, so a guide buck shot from 9 positions
+// stays distinguishable — 'angled' is a catch-all that tells us nothing about
+// WHICH angle, which is the whole point of the exercise.
+// Additive only: every pre-existing value is still present and valid.
 const IMAGE_TYPES = [
-  { value: 'front',       label: 'Front' },
-  { value: 'side_left',   label: 'Left Side' },
-  { value: 'side_right',  label: 'Right Side' },
-  { value: 'angled',      label: 'Angled' },
-  { value: 'live',        label: 'Live Photo' },
-  { value: 'mounted',     label: 'Mounted' },
-  { value: 'harvest',     label: 'Harvest' },
-  { value: 'trail_cam',   label: 'Trail Cam' },
+  { value: 'front',            label: 'Front (0°)' },
+  { value: 'front_left_45',    label: 'Front-Left (45°)' },
+  { value: 'side_left',        label: 'Left Side (90°)' },
+  { value: 'rear_left_135',    label: 'Rear-Left (135°)' },
+  { value: 'rear',             label: 'Rear (180°)' },
+  { value: 'rear_right_135',   label: 'Rear-Right (135°)' },
+  { value: 'side_right',       label: 'Right Side (90°)' },
+  { value: 'front_right_45',   label: 'Front-Right (45°)' },
+  { value: 'elevated',         label: 'Elevated / Top-Down' },
+  { value: 'angled',           label: 'Angled (unspecified)' },
+  { value: 'live',             label: 'Live Photo' },
+  { value: 'mounted',          label: 'Mounted' },
+  { value: 'harvest',          label: 'Harvest' },
+  { value: 'trail_cam',        label: 'Trail Cam' },
 ]
 
 // ── Types ─────────────────────────────────────────────────────────────────────

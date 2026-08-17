@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getServiceSupabase } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { OfficialVsAiTable } from '@/components/admin/official-vs-ai-table'
+import { PerAngleAccuracy, type PerAngleReport } from '@/components/admin/per-angle-accuracy'
 import { SheetDetailClient } from './sheet-detail-client'
 
 export default async function TrainingImportDetailPage({
@@ -40,6 +41,8 @@ export default async function TrainingImportDetailPage({
     fields?: Array<{ field: string; official: number | null; ai: number | null; delta: number | null; percent_off: number | null }>
     ai_confidence_percent?: number | null
   } | null
+
+  const perAngle = (sheet.ai_run_per_angle as PerAngleReport | null) ?? null
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
@@ -106,6 +109,18 @@ export default async function TrainingImportDetailPage({
             No AI run yet. Click "Run AI" to generate a comparison.
           </p>
         )}
+      </section>
+
+      {/* Per-angle accuracy — each image scored on its own vs the same truth */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          Accuracy by Angle
+        </h2>
+        <PerAngleAccuracy
+          sheetId={id}
+          report={perAngle}
+          imageCount={images?.length ?? 0}
+        />
       </section>
 
       {/* Client actions: Run AI + Promote */}

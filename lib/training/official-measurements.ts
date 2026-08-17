@@ -63,3 +63,30 @@ export function officialGrossFromScoreData(scoreData: unknown): number | null {
   const data = scoreData as Record<string, unknown>
   return num(data.calculated_gross) ?? num(data.gross_score)
 }
+
+/**
+ * Map an `official_score_images.image_type` tag to the production `AngleType`
+ * the scorer understands.
+ *
+ * The previous inline mapping only recognised `image_type.includes('side')`,
+ * so `angled`, `live`, `mounted`, `harvest` and `trail_cam` ALL silently
+ * became `'front'` — which would have mislabelled most of a guide buck's
+ * angles. Context tags (live/mounted/harvest/trail_cam) genuinely carry no
+ * angle information, so they map to `'other'` rather than pretending to be a
+ * front-on view.
+ */
+export function officialImageTypeToAngle(
+  imageType: string | null | undefined,
+): 'front' | 'left' | 'right' | 'back' | 'other' {
+  const t = (imageType ?? '').toLowerCase()
+  if (!t) return 'other'
+
+  // Rear views before the left/right check: 'rear_left_135' is predominantly a
+  // rear aspect, and the scorer has no oblique bucket to put it in.
+  if (t === 'rear' || t.startsWith('rear')) return 'back'
+  if (t.includes('left')) return 'left'
+  if (t.includes('right')) return 'right'
+  if (t === 'front') return 'front'
+  // 'elevated', 'angled', and the context tags carry no usable angle.
+  return 'other'
+}

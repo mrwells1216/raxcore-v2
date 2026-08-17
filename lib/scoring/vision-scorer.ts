@@ -1480,7 +1480,7 @@ export async function detectLandmarkPositionsPerImage(
  * sharp is imported dynamically so this module stays importable from tests
  * (and any non-node context) that never call it.
  */
-async function probeImageDimensions(
+export async function probeImageDimensions(
   imageUrl: string,
 ): Promise<{ width: number; height: number } | null> {
   try {

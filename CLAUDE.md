@@ -1026,6 +1026,65 @@ tsc clean, lint 0 errors, build succeeds, full suite 161/161. Files: modified
 `app/api/scoring/refine-circumference/route.ts`,
 `components/scoring/calibration-dots.tsx`.
 
+### 3.49. Guide buck: per-angle accuracy ruler ✓
+Ground truth, at last. Every accuracy decision up to now was made without it —
+which is how the `+6` global bias (inferred from two photos) and the
+double-applied per-field bias got in. The user is supplying a **guide buck**
+(9 photos from different angles + certified measurements), with more to
+follow. Scoped deliberately as an **accuracy ruler, not a prompt exemplar**:
+it changes NOTHING about live scoring. Feeding a reference buck into the
+vision prompt was considered and deferred — it would roughly 4× image cost per
+score and risks anchoring every estimate toward one animal's proportions, and
+there is no way to know whether it helps until a baseline exists. That
+question is answerable later via the existing A/B runner (§3.35).
+
+Most of the pipeline already existed (§3.29): `training-import-form.tsx` does
+multi-image upload with per-image angle tagging plus a full B&C/P&Y field
+form, `run-ai` compares AI vs official per field, and `promote` builds a
+benchmark pack. Three real gaps were closed:
+(a) **`run-ai` scored all images in ONE `scoreBuck` call**, so 9 angles gave
+one number and zero per-angle signal. New
+`POST /api/admin/training-import/[id]/run-ai-per-angle` (`maxDuration = 300`)
+scores each image **alone** against the same flattened ground truth and stores
+`{run_at, image_count, scored_count, mae_gross, best_angle, worst_angle,
+angles[]}` in a new `ai_run_per_angle` JSONB column. Runs sequentially, since
+each `scoreBuck` already fans out into several GPT-4o calls; a per-image
+failure records an error row rather than losing the other results, and a
+missing column returns the computed numbers with a migration hint instead of
+discarding the work.
+(b) **Angle mapping was lossy**: the old inline version only matched
+`includes('side')`, so `angled`, `rear`, `live`, `mounted`, `harvest` and
+`trail_cam` ALL silently became `'front'`. New shared
+`officialImageTypeToAngle()` in `lib/training/official-measurements.ts` maps
+rear tags to `back` before the left/right check (`rear_left_135` contains
+"left" but is a rear aspect) and maps context tags to `'other'` rather than
+claiming they are front-on views. Both routes now use it.
+(c) **Hardcoded `1024x768`** in the scoring input — the per-angle route uses
+the real size via `probeImageDimensions()` (now exported from
+`vision-scorer.ts`, §3.45).
+`IMAGE_TYPES` gained 6 angle positions (`front_left_45`, `rear_left_135`,
+`rear`, `rear_right_135`, `front_right_45`, `elevated`) so 9 positions are
+distinguishable; additive only, and the production `AngleType` union in
+`lib/types.ts` is deliberately UNCHANGED. New
+`components/admin/per-angle-accuracy.tsx` renders the run button + a table
+sorted most-accurate-first with MAE / best / worst angle stats.
+Deliberately NOT done: no global constant is derived from one buck. The bias
+corrector still requires ≥10 observations and clamps ±3", so a single sheet
+cannot move it — verify `/admin/accuracy` is unchanged after importing.
+Tests: 8 specs in `__tests__/scoring/official-image-angle.test.ts` (front,
+both sides, obliques, rear-not-side, context tags never claim 'front',
+case-insensitivity, empty input, and a guard that the output never escapes the
+production union). tsc clean, lint 0 errors, build succeeds, full suite
+169/169. Files: new
+`app/api/admin/training-import/[id]/run-ai-per-angle/route.ts`, new
+`components/admin/per-angle-accuracy.tsx`, new
+`supabase/migrations/20260817_ai_run_per_angle.sql`, new
+`__tests__/scoring/official-image-angle.test.ts`; modified
+`lib/training/official-measurements.ts`, `lib/scoring/vision-scorer.ts`,
+`app/api/admin/training-import/[id]/run-ai/route.ts`,
+`app/admin/training-import/[id]/page.tsx`,
+`components/admin/training-import-form.tsx`.
+
 ---
 
 ## 4. What is NOT built yet
