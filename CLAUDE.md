@@ -1085,6 +1085,38 @@ production union). tsc clean, lint 0 errors, build succeeds, full suite
 `app/admin/training-import/[id]/page.tsx`,
 `components/admin/training-import-form.tsx`.
 
+### 3.50. `public.profiles` migration — the silent admin 403 ✓
+Setting up the §3.49 guide-buck import surfaced a schema gap much broader than
+the guide buck: **`public.profiles` did not exist** in the live database.
+Every admin gate does
+`.from('profiles').select('is_admin').eq('id', user.id).single()` and then
+`if (!profile?.is_admin) return 403`. Against a missing table that query
+errors, `profile` is `null`, and the route 403s — so the ENTIRE admin surface
+(training import, `/admin/accuracy`, benchmarks, supervision, prompt-biases,
+seed-dataset) was silently unreachable, with no error anywhere pointing at the
+real cause. It presented as a permissions problem, not a missing table.
+Nothing in `supabase/migrations/` created it (the base schema was built
+outside version control), so a fresh environment or restored project would hit
+the identical wall.
+New `supabase/migrations/20260818_profiles_table.sql` records the schema:
+columns matching the `Profile` interface in `lib/types.ts` (`id` UUID PK FK to
+`auth.users` ON DELETE CASCADE, `display_name`, `is_admin` NOT NULL DEFAULT
+FALSE, `created_at`, `updated_at`) **plus `role`**, which
+`lib/structural-hypothesis/service.ts` selects but which is absent from that
+interface. RLS is enabled with select/update/insert policies scoped to
+`auth.uid() = id` — admin promotion stays a deliberate out-of-band SQL action
+and is never something the app can grant itself. A `handle_new_user()`
+trigger function (`SECURITY DEFINER`, so its insert is not blocked by those
+same policies) on `on_auth_user_created` creates a profile row at signup;
+without it every new account lands in exactly the broken state described
+above, failing both the admin check and `getProfile()`
+(`lib/auth/actions.ts`). Ends with a backfill for pre-existing accounts.
+Every statement is guarded (`IF NOT EXISTS` / `DROP ... IF EXISTS` /
+`CREATE OR REPLACE`), so it is a clean no-op against the operator's database
+where the table was already created by hand. SQL only — no application code
+changed. tsc clean, build succeeds, full suite 169/169. File: new
+`supabase/migrations/20260818_profiles_table.sql`.
+
 ---
 
 ## 4. What is NOT built yet
