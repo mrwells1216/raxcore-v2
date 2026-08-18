@@ -93,7 +93,47 @@ const emptyMeasurements = (): Measurements => ({
 
 // ── Calculation helpers ───────────────────────────────────────────────────────
 
-function parseInch(v: string): number { const n = parseFloat(v); return isFinite(n) ? n : 0 }
+/**
+ * Parse a measurement written the way scorers actually write it.
+ *
+ * B&C is recorded in eighths — a scorer writes `4 6/8`, not `4.75`. The old
+ * implementation was a bare parseFloat, which stops at the first non-numeric
+ * character: "4 6/8" silently became 4 and "6/8" became 6. Since this feeds
+ * the ground-truth sheet that every later accuracy claim is measured against,
+ * a silent truncation here would look like AI error for months.
+ *
+ * Accepts: "4.75", "4", "4 6/8", "4-6/8", "6/8", any of the above with a
+ * trailing inch mark. Anything unparseable is 0, and the result is always
+ * finite (a /0 denominator yields 0, never Infinity).
+ */
+export function parseInch(v: string): number {
+  if (typeof v !== 'string') return 0
+  const cleaned = v.trim().replace(/["\u201d\s]+$/, '').trim()
+  if (!cleaned) return 0
+
+  // Mixed fraction: "4 6/8" or "4-6/8"
+  const mixed = cleaned.match(/^(\d+)\s*[-\s]\s*(\d+)\s*\/\s*(\d+)$/)
+  if (mixed) {
+    const whole = Number(mixed[1])
+    const num = Number(mixed[2])
+    const den = Number(mixed[3])
+    if (!den) return 0
+    const out = whole + num / den
+    return Number.isFinite(out) ? out : 0
+  }
+
+  // Bare fraction: "6/8"
+  const frac = cleaned.match(/^(\d+)\s*\/\s*(\d+)$/)
+  if (frac) {
+    const den = Number(frac[2])
+    if (!den) return 0
+    const out = Number(frac[1]) / den
+    return Number.isFinite(out) ? out : 0
+  }
+
+  const n = parseFloat(cleaned)
+  return Number.isFinite(n) ? n : 0
+}
 
 function calcGross(m: Measurements): number {
   const spread = parseInch(m.inside_spread)
@@ -121,21 +161,28 @@ function calcDeductions(m: Measurements, isTypical: boolean): number {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function MeasInput({
-  label, value, onChange, placeholder = '0.000',
+  label, value, onChange, placeholder = '4.75 or 4 6/8',
 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  // type="text", not "number": a number input rejects "4 6/8" outright, so
+  // eighths could not be entered at all. No inputMode is set so the full
+  // keyboard (with "/") is available on a phone, which is where these get
+  // typed. The parsed value is echoed below so a misparse is visible rather
+  // than silently stored.
+  const parsed = parseInch(value)
+  const showParsed = value.trim() !== '' && parsed > 0
   return (
     <div className="space-y-0.5">
       <Label className="text-[11px] text-muted-foreground">{label}</Label>
       <Input
-        type="number"
-        step="0.001"
-        min="0"
-        max="99"
+        type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         className="h-8 text-sm font-mono"
       />
+      <p className="h-3 text-[10px] font-mono text-muted-foreground">
+        {showParsed ? `= ${parsed.toFixed(3)}"` : ''}
+      </p>
     </div>
   )
 }

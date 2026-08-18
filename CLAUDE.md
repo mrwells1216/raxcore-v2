@@ -1117,6 +1117,37 @@ where the table was already created by hand. SQL only — no application code
 changed. tsc clean, build succeeds, full suite 169/169. File: new
 `supabase/migrations/20260818_profiles_table.sql`.
 
+### 3.51. Official score sheet accepts eighths-of-an-inch ✓
+Caught while preparing the guide-buck import — i.e. while preparing to enter
+the **ground truth every later accuracy claim is measured against**, which is
+the worst possible place for silent data corruption. Two compounding problems:
+(a) `parseInch` (`components/admin/training-import-form.tsx`) was a bare
+`parseFloat`, which stops at the first non-numeric character. B&C is recorded
+in eighths — a scorer writes `4 6/8`, not `4.75` — so `"4 6/8"` silently
+became **4** (losing 0.75") and `"6/8"` became **6** (a 5.25" error on one
+field). Across ~19 measurement fields that is potentially double-digit inches
+baked into the reference data, and it would have surfaced later as apparent AI
+inaccuracy with no way to trace it back.
+(b) The `MeasInput` was `type="number"`, so the browser **rejected** fraction
+text outright — eighths could not be entered at all, only silently mangled if
+pasted.
+`parseInch` now accepts `4.75`, `4`, `4 6/8`, `4-6/8`, `6/8`, and any of those
+with a trailing inch mark; a `/0` denominator returns 0 rather than `Infinity`
+(§5 finite-guard rule), non-strings return 0, and plain decimals are
+unchanged. It is exported so it is unit-testable without React. The input is
+now `type="text"` with **no** `inputMode` — a `decimal` keypad has no `/` key,
+which would have blocked fraction entry on the phone where these actually get
+typed. Each field echoes its parsed value (`= 4.750"`) underneath, so a
+misparse is visible at entry instead of discovered months later. Tests: 8
+specs in `__tests__/scoring/parse-inch.test.ts` covering decimal
+no-regression, mixed and bare fractions, trailing inch mark, the `/0` guard,
+junk input, a non-string guard, and a sweep asserting no input can produce a
+non-finite result. `calcGross`/`calcDeductions`, the stored `score_data`
+shape, and `flattenOfficialScoreData()` are all unchanged — only input parsing
+widened. tsc clean, lint 0 errors, build succeeds, full suite 177/177. Files:
+modified `components/admin/training-import-form.tsx`; new
+`__tests__/scoring/parse-inch.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet
