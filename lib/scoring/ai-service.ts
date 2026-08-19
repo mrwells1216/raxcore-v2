@@ -760,12 +760,31 @@ function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibr
  *  - non-typical: abnormal points count positively, so they belong in gross
  *                 and are not subtracted again.
  */
+/**
+ * Credited inside spread, per the B&C chart: "spread credit may equal but not
+ * exceed the length of the longer antler". A 22" spread on 21" beams is
+ * credited 21", not 22" — so the cap only binds on wide, short-beamed racks,
+ * which is exactly where the uncapped total ran high.
+ *
+ * With no beam measured there is nothing to cap against, so the raw spread is
+ * credited rather than zeroing it out.
+ */
+function spreadCredit(measurements: Measurements): number {
+  const spread = measurements.inside_spread
+  if (typeof spread !== 'number' || !Number.isFinite(spread)) return 0
+
+  const beams = [measurements.main_beam_left, measurements.main_beam_right]
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0)
+  if (beams.length === 0) return spread
+
+  return Math.min(spread, Math.max(...beams))
+}
+
 function calculateScores(
   measurements: Measurements,
   rackType: 'typical' | 'non-typical' = 'typical',
 ) {
   const frame = [
-    measurements.inside_spread,
     measurements.main_beam_left, measurements.main_beam_right,
     measurements.g1_left, measurements.g1_right,
     measurements.g2_left, measurements.g2_right,
@@ -778,7 +797,8 @@ function calculateScores(
     measurements.h4_left, measurements.h4_right,
   ].filter((v): v is number => v !== null)
 
-  const frameTotal = frame.reduce((sum, v) => sum + v, 0)
+  const frameTotal =
+    frame.reduce((sum, v) => sum + v, 0) + spreadCredit(measurements)
   const abnormal = measurements.abnormal_points || 0
   const deductions = measurements.deductions || 0
 

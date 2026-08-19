@@ -511,7 +511,8 @@ MEASUREMENT RULES
 - Broken tines: if a tine is clearly snapped, splintered, or rubbed off, report its CURRENT remaining length (not the inferred original). Add the tine key to quality_notes (e.g. "broken: g3_left"). Never invent the missing length.
 - Velvet: if the rack is in velvet, score the underlying hard-antler dimensions visible through the velvet. Do not subtract for velvet bulk and do not add a separate velvet measurement.
 - Deductions: sum |left - right| asymmetries; estimate non-typical-on-typical penalties.
-- typical frame = sum(beams) + sum(tines) + sum(H) + inside_spread.
+- spread credit = inside_spread, capped at the LONGER main beam (B&C: spread credit may equal but not exceed the longer antler).
+- typical frame = sum(beams) + sum(tines) + sum(H) + spread credit.
 - gross_score (typical) = typical frame. Do NOT add abnormal_points to it.
 - net_score (typical) = gross_score - abnormal_points - deductions.
 - gross_score (non-typical) = typical frame + abnormal_points (they count positively).

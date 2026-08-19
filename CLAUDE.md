@@ -1206,6 +1206,44 @@ CLAUDE.md file references in §3.15, §3.18, §3.24, §3.30, §3.38, §3.49 and
 clean, build succeeds, full suite 185/185. Files: renamed all of
 `supabase/migrations/*.sql`.
 
+### 3.54. B&C spread credit cap ✓
+Surfaced while answering whether B&C requires a point count (it does require
+recording one, but the count adds **zero inches** — only lengths total). The
+same chart carries a rule this codebase never implemented, on the Spread
+Credit line: *"spread credit may equal but not exceed the length of the longer
+antler."* Credited spread is therefore
+`min(inside_spread, max(main_beam_left, main_beam_right))`, and both totalling
+paths were adding the raw spread:
+`calculateScores` (`lib/scoring/ai-service.ts`) and `calcGross`
+(`components/admin/training-import-form.tsx`).
+For most bucks the cap never binds — beams (22–26") normally exceed spread
+(16–20"), which is why an uncapped total looked correct indefinitely. It bites
+on **wide, short-beamed racks**: a 22" spread on 21" beams was credited 22"
+instead of 21", and the overstatement grows with width. Those are exactly the
+bucks users are most excited to score.
+The urgent consequence was not the display: an official sheet has the cap
+applied and the app did not, so the §3.49 per-angle accuracy run would have
+reported that formula mismatch as **AI error**, silently poisoning the first
+real accuracy baseline the project has ever had — before it was even measured.
+New `spreadCredit()` helper in `ai-service.ts` and the same rule inline in
+`calcGross`; both fall back to the raw spread when no beam is measured, since
+with nothing to cap against zeroing the spread on a half-filled sheet would be
+worse than not capping. The prompt's SCORING block now states the cap too, so
+the model's own `gross_score` follows the same rule the arithmetic does — the
+§3.47 lesson, where prompt and arithmetic disagreeing about abnormal points
+produced a correct net beside an inflated gross. `calcDeductions` is
+untouched; the cap is not an asymmetry deduction. NOTE: this **lowers**
+displayed gross for wide, short-beamed racks, and net moves with it since net
+derives from gross. Most bucks are unaffected. This is the second change to
+what "gross" means after §3.47. Tests: 8 specs in
+`__tests__/scoring/spread-credit.test.ts` (under-cap full credit as the key
+regression guard, over-cap, exactly-equal "may equal", cap against the right
+beam, no-beam fallback, single-beam, eighths notation, and finite/empty
+guards); `calcGross` exported for testing. tsc clean, lint 0 errors, build
+succeeds, full suite 193/193. Files: modified `lib/scoring/ai-service.ts`,
+`components/admin/training-import-form.tsx`, `lib/scoring/vision-scorer.ts`;
+new `__tests__/scoring/spread-credit.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

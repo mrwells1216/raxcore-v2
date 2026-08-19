@@ -177,9 +177,13 @@ export function fromEighths(whole: number | null, eighths: number): string {
   return `${w} ${e}/8`
 }
 
-function calcGross(m: Measurements): number {
+export function calcGross(m: Measurements): number {
+  // B&C: spread credit may equal but not exceed the longer antler. With no
+  // beam entered yet there is nothing to cap against, so credit the raw
+  // spread rather than zeroing it while the sheet is half filled in.
   const spread = parseInch(m.inside_spread)
-  let total = spread
+  const beams = [parseInch(m.left.main_beam), parseInch(m.right.main_beam)].filter(b => b > 0)
+  let total = beams.length > 0 ? Math.min(spread, Math.max(...beams)) : spread
   for (const side of ['left', 'right'] as Side[]) {
     const s = m[side]
     total += parseInch(s.main_beam)
