@@ -1148,6 +1148,41 @@ widened. tsc clean, lint 0 errors, build succeeds, full suite 177/177. Files:
 modified `components/admin/training-import-form.tsx`; new
 `__tests__/scoring/parse-inch.test.ts`.
 
+### 3.52. Official score sheet: eighths dropdown ✓
+Follow-up to §3.51. Accepting `4 6/8` as free text fixed the silent
+truncation, but left three problems: an illegal value like `4.7` was still
+storable (B&C has no such measurement), typing `/` meant switching to the
+symbol keyboard ~22 times per sheet on a phone, and a fat-finger was only
+caught if the user read the echoed decimal. Since this form enters the ground
+truth everything else is measured against, constraining input is better than
+validating it after the fact — an illegal value becomes unrepresentable.
+`MeasInput` is now two controls: a short whole-inch box plus a `Select` of the
+eight legal fractions (`—`, `1/8` … `7/8`). Kept in eighths rather than
+reduced to `1/4`/`1/2` — scorers read a tape and write a sheet in eighths, so
+a constant denominator removes a conversion step at entry.
+**The value contract is unchanged**: `MeasInput` still takes/emits the same
+`string` that `parseInch` reads (`"4 6/8"`, `"4"`, `""`), so `calcGross`,
+`calcDeductions`, the stored `score_data` shape, and
+`flattenOfficialScoreData()` are all untouched — only the widget changed. Two
+exported pure helpers do the split: `toEighths()` (decomposes via the existing
+`parseInch`, rounds to the nearest eighth, handles the `eighths === 8` carry
+so `3.99` → whole 4 / 0 eighths, and returns `whole: null` for a blank field
+so an unmeasured G5 stays blank instead of becoming a hard 0) and
+`fromEighths()` (recomposes, clamps eighths to 0–7 and negative wholes to 0).
+`parseInch` and its specs are unchanged — it still parses stored values and
+guards any legacy decimal already in the database.
+NOTE a deliberate behavior change: a previously stored non-eighth decimal
+(e.g. `4.7`) now displays as `4 6/8` once it round-trips through the widget.
+That is a correction toward legal B&C precision, not data loss. Tests: 8 new
+specs in `__tests__/scoring/parse-inch.test.ts` including a full round-trip
+across all 328 legal eighths from `0` to `40 7/8` asserting both the
+whole/eighth split and the numeric value survive, plus blank-stays-blank,
+explicit-zero preservation, sub-inch with no whole part, the carry case,
+legacy-decimal snapping, out-of-range clamping, and a finite guard. tsc
+clean, lint 0 errors, build succeeds, full suite 185/185. File: modified
+`components/admin/training-import-form.tsx`,
+`__tests__/scoring/parse-inch.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

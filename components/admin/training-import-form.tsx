@@ -135,6 +135,48 @@ export function parseInch(v: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/** The eight legal B&C fractions. Kept in eighths rather than reduced to
+ *  1/4 and 1/2 — scorers read a tape and write a sheet in eighths, so a
+ *  constant denominator avoids a conversion step at entry time. */
+export const EIGHTHS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '0', label: '—' },
+  { value: '1', label: '1/8' },
+  { value: '2', label: '2/8' },
+  { value: '3', label: '3/8' },
+  { value: '4', label: '4/8' },
+  { value: '5', label: '5/8' },
+  { value: '6', label: '6/8' },
+  { value: '7', label: '7/8' },
+]
+
+/**
+ * Split a stored measurement into whole inches + eighths for the two-control
+ * editor. `whole: null` means the field is genuinely blank (an unmeasured G5
+ * must stay blank rather than becoming a hard 0).
+ */
+export function toEighths(value: string): { whole: number | null; eighths: number } {
+  if (typeof value !== 'string' || value.trim() === '') return { whole: null, eighths: 0 }
+  const total = parseInch(value)
+  if (!Number.isFinite(total) || total < 0) return { whole: null, eighths: 0 }
+  let whole = Math.floor(total)
+  let eighths = Math.round((total - whole) * 8)
+  // Carry: 3.99 rounds to 8 eighths, which is 4 whole inches and 0 eighths.
+  if (eighths >= 8) {
+    whole += 1
+    eighths = 0
+  }
+  return { whole, eighths }
+}
+
+/** Recompose into the canonical string parseInch already reads. */
+export function fromEighths(whole: number | null, eighths: number): string {
+  const e = Number.isFinite(eighths) ? Math.max(0, Math.min(7, Math.trunc(eighths))) : 0
+  const w = whole == null || !Number.isFinite(whole) ? null : Math.max(0, Math.trunc(whole))
+  if (w == null) return e === 0 ? '' : `${e}/8`
+  if (e === 0) return String(w)
+  return `${w} ${e}/8`
+}
+
 function calcGross(m: Measurements): number {
   const spread = parseInch(m.inside_spread)
   let total = spread
@@ -161,28 +203,47 @@ function calcDeductions(m: Measurements, isTypical: boolean): number {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function MeasInput({
-  label, value, onChange, placeholder = '4.75 or 4 6/8',
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  // type="text", not "number": a number input rejects "4 6/8" outright, so
-  // eighths could not be entered at all. No inputMode is set so the full
-  // keyboard (with "/") is available on a phone, which is where these get
-  // typed. The parsed value is echoed below so a misparse is visible rather
-  // than silently stored.
-  const parsed = parseInch(value)
-  const showParsed = value.trim() !== '' && parsed > 0
+  label, value, onChange,
+}: { label: string; value: string; onChange: (v: string) => void }) {
+  // Whole inches + an eighths dropdown. B&C is measured to the nearest 1/8,
+  // so restricting the fraction to the eight legal values makes an illegal
+  // measurement unrepresentable rather than something to validate after the
+  // fact — this form enters the ground truth everything else is judged
+  // against. The stored string format is unchanged, so calcGross,
+  // calcDeductions and score_data are untouched.
+  const { whole, eighths } = toEighths(value)
+
   return (
     <div className="space-y-0.5">
       <Label className="text-[11px] text-muted-foreground">{label}</Label>
-      <Input
-        type="text"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="h-8 text-sm font-mono"
-      />
-      <p className="h-3 text-[10px] font-mono text-muted-foreground">
-        {showParsed ? `= ${parsed.toFixed(3)}"` : ''}
-      </p>
+      <div className="flex items-center gap-1.5">
+        <Input
+          type="text"
+          inputMode="numeric"
+          aria-label={`${label} whole inches`}
+          value={whole == null ? '' : String(whole)}
+          onChange={e => {
+            const digits = e.target.value.replace(/[^0-9]/g, '').slice(0, 2)
+            onChange(fromEighths(digits === '' ? null : Number(digits), eighths))
+          }}
+          placeholder="0"
+          className="h-9 w-14 shrink-0 text-center text-sm font-mono"
+        />
+        <span className="shrink-0 text-[11px] text-muted-foreground">in</span>
+        <Select
+          value={String(eighths)}
+          onValueChange={v => onChange(fromEighths(whole, Number(v)))}
+        >
+          <SelectTrigger className="h-9 min-w-0 flex-1 text-sm font-mono" aria-label={`${label} eighths`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EIGHTHS_OPTIONS.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   )
 }
