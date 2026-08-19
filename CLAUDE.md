@@ -1319,6 +1319,42 @@ nine front positions, all nine back positions staying `back`, irregular →
 `__tests__/scoring/official-image-angle.test.ts`; new
 `supabase/migrations/20260819000000_official_image_context.sql`.
 
+### 3.57. Official score sheet column backfill + import UX ✓
+The §3.56 RLS fix worked — the import reached the insert and returned a
+*specific* error: *"Could not find the 'buck_name' column of
+'official_score_sheets' in the schema cache"*. The table exists but was
+created outside version control with a **minimal schema**, so the code and
+the database had drifted; `buck_name` was simply the first column PostgREST
+tripped on and the rest would have failed in turn. Same class of gap as §3.50
+(`profiles` missing entirely).
+New `supabase/migrations/20260820000000_official_score_sheet_columns.sql`
+adds every column the app touches, all `ADD COLUMN IF NOT EXISTS` so it is a
+no-op against whatever already exists. On `official_score_sheets`: `user_id`,
+`buck_name`, `year_taken`, `state`, `county`, `hunter_name`, `created_at`,
+`is_benchmark`, `benchmark_pack_id`, `promoted_by`, `promoted_at`,
+`ai_run_result`, `ai_run_per_angle`. On `official_score_images`: `sheet_id`
+(FK ON DELETE CASCADE), `image_url`, `image_type`, `image_context`,
+`uploaded_at`, plus a `sheet_id` index. `is_benchmark` is deliberately
+`NOT NULL DEFAULT FALSE` — both list queries filter `.eq('is_benchmark',
+false/true)`, so a nullable column would make freshly imported sheets
+invisible in the pending list. No RLS policies added: §3.56 moved all writes
+to the service role and the reads are server components using the service
+client, so policies here would be speculative.
+Two UX fixes in `components/admin/training-import-form.tsx`:
+(a) **Photo delete was invisible, not missing.** `removeFile(idx)` and its X
+button already existed, but the button was styled `opacity-0
+group-hover:opacity-100` — a phone has no hover, so the control could never
+appear. Now always visible with a 28px touch target and an `aria-label`.
+(b) **"European Mount" added to `IMAGE_CONTEXTS`.** A European (skull) mount
+is a materially different presentation from a shoulder mount — no cape, no
+ears — which matters because the anatomical fallback tiers (§8 tiers 6–8)
+lean on eye/ear/pedicle references a European mount does not provide, so
+being able to separate it in the per-angle report is real signal. No mapping
+change needed: `officialImageTypeToAngle()` reads only `image_type`.
+tsc clean, lint 0 errors, build succeeds, full suite 196/196. Files: new
+`supabase/migrations/20260820000000_official_score_sheet_columns.sql`;
+modified `components/admin/training-import-form.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

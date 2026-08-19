@@ -73,6 +73,7 @@ const IMAGE_CONTEXTS = [
   { value: 'live',      label: 'Live Buck' },
   { value: 'harvest',   label: 'Harvest' },
   { value: 'trail_cam', label: 'Trail Cam' },
+  { value: 'european',  label: 'European Mount' },
   { value: 'other',     label: 'Other' },
 ]
 
@@ -584,7 +585,8 @@ export function TrainingImportForm() {
                   <button
                     type="button"
                     onClick={() => removeFile(idx)}
-                    className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="Remove photo"
+                    className="absolute top-1 right-1 grid h-7 w-7 place-items-center rounded-full bg-black/70 text-white transition-colors hover:bg-black/90"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
