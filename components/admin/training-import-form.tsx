@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { toast } from 'sonner'
+import { preprocessImage } from '@/lib/scoring/image-preprocessor'
 import { Loader2, Upload, X, CheckCircle2 } from 'lucide-react'
 
 // ── Field schemas ─────────────────────────────────────────────────────────────
@@ -220,7 +221,7 @@ function MeasInput({
   return (
     <div className="space-y-0.5">
       <Label className="text-[11px] text-muted-foreground">{label}</Label>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1">
         <Input
           type="text"
           inputMode="numeric"
@@ -231,14 +232,16 @@ function MeasInput({
             onChange(fromEighths(digits === '' ? null : Number(digits), eighths))
           }}
           placeholder="0"
-          className="h-9 w-14 shrink-0 text-center text-sm font-mono"
+          className="h-9 w-11 shrink-0 px-1 text-center text-sm font-mono"
         />
-        <span className="shrink-0 text-[11px] text-muted-foreground">in</span>
         <Select
           value={String(eighths)}
           onValueChange={v => onChange(fromEighths(whole, Number(v)))}
         >
-          <SelectTrigger className="h-9 min-w-0 flex-1 text-sm font-mono" aria-label={`${label} eighths`}>
+          <SelectTrigger
+            className="h-9 min-w-0 flex-1 px-2 text-sm font-mono [&>svg]:ml-0.5 [&>svg]:shrink-0"
+            aria-label={`${label} eighths`}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -375,10 +378,26 @@ export function TrainingImportForm() {
       if (state) formData.append('state', state)
       if (county) formData.append('county', county)
       if (hunterName) formData.append('hunter_name', hunterName)
-      files.forEach((f, idx) => {
-        formData.append(`file_${idx}`, f.file)
+      // Downscale before upload. Nine full-resolution phone photos are tens of
+      // megabytes and exceed the serverless request body limit, which is what
+      // made "Import Score Sheet" fail. Matching the scoring wizard's
+      // 1200px/0.7 settings also keeps the benchmark honest: these images are
+      // scored by the per-angle run, so they should be the same quality the
+      // production pipeline actually sees rather than something sharper.
+      for (let idx = 0; idx < files.length; idx++) {
+        const f = files[idx]
+        let upload: Blob = f.file
+        try {
+          const processed = await preprocessImage(f.file, { maxDimension: 1200, quality: 0.7 })
+          const res = await fetch(processed.dataUrl)
+          upload = await res.blob()
+        } catch (err) {
+          // Fall back to the original; the request may still be under the cap.
+          console.warn(`[training-import] preprocess failed for image ${idx}:`, err)
+        }
+        formData.append(`file_${idx}`, upload, f.file.name)
         formData.append(`file_${idx}_type`, f.type || '')
-      })
+      }
 
       const res = await fetch('/api/admin/training-import', { method: 'POST', body: formData })
       if (!res.ok) {
@@ -429,7 +448,7 @@ export function TrainingImportForm() {
       {/* ── 1. Buck Info ── */}
       <section className="space-y-4">
         <h3 className="text-sm font-semibold">Buck Info</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
           <div className="space-y-1.5">
             <Label htmlFor="system">Scoring System</Label>
             <Select value={system} onValueChange={setSystem}>
@@ -471,7 +490,7 @@ export function TrainingImportForm() {
         <h3 className="text-sm font-semibold">Official Measurements (inches)</h3>
 
         {/* Spread + abnormal */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
           <MeasInput
             label="Inside Spread"
             value={measurements.inside_spread}
@@ -485,7 +504,7 @@ export function TrainingImportForm() {
         </div>
 
         {/* Left / Right side columns */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-2 gap-2 sm:gap-6 [&>*]:min-w-0">
           <SidePanel side="left" vals={measurements.left} onChange={(f, v) => updateSide('left', f, v)} />
           <SidePanel side="right" vals={measurements.right} onChange={(f, v) => updateSide('right', f, v)} />
         </div>
@@ -533,7 +552,7 @@ export function TrainingImportForm() {
         </div>
 
         {files.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 [&>*]:min-w-0">
             {files.map((f, idx) => (
               <Card key={idx} className="overflow-hidden">
                 <div className="aspect-square bg-muted relative group">

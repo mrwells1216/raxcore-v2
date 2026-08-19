@@ -33,7 +33,7 @@ export default async function AdminTrainingImportPage() {
     .limit(10)
 
   return (
-    <div className="p-4 lg:p-6 space-y-8 max-w-5xl">
+    <div className="w-full max-w-5xl overflow-x-hidden p-4 lg:p-6 space-y-8">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold">Import Training Data</h1>
         <p className="text-muted-foreground">

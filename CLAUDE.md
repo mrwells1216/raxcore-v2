@@ -1244,6 +1244,36 @@ succeeds, full suite 193/193. Files: modified `lib/scoring/ai-service.ts`,
 `components/admin/training-import-form.tsx`, `lib/scoring/vision-scorer.ts`;
 new `__tests__/scoring/spread-credit.test.ts`.
 
+### 3.55. Guide-buck import: upload size, truncated eighths, overflow ✓
+Three field-reported defects from the first real attempt to import the guide
+buck.
+(a) **"Import Score Sheet" failed with 9 images.** The form appended the raw
+`File` objects straight to `FormData` — nine full-resolution phone photos are
+tens of megabytes and blow past the serverless request body limit (~4.5MB), so
+the request died before reaching any of the route's own error handling. Images
+are now downscaled client-side with the existing
+`preprocessImage()` (`lib/scoring/image-preprocessor.ts`) at the same
+`maxDimension: 1200, quality: 0.7` the scoring wizard uses, then appended as
+Blobs. A per-image preprocess failure falls back to the original rather than
+aborting the whole import. Matching the wizard's settings is not just a size
+workaround — the §3.49 per-angle run scores these images, and production user
+photos go through exactly this preprocessing, so uploading sharper originals
+would have measured the AI on inputs it never actually sees and inflated
+apparent accuracy.
+(b) **Eighths dropdown truncated to `6/`.** Inside the two-column antler grid
+the `SelectTrigger` was too narrow to render `6/8` plus its chevron. Dropped
+the redundant `in` suffix (the field label already says inches), narrowed the
+whole-inch box `w-14` → `w-11` with tighter padding, and stopped the chevron
+from stealing label width.
+(c) **Card ran off the right edge.** The antler panels used
+`grid grid-cols-2 gap-6` with no `min-w-0` on the children; grid items default
+to `min-width: auto`, so a child wider than its track pushes the whole row
+past the viewport. Added `[&>*]:min-w-0` to the grids, dropped the antler gap
+to `gap-2` below `sm`, and gave the page wrapper `w-full overflow-x-hidden`.
+tsc clean, lint 0 errors, build succeeds, full suite 193/193. Files: modified
+`components/admin/training-import-form.tsx`,
+`app/admin/training-import/page.tsx`.
+
 ---
 
 ## 4. What is NOT built yet
