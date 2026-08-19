@@ -133,7 +133,7 @@ Replaced 8-14pt chip grid with two `PointCountSlider` components (total 4-30; ma
 Merged the toggle-gated Precision Mode card (8 reference types: none/ruler/card/coin/aruco/other/ring/hat) with the old limited ring/hat-only Reference Object section into one always-visible "Reference Object" section. Removed the `precision_mode_enabled` toggle from the UI; `scoring-wizard.tsx` now sends reference fields whenever `reference_type !== 'none'` (passes `precision_mode_enabled: 'true'` to the API so the existing API contract is unchanged). Removed the Ears Visible toggle (landmark detection handles it automatically). Made Optional Details (method/year/notes) a collapsible section moved after Irregular Points. New section order: Rack Info → Image Context → Reference Object → Known Measurements → Irregular Points → Optional Details. Files: `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
 
 ### 3.15. Pre-AI manual measurements panel ✓
-Optional collapsible "Known Measurements" section in the scoring form lets users enter tape-measured B&C fields (main beams, G1–G4, H1–H4, inside spread) before submission. Non-null values are serialized to JSON in the wizard, parsed in route.ts, passed to `scoreBuck` → `VisionScoringInput`, and injected into the vision prompt as "USER-PROVIDED MEASUREMENTS (treat as ground truth) — DO NOT contradict them." Values are also stored in a new `user_measurements_metadata` JSONB column on `predictions`. Plausibility warnings shown inline; amber highlight on entered fields. Files: new `components/scoring/pre-scoring-measurements.tsx`, new `supabase/migrations/20260518_user_measurements_metadata.sql`; modified `lib/types.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/api/score/route.ts`, `lib/storage/service.ts`, `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
+Optional collapsible "Known Measurements" section in the scoring form lets users enter tape-measured B&C fields (main beams, G1–G4, H1–H4, inside spread) before submission. Non-null values are serialized to JSON in the wizard, parsed in route.ts, passed to `scoreBuck` → `VisionScoringInput`, and injected into the vision prompt as "USER-PROVIDED MEASUREMENTS (treat as ground truth) — DO NOT contradict them." Values are also stored in a new `user_measurements_metadata` JSONB column on `predictions`. Plausibility warnings shown inline; amber highlight on entered fields. Files: new `components/scoring/pre-scoring-measurements.tsx`, new `supabase/migrations/20260518000000_user_measurements_metadata.sql`; modified `lib/types.ts`, `lib/scoring/vision-scorer.ts`, `lib/scoring/ai-service.ts`, `app/api/score/route.ts`, `lib/storage/service.ts`, `components/scoring/scoring-form.tsx`, `components/scoring/scoring-wizard.tsx`.
 
 ### 3.17. Landmark dot position fix + trophy room overhaul + learning pipeline gaps ✓
 - **Landmark dot fix**: `LandmarkOverlay` now computes object-contain letterbox/pillarbox offsets so colored dots and connector lines land on the actual antler pixels regardless of container aspect ratio. `scoring-results.tsx` uses `ResizeObserver` to pass actual rendered container dimensions instead of original image pixel dimensions. Also fixes drag-to-correct coordinate math (subtract offset before dividing by scale). Files: `components/scoring/landmark-overlay.tsx`, `components/scoring/scoring-results.tsx`.
@@ -323,7 +323,7 @@ selection, out-of-band knownInches clamp, mixed-source demotion, ±25%
 outlier rejection across images, >12% disagreement warning, and NaN/Infinity
 input guards. Files: new `components/scoring/calibration-dots.tsx`, new
 `__tests__/scoring/pedicle-calibration.test.ts`, new migration
-`supabase/migrations/20260524_pedicle_calibration_metadata.sql`; modified
+`supabase/migrations/20260524000100_pedicle_calibration_metadata.sql`; modified
 `lib/scoring/calibration-resolver.ts`, `app/api/score/route.ts`,
 `components/scoring/scoring-wizard.tsx`, `lib/storage/service.ts`.
 
@@ -374,7 +374,7 @@ Rewrote `buildVisionPrompt` (`lib/scoring/vision-scorer.ts`) and the rack-admiss
 Four-part fix derived from the IMG_6534/IMG_6535 screenshots. (a) **Error-band invariant**: intersecting consensus and legacy error bands with `max(low)/min(high)` could produce a CI window that excluded `predicted_gross` (e.g. range 161–172 with gross 159.3). `ai-service.ts` now widens the intersected band when it excludes the point estimate, logs the disagreement, and surfaces it in the confidence explanations; `scoring-results.tsx` has a defense-in-depth clamp for pre-existing prediction rows; "Precision: -" is now "Precision: not run" so the missing pass is legible. (b) **Anatomical-prior calibration disagreement (141% spread)**: the `skull_width` spec in `per-image-consensus.ts` used the SAME `[pedicle_left, pedicle_right]` endpoint pair as `pedicle_spacing` but divided by a different inch constant — guaranteeing a ~37% mathematical disagreement; removed until a real orbital-ridge landmark pair exists. `EAR_BASE_SPACING` was 7.5" (too large vs published whitetail anatomy ~5.5"), corrected. `calibration-resolver.ts` kept its own local `ANATOMICAL_REFERENCES` table that drifted out of sync with `lib/constants.ts` (local `EYE_BOX_WIDTH=3.5` mislabeled as interocular vs canonical `EYE_TO_EYE=4.3`); now imports the canonical source. Resolver multi-estimate aggregation upgraded from "use highest confidence on >20% disagreement" to **median-based outlier rejection** (tolerates ±25% from median) with an agreement boost when survivors are tight. Each `REFERENCE_SPECS` entry now carries a `viewSensitivity: 'low' | 'medium' | 'high'` tier so future callers can pick the right priors for primary calibration vs cross-check duty (nose_bridge and ear_base_to_tip flagged 'high' — front-projected, need orthogonal views). (c) **Foreshortening correction**: `landmark-geometry.ts` now applies a `cos(θ)` recovery factor per measurement based on principal 3D axis (horizontal / parasagittal / vertical) vs viewing angle, clamped to 2.94× to avoid amplifying noise. Confidence drops as `cos²(θ)` so the correction is honest about its 3D-pose assumption. Only fires when both endpoints share a `sourceAngle`. (d) **Landmark prompt rewrite**: `buildLandmarkDetectionPrompt` (was unused) is now wired into `detectLandmarksForOneImage`, enforces float pixel coordinates with one decimal place (no integer rounding), explicit "you do not estimate scores or inches" role, per-landmark placement rules (pedicle vs burr, tine-base vs visual-start, skull-fixed ear bases), and a 4-step self-check before returning (pedicle symmetry, burr proximity, base/tip ordering, not-a-target guard). Files: modified `lib/scoring/ai-service.ts`, `lib/scoring/per-image-consensus.ts`, `lib/scoring/calibration-resolver.ts`, `lib/scoring/landmark-geometry.ts`, `lib/scoring/landmark-prompt.ts`, `lib/scoring/vision-scorer.ts`, `lib/constants.ts`, `components/scoring/scoring-results.tsx`.
 
 ### 3.18. Per-image anatomical reference capture + angle-distortion compensation ✓
-Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle, skull width, ear-base spacing, ear-base-to-tip) is now captured **per image** instead of once across the whole submission. The GPT-4o landmark detector runs once per image in parallel via new `detectLandmarkPositionsPerImage`; each call only sees one image so the model cannot mix up which image a coordinate came from. Per-image observations are fused with **median + MAD outlier rejection** (estimates >2.5× MAD from median are dropped with `excludedReason`) and per-reference agreement spread is computed across surviving images. Side-angle photos automatically take a +0.18 distortion bump for references that are only reliable head-on (eye box, pedicle spacing, skull width, nose bridge, ear-base spacing). Ear handling: new `ear_base_*` and `ear_tip_*` landmark IDs let `detectEarPosition()` flag perked/sideways ear poses and exclude `ear_base_to_tip` from the consensus for those images — ear-base spacing (skull-fixed) stays as a reference. Per-image landmarks are persisted into the existing `BuckImage.landmarks_detected` field (was null until now); aggregated `per_image_consensus` blob is cached on `predictions` via a new JSONB column for fast UI reads. The carousel now drives a `currentImageIndex` so `LandmarkOverlay` renders only that image's dots, and a new collapsible "Per-image anatomical references" card surfaces per-reference per-image breakdown with outlier badges and ear-pose warnings. Learning win: correction events now carry `source_image_index` + `sourceAngle` for free, so future bias-correction analytics can learn angle-specific biases ("AI overestimates eye box on left profiles"). Cost: ~$0.05/run vs $0.03 today (N parallel calls, modest prompt overhead duplication). Verified Score gates unchanged. Files: new `lib/scoring/ear-position.ts`, `lib/scoring/per-image-consensus.ts`, `components/scoring/per-image-consensus-card.tsx`, `supabase/migrations/20260520_per_image_consensus.sql`; modified `lib/scoring/landmark-detection.ts` (added ear landmark IDs + `PerImageLandmarkResult` type), `lib/scoring/vision-scorer.ts` (added `detectLandmarkPositionsPerImage`, legacy `detectLandmarkPositions` now a back-compat wrapper), `lib/types.ts` (added `PerImageReferenceObservation`, `PerReferenceFusion`, `PerImageConsensusResult`, `Prediction.per_image_consensus`), `lib/storage/service.ts` (added `updateBuckImageLandmarks`, `updatePredictionPerImageConsensus`, threaded `perImageConsensus` through `CreatePredictionParams`), `app/api/score/route.ts` (calls per-image detector, persists per-image data, exposes `perImageConsensus` and `landmarkDetections.perImage` in response), `components/scoring/scoring-results.tsx` (carousel index threading, per-image landmark overlay slicing), `components/scoring/antler-image-carousel.tsx` (new `onImageChange` callback).
+Each anatomical reference (nose bridge, eye box, pedicle spacing, eye-to-pedicle, skull width, ear-base spacing, ear-base-to-tip) is now captured **per image** instead of once across the whole submission. The GPT-4o landmark detector runs once per image in parallel via new `detectLandmarkPositionsPerImage`; each call only sees one image so the model cannot mix up which image a coordinate came from. Per-image observations are fused with **median + MAD outlier rejection** (estimates >2.5× MAD from median are dropped with `excludedReason`) and per-reference agreement spread is computed across surviving images. Side-angle photos automatically take a +0.18 distortion bump for references that are only reliable head-on (eye box, pedicle spacing, skull width, nose bridge, ear-base spacing). Ear handling: new `ear_base_*` and `ear_tip_*` landmark IDs let `detectEarPosition()` flag perked/sideways ear poses and exclude `ear_base_to_tip` from the consensus for those images — ear-base spacing (skull-fixed) stays as a reference. Per-image landmarks are persisted into the existing `BuckImage.landmarks_detected` field (was null until now); aggregated `per_image_consensus` blob is cached on `predictions` via a new JSONB column for fast UI reads. The carousel now drives a `currentImageIndex` so `LandmarkOverlay` renders only that image's dots, and a new collapsible "Per-image anatomical references" card surfaces per-reference per-image breakdown with outlier badges and ear-pose warnings. Learning win: correction events now carry `source_image_index` + `sourceAngle` for free, so future bias-correction analytics can learn angle-specific biases ("AI overestimates eye box on left profiles"). Cost: ~$0.05/run vs $0.03 today (N parallel calls, modest prompt overhead duplication). Verified Score gates unchanged. Files: new `lib/scoring/ear-position.ts`, `lib/scoring/per-image-consensus.ts`, `components/scoring/per-image-consensus-card.tsx`, `supabase/migrations/20260520000000_per_image_consensus.sql`; modified `lib/scoring/landmark-detection.ts` (added ear landmark IDs + `PerImageLandmarkResult` type), `lib/scoring/vision-scorer.ts` (added `detectLandmarkPositionsPerImage`, legacy `detectLandmarkPositions` now a back-compat wrapper), `lib/types.ts` (added `PerImageReferenceObservation`, `PerReferenceFusion`, `PerImageConsensusResult`, `Prediction.per_image_consensus`), `lib/storage/service.ts` (added `updateBuckImageLandmarks`, `updatePredictionPerImageConsensus`, threaded `perImageConsensus` through `CreatePredictionParams`), `app/api/score/route.ts` (calls per-image detector, persists per-image data, exposes `perImageConsensus` and `landmarkDetections.perImage` in response), `components/scoring/scoring-results.tsx` (carousel index threading, per-image landmark overlay slicing), `components/scoring/antler-image-carousel.tsx` (new `onImageChange` callback).
 
 ### 3.30. Classroom (RAXam / RAXrs) + global calibration + precision-pass fix ✓
 New public `/classroom` tab — a lab for testing and calibrating the scorer —
@@ -416,7 +416,7 @@ precision pass spinning forever).
 Verified Score gates unchanged (calibration/experiment overrides never unlock it).
 Files: new `lib/calibration-constants.ts`, `lib/scoring/experiment-config.ts`,
 `app/classroom/page.tsx`, `components/classroom/{features-panel,raxam-flow,raxrs-flow,classroom-results}.tsx`,
-`app/api/classroom/{recent,rescore}/route.ts`, `supabase/migrations/20260524_classroom_predictions.sql`,
+`app/api/classroom/{recent,rescore}/route.ts`, `supabase/migrations/20260524000000_classroom_predictions.sql`,
 `__tests__/scoring/classroom-experiment.test.ts`; modified `lib/calibration.ts`,
 `app/api/score/route.ts`, `lib/scoring/ai-service.ts`, `lib/scoring/vision-scorer.ts`,
 `lib/storage/service.ts`, `lib/types.ts`, `lib/training/correction-events.ts`,
@@ -658,9 +658,9 @@ split the insert into a `corePayload` (base-schema columns) + `optionalPayload`
 cache'`), warn and retry with core columns only so an already-successful
 scoring run still persists instead of 503-ing. The optional feature fields
 silently won't store until the pending migrations are applied — apply
-`20260517_crop_box_metadata`, `20260518_user_measurements_metadata`,
-`20260520_per_image_consensus`, `20260524_classroom_predictions`,
-`20260524_pedicle_calibration_metadata` to fully restore them. The three
+`20260517000000_crop_box_metadata`, `20260518000000_user_measurements_metadata`,
+`20260520000000_per_image_consensus`, `20260524000000_classroom_predictions`,
+`20260524000100_pedicle_calibration_metadata` to fully restore them. The three
 sibling update writers (`updatePredictionPerImageConsensus`,
 `updatePredictionPedicleCalibration`, `updateBuckImageLandmarks`) were already
 non-blocking and needed no change. tsc clean, build succeeds. File: modified
@@ -1078,7 +1078,7 @@ production union). tsc clean, lint 0 errors, build succeeds, full suite
 169/169. Files: new
 `app/api/admin/training-import/[id]/run-ai-per-angle/route.ts`, new
 `components/admin/per-angle-accuracy.tsx`, new
-`supabase/migrations/20260817_ai_run_per_angle.sql`, new
+`supabase/migrations/20260817000000_ai_run_per_angle.sql`, new
 `__tests__/scoring/official-image-angle.test.ts`; modified
 `lib/training/official-measurements.ts`, `lib/scoring/vision-scorer.ts`,
 `app/api/admin/training-import/[id]/run-ai/route.ts`,
@@ -1098,7 +1098,7 @@ real cause. It presented as a permissions problem, not a missing table.
 Nothing in `supabase/migrations/` created it (the base schema was built
 outside version control), so a fresh environment or restored project would hit
 the identical wall.
-New `supabase/migrations/20260818_profiles_table.sql` records the schema:
+New `supabase/migrations/20260818000000_profiles_table.sql` records the schema:
 columns matching the `Profile` interface in `lib/types.ts` (`id` UUID PK FK to
 `auth.users` ON DELETE CASCADE, `display_name`, `is_admin` NOT NULL DEFAULT
 FALSE, `created_at`, `updated_at`) **plus `role`**, which
@@ -1115,7 +1115,7 @@ Every statement is guarded (`IF NOT EXISTS` / `DROP ... IF EXISTS` /
 `CREATE OR REPLACE`), so it is a clean no-op against the operator's database
 where the table was already created by hand. SQL only — no application code
 changed. tsc clean, build succeeds, full suite 169/169. File: new
-`supabase/migrations/20260818_profiles_table.sql`.
+`supabase/migrations/20260818000000_profiles_table.sql`.
 
 ### 3.51. Official score sheet accepts eighths-of-an-inch ✓
 Caught while preparing the guide-buck import — i.e. while preparing to enter
@@ -1182,6 +1182,29 @@ legacy-decimal snapping, out-of-range clamping, and a finite guard. tsc
 clean, lint 0 errors, build succeeds, full suite 185/185. File: modified
 `components/admin/training-import-form.tsx`,
 `__tests__/scoring/parse-inch.test.ts`.
+
+### 3.53. Migration filenames: unique 14-digit versions ✓
+Applying migrations failed with
+`duplicate key value violates unique constraint "schema_migrations_pkey",
+Key (version)=(20260524) already exists`. Supabase derives a migration's
+version from the **numeric prefix of the filename**, and this repo used an
+8-digit `YYYYMMDD` prefix — so `20260524_classroom_predictions.sql` and
+`20260524_pedicle_calibration_metadata.sql` both resolved to version
+`20260524` and the second insert collided. Any two migrations authored on the
+same day would have done the same; it only surfaced now because nobody had run
+the migration set end-to-end against a database.
+All eight files renamed via `git mv` to the standard `YYYYMMDDHHMMSS` form,
+preserving chronological order and giving the same-day pair distinct versions
+(`20260524000000` / `20260524000100`). Contents are byte-identical — only the
+filenames changed. Re-applying is safe because every migration is guarded
+(`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`,
+`CREATE OR REPLACE`, `DROP ... IF EXISTS`), so a database that already ran the
+old versions simply no-ops on the new ones; the orphaned `20260524` row left
+in `supabase_migrations.schema_migrations` is harmless.
+CLAUDE.md file references in §3.15, §3.18, §3.24, §3.30, §3.38, §3.49 and
+§3.50 updated to the new names so the documented paths still resolve. tsc
+clean, build succeeds, full suite 185/185. Files: renamed all of
+`supabase/migrations/*.sql`.
 
 ---
 
