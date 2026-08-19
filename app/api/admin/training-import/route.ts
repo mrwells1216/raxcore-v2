@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { getServiceSupabase } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
@@ -61,8 +62,15 @@ export async function POST(request: NextRequest) {
     const hunterName = formData.get('hunter_name') as string | null;
     const yearTaken = yearTakenRaw ? parseInt(yearTakenRaw, 10) : null;
 
+    // Every write below uses the service role. The admin check above has
+    // already authorized the caller; the user-scoped client is subject to RLS
+    // on these tables and was silently rejected, which is what surfaced as a
+    // generic "Failed to create score sheet". Sibling admin routes
+    // ([id]/run-ai, [id]/promote) already do this — this route was the outlier.
+    const adminDb = await getServiceSupabase();
+
     // Insert official score sheet
-    const { data: sheet, error: sheetError } = await supabase
+    const { data: sheet, error: sheetError } = await adminDb
       .from('official_score_sheets')
       .insert({
         user_id: user.id,
@@ -79,8 +87,16 @@ export async function POST(request: NextRequest) {
 
     if (sheetError || !sheet) {
       console.error('Sheet insert error:', sheetError);
+      // Surface the real cause — a generic message here cost two rounds of
+      // guessing before the RLS rejection was identified.
       return NextResponse.json(
-        { message: 'Failed to create score sheet' },
+        {
+          message: sheetError?.message
+            ? `Failed to create score sheet: ${sheetError.message}`
+            : 'Failed to create score sheet',
+          detail: sheetError?.details ?? null,
+          hint: sheetError?.hint ?? null,
+        },
         { status: 500 }
       );
     }
@@ -89,6 +105,9 @@ export async function POST(request: NextRequest) {
 
     // Process uploaded images
     let imageCount = 0;
+    // Collected so a partial failure is reported rather than silently dropping
+    // images and reporting success.
+    const imageErrors: string[] = [];
     for (let i = 0; i < 100; i++) {
       const file = formData.get(`file_${i}`) as File | null;
       if (!file) break;
@@ -102,7 +121,7 @@ export async function POST(request: NextRequest) {
         const fileName = `training-sheets/${sheetId}/${timestamp}_${i}.${fileExt}`;
 
         // Upload to Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { data: uploadData, error: uploadError } = await adminDb.storage
           .from('training-images')
           .upload(fileName, file, {
             contentType: file.type,
@@ -111,27 +130,31 @@ export async function POST(request: NextRequest) {
 
         if (uploadError) {
           console.error(`Image upload error for file ${i}:`, uploadError);
+          imageErrors.push(`image ${i + 1}: ${uploadError.message}`);
           continue;
         }
 
         // Get public URL
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = adminDb.storage
           .from('training-images')
           .getPublicUrl(fileName);
 
         const imageUrl = urlData.publicUrl;
 
         // Insert image record
-        const { error: imageError } = await supabase
+        const imageContext = formData.get(`file_${i}_context`) as string || '';
+        const { error: imageError } = await adminDb
           .from('official_score_images')
           .insert({
             sheet_id: sheetId,
             image_url: imageUrl,
-            image_type: imageType
+            image_type: imageType,
+            ...(imageContext ? { image_context: imageContext } : {}),
           });
 
         if (imageError) {
           console.error(`Image record error for file ${i}:`, imageError);
+          imageErrors.push(`image ${i + 1}: ${imageError.message}`);
           continue;
         }
 
@@ -146,7 +169,8 @@ export async function POST(request: NextRequest) {
       {
         message: 'Training data imported successfully',
         sheet_id: sheetId,
-        images_uploaded: imageCount
+        images_uploaded: imageCount,
+        image_errors: imageErrors.length > 0 ? imageErrors : undefined,
       },
       { status: 200 }
     );

@@ -50,12 +50,47 @@ describe('officialImageTypeToAngle', () => {
     expect(officialImageTypeToAngle('   ')).toBe('other')
   })
 
+  it('maps every front camera position to a side or front', () => {
+    expect(officialImageTypeToAngle('front_center')).toBe('front')
+    expect(officialImageTypeToAngle('front_top_center')).toBe('front')
+    expect(officialImageTypeToAngle('front_bottom_center')).toBe('front')
+    expect(officialImageTypeToAngle('front_center_left')).toBe('left')
+    expect(officialImageTypeToAngle('front_top_left')).toBe('left')
+    expect(officialImageTypeToAngle('front_bottom_left')).toBe('left')
+    expect(officialImageTypeToAngle('front_center_right')).toBe('right')
+    expect(officialImageTypeToAngle('front_top_right')).toBe('right')
+    expect(officialImageTypeToAngle('front_bottom_right')).toBe('right')
+  })
+
+  it('maps every back camera position to back, including the left/right ones', () => {
+    // back_center_left contains "left" but is a rear aspect — the same trap
+    // that rear_left_135 set.
+    for (const t of [
+      'back_center', 'back_center_left', 'back_center_right',
+      'back_top_center', 'back_top_left', 'back_top_right',
+      'back_bottom_center', 'back_bottom_left', 'back_bottom_right',
+    ]) {
+      expect(officialImageTypeToAngle(t)).toBe('back')
+    }
+  })
+
+  it('treats an irregular-point close-up as carrying no angle', () => {
+    expect(officialImageTypeToAngle('irregular_points')).toBe('other')
+  })
+
   it('never returns a value outside the production AngleType union', () => {
     const allowed = new Set(['front', 'left', 'right', 'back', 'other'])
     for (const t of [
       'front', 'front_left_45', 'side_left', 'rear_left_135', 'rear',
       'rear_right_135', 'side_right', 'front_right_45', 'elevated',
       'angled', 'live', 'mounted', 'harvest', 'trail_cam', 'nonsense',
+      'front_center', 'front_center_left', 'front_center_right',
+      'front_top_center', 'front_top_left', 'front_top_right',
+      'front_bottom_center', 'front_bottom_left', 'front_bottom_right',
+      'back_center', 'back_center_left', 'back_center_right',
+      'back_top_center', 'back_top_left', 'back_top_right',
+      'back_bottom_center', 'back_bottom_left', 'back_bottom_right',
+      'irregular_points',
     ]) {
       expect(allowed.has(officialImageTypeToAngle(t))).toBe(true)
     }

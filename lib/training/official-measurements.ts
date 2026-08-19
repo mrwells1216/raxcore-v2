@@ -78,15 +78,26 @@ export function officialGrossFromScoreData(scoreData: unknown): number | null {
 export function officialImageTypeToAngle(
   imageType: string | null | undefined,
 ): 'front' | 'left' | 'right' | 'back' | 'other' {
-  const t = (imageType ?? '').toLowerCase()
+  const t = (imageType ?? '').trim().toLowerCase()
   if (!t) return 'other'
 
-  // Rear views before the left/right check: 'rear_left_135' is predominantly a
-  // rear aspect, and the scorer has no oblique bucket to put it in.
-  if (t === 'rear' || t.startsWith('rear')) return 'back'
+  // Rear tags first. `back_center_left` and the legacy `rear_left_135` both
+  // contain "left" but are rear aspects — a naive includes() check would call
+  // them left profiles.
+  if (t === 'rear' || t.startsWith('rear') || t === 'back' || t.startsWith('back')) return 'back'
+
+  // Irregular-point close-ups and unspecified positions carry no usable angle.
+  if (t === 'irregular_points' || t === 'elevated' || t === 'angled') return 'other'
+
+  // Context tags describe the situation, not the camera. They are their own
+  // field now, but older rows stored them here.
+  if (t === 'live' || t === 'mounted' || t === 'harvest' || t === 'trail_cam') return 'other'
+
   if (t.includes('left')) return 'left'
   if (t.includes('right')) return 'right'
-  if (t === 'front') return 'front'
-  // 'elevated', 'angled', and the context tags carry no usable angle.
+
+  // front, front_center, front_top_center, front_bottom_center
+  if (t === 'front' || t.startsWith('front')) return 'front'
+
   return 'other'
 }

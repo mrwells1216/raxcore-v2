@@ -1274,6 +1274,51 @@ tsc clean, lint 0 errors, build succeeds, full suite 193/193. Files: modified
 `components/admin/training-import-form.tsx`,
 `app/admin/training-import/page.tsx`.
 
+### 3.56. Import RLS fix + camera-position / photo-context split ✓
+The §3.55 size fix got the request to the API, which then returned a bare
+**"Failed to create score sheet"**. Four fixes, all in the import path.
+(a) **The blocker was RLS.** `app/api/admin/training-import/route.ts` used the
+user-scoped `createClient()` for the `official_score_sheets` insert, the
+storage upload, AND the `official_score_images` inserts. Those run under RLS
+as the signed-in user, and the table was created outside version control with
+no INSERT policy, so the insert was rejected. The route had *already* verified
+`profile.is_admin` at that point, and sibling admin routes (`[id]/run-ai`,
+`[id]/promote`) already use `getServiceSupabase()` — this route was the
+outlier. All writes now use the service role after the admin check. The
+response also carries the real Postgres message/detail/hint instead of the
+generic string; a bare "Failed to create score sheet" is what made this take
+two rounds to diagnose. Per-image upload/insert failures are now collected
+into an `image_errors[]` field rather than silently skipped while still
+reporting success.
+(b) **Page title behind the top bar.** `AdminSidebar` renders a mobile header
+as `lg:hidden fixed top-0 h-14 z-50`, but `app/admin/layout.tsx`'s `<main>`
+had no top offset, so the first element of EVERY admin page sat under it.
+Added `pt-14 lg:pt-0` — one fix for the whole admin surface.
+(c) **New angle taxonomy.** `IMAGE_TYPES` is now a 3×3 camera grid per
+hemisphere — `front_center`, `front_center_left`, `front_top_center`, … and
+the matching `back_*` nine — plus `irregular_points`, with `SelectSeparator`
+between the three groups. `officialImageTypeToAngle()` checks the back prefix
+BEFORE the left/right test, since `back_center_left` contains "left" but is a
+rear aspect (the same trap §3.49 fixed for `rear_left_135`), and every legacy
+value still maps as before so stored rows keep resolving.
+(d) **Context is its own dropdown.** `mounted` / `live` / `harvest` /
+`trail_cam` describe the situation, not the camera, and mixing both axes in
+one control is what prompted this. Each image card now has a second
+`IMAGE_CONTEXTS` dropdown, stored in a new nullable `image_context` column
+(migration `20260819000000_official_image_context.sql`). Per-image rather than
+per-sheet: one buck can legitimately have trail-cam photos of the live deer
+and mounted photos after harvest, and it lets the per-angle report later
+separate "trail cam scores worse than mounted", which is real signal.
+Tests: 3 new specs in `__tests__/scoring/official-image-angle.test.ts` (all
+nine front positions, all nine back positions staying `back`, irregular →
+`other`) plus the union guard extended to all 19 new values. tsc clean, lint
+0 errors, build succeeds, full suite 196/196. Files: modified
+`app/api/admin/training-import/route.ts`, `app/admin/layout.tsx`,
+`components/admin/training-import-form.tsx`,
+`lib/training/official-measurements.ts`,
+`__tests__/scoring/official-image-angle.test.ts`; new
+`supabase/migrations/20260819000000_official_image_context.sql`.
+
 ---
 
 ## 4. What is NOT built yet

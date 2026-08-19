@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { preprocessImage } from '@/lib/scoring/image-preprocessor'
@@ -39,26 +39,41 @@ const SCORING_SYSTEMS = [
   { value: 'PY_NONTYPICAL',  label: 'P&Y Non-Typical' },
 ]
 
-// Angle positions first, then context types. The angle values are what the
-// per-angle accuracy run buckets by, so a guide buck shot from 9 positions
-// stays distinguishable — 'angled' is a catch-all that tells us nothing about
-// WHICH angle, which is the whole point of the exercise.
-// Additive only: every pre-existing value is still present and valid.
+// Camera position, as a 3x3 grid on each hemisphere. These are what the
+// per-angle accuracy run buckets by, so every value has to describe WHERE the
+// camera was — situation ("mounted", "trail cam") is a separate axis and lives
+// in IMAGE_CONTEXTS below.
 const IMAGE_TYPES = [
-  { value: 'front',            label: 'Front (0°)' },
-  { value: 'front_left_45',    label: 'Front-Left (45°)' },
-  { value: 'side_left',        label: 'Left Side (90°)' },
-  { value: 'rear_left_135',    label: 'Rear-Left (135°)' },
-  { value: 'rear',             label: 'Rear (180°)' },
-  { value: 'rear_right_135',   label: 'Rear-Right (135°)' },
-  { value: 'side_right',       label: 'Right Side (90°)' },
-  { value: 'front_right_45',   label: 'Front-Right (45°)' },
-  { value: 'elevated',         label: 'Elevated / Top-Down' },
-  { value: 'angled',           label: 'Angled (unspecified)' },
-  { value: 'live',             label: 'Live Photo' },
-  { value: 'mounted',          label: 'Mounted' },
-  { value: 'harvest',          label: 'Harvest' },
-  { value: 'trail_cam',        label: 'Trail Cam' },
+  { value: 'front_center',        label: 'Front-Center' },
+  { value: 'front_center_left',   label: 'Front-Center-Left' },
+  { value: 'front_center_right',  label: 'Front-Center-Right' },
+  { value: 'front_top_center',    label: 'Front-Top-Center' },
+  { value: 'front_top_left',      label: 'Front-Top-Left' },
+  { value: 'front_top_right',     label: 'Front-Top-Right' },
+  { value: 'front_bottom_center', label: 'Front-Bottom-Center' },
+  { value: 'front_bottom_left',   label: 'Front-Bottom-Left' },
+  { value: 'front_bottom_right',  label: 'Front-Bottom-Right' },
+  { value: '__sep_back__',        label: '' },
+  { value: 'back_center',         label: 'Back-Center' },
+  { value: 'back_center_left',    label: 'Back-Center-Left' },
+  { value: 'back_center_right',   label: 'Back-Center-Right' },
+  { value: 'back_top_center',     label: 'Back-Top-Center' },
+  { value: 'back_top_left',       label: 'Back-Top-Left' },
+  { value: 'back_top_right',      label: 'Back-Top-Right' },
+  { value: 'back_bottom_center',  label: 'Back-Bottom-Center' },
+  { value: 'back_bottom_left',    label: 'Back-Bottom-Left' },
+  { value: 'back_bottom_right',   label: 'Back-Bottom-Right' },
+  { value: '__sep_irregular__',   label: '' },
+  { value: 'irregular_points',    label: 'Irregular Point/s' },
+]
+
+/** What the photo is OF, independent of camera position. */
+const IMAGE_CONTEXTS = [
+  { value: 'mounted',   label: 'Mounted' },
+  { value: 'live',      label: 'Live Buck' },
+  { value: 'harvest',   label: 'Harvest' },
+  { value: 'trail_cam', label: 'Trail Cam' },
+  { value: 'other',     label: 'Other' },
 ]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -72,7 +87,10 @@ interface SideVals {
 interface FilePreview {
   file: File
   preview: string
+  /** Camera position (IMAGE_TYPES). */
   type: string
+  /** What the photo is of (IMAGE_CONTEXTS) — independent of camera position. */
+  context: string
 }
 
 interface Measurements {
@@ -315,7 +333,7 @@ export function TrainingImportForm() {
     if (!selected) return
     const next: FilePreview[] = []
     for (let i = 0; i < selected.length; i++) {
-      next.push({ file: selected[i], preview: URL.createObjectURL(selected[i]), type: '' })
+      next.push({ file: selected[i], preview: URL.createObjectURL(selected[i]), type: '', context: '' })
     }
     setFiles(prev => [...prev, ...next])
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -332,6 +350,10 @@ export function TrainingImportForm() {
 
   const updateFileType = (idx: number, type: string) => {
     setFiles(prev => prev.map((f, i) => i === idx ? { ...f, type } : f))
+  }
+
+  const updateFileContext = (idx: number, context: string) => {
+    setFiles(prev => prev.map((f, i) => i === idx ? { ...f, context } : f))
   }
 
   function buildScoreData() {
@@ -397,6 +419,7 @@ export function TrainingImportForm() {
         }
         formData.append(`file_${idx}`, upload, f.file.name)
         formData.append(`file_${idx}_type`, f.type || '')
+        formData.append(`file_${idx}_context`, f.context || '')
       }
 
       const res = await fetch('/api/admin/training-import', { method: 'POST', body: formData })
@@ -566,14 +589,26 @@ export function TrainingImportForm() {
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <div className="p-1.5 border-t bg-background">
+                <div className="space-y-1 border-t bg-background p-1.5">
                   <Select value={f.type} onValueChange={type => updateFileType(idx, type)}>
                     <SelectTrigger className="h-7 text-xs">
-                      <SelectValue placeholder="Select angle" />
+                      <SelectValue placeholder="Camera angle" />
                     </SelectTrigger>
                     <SelectContent>
-                      {IMAGE_TYPES.map(t => (
-                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      {IMAGE_TYPES.map(t =>
+                        t.value.startsWith('__sep_')
+                          ? <SelectSeparator key={t.value} />
+                          : <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <Select value={f.context} onValueChange={c => updateFileContext(idx, c)}>
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue placeholder="Photo type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {IMAGE_CONTEXTS.map(c => (
+                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
