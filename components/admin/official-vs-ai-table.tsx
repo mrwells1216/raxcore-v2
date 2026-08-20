@@ -63,7 +63,7 @@ export function OfficialVsAiTable({
       )}
 
       {/* Per-field table */}
-      <div className="rounded-lg border border-border/40 overflow-hidden">
+      <div className="overflow-x-auto rounded-lg border border-border/40">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border/40 bg-secondary/20">
@@ -71,7 +71,7 @@ export function OfficialVsAiTable({
               <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Official</th>
               <th className="px-3 py-2 text-right font-semibold text-muted-foreground">AI</th>
               <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Delta</th>
-              <th className="px-3 py-2 text-right font-semibold text-muted-foreground">% Off</th>
+              <th className="hidden px-3 py-2 text-right font-semibold text-muted-foreground sm:table-cell">% Off</th>
             </tr>
           </thead>
           <tbody>
@@ -90,7 +90,7 @@ export function OfficialVsAiTable({
                 <td className={`px-3 py-1.5 text-right tabular-nums ${f.delta != null && Math.abs(f.delta) > 2 ? 'text-amber-500' : ''}`}>
                   {f.delta != null ? `${f.delta >= 0 ? '+' : ''}${f.delta.toFixed(3)}"` : '—'}
                 </td>
-                <td className={`px-3 py-1.5 text-right tabular-nums font-medium ${f.percent_off != null && Math.abs(f.percent_off) > 10 ? 'text-red-500' : f.percent_off != null && Math.abs(f.percent_off) > 5 ? 'text-amber-500' : ''}`}>
+                <td className={`hidden px-3 py-1.5 text-right tabular-nums font-medium sm:table-cell ${f.percent_off != null && Math.abs(f.percent_off) > 10 ? 'text-red-500' : f.percent_off != null && Math.abs(f.percent_off) > 5 ? 'text-amber-500' : ''}`}>
                   {f.percent_off != null ? `${f.percent_off >= 0 ? '+' : ''}${f.percent_off.toFixed(1)}%` : '—'}
                 </td>
               </tr>

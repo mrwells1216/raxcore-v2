@@ -153,7 +153,7 @@ function Total({
   return (
     <div className="min-w-0 rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={`truncate font-mono text-lg font-bold tabular-nums ${color}`}>
+      <div className={`font-mono text-base font-bold leading-tight break-words sm:text-lg ${color}`}>
         {formatInchesAsEighths(value)}
       </div>
       {hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}

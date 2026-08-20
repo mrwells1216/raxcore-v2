@@ -1446,6 +1446,43 @@ modified `app/api/admin/training-import/[id]/run-ai-per-angle/route.ts`,
 `lib/training/official-measurements.ts`,
 `__tests__/scoring/official-image-angle.test.ts`.
 
+### 3.60. Per-angle report: restore official gross, fix truncation/clipping ✓
+The guide-buck pipeline now runs end to end — ground truth stored in eighths,
+12/12 angles scored, AI values landing off the half-inch grid (the §3.58 1/16
+instruction took). Four presentation defects were hiding parts of the result.
+(a) **`official_gross` showed as "—".** When `buildPayload()` was rewritten in
+§3.59 to average repeated angles, `official_gross` / `official_net` were
+dropped from the returned object. The values were still computed and still fed
+the deltas — only the persisted payload lost them, so the panel had nothing to
+read. Threaded back in as builder parameters.
+(b) **Totals truncated** (`151 4/…`): eighths notation is wider than the
+decimals the `Total` box was sized for. Dropped `truncate`, allowed wrapping,
+stepped type down below `sm`.
+(c) **Angle names truncated** in the per-angle `Stat` boxes
+(`Front-Bottom-Left (Ri…`). Same fix — wrap rather than clip; these are 2-of-4
+boxes on a phone so there is vertical room but no horizontal room.
+(d) **"% Off" column was unreachable.** `official-vs-ai-table.tsx` renders
+five columns inside a wrapper with `overflow-hidden`, so the fifth was clipped
+at the viewport edge with no way to scroll to it. Wrapper is now
+`overflow-x-auto`, and the `% Off` column is `hidden sm:table-cell` — delta in
+inches is the number that matters for scoring, so the percentage is what
+should yield on a narrow screen.
+No computed value changed; this is presentation plus one dropped field.
+FIRST BASELINE (recorded, deliberately NOT acted on): AI gross read **+10.6"**
+high against a 151 4/8" official. Beams and spread overestimated ~3–3.8",
+tines underestimated ~1.4–1.6", circumferences close (+0.05–0.8"), and the
+1 5/8" abnormal point missed entirely. Per-angle spread ran **-8.4" to
++16.1"** — a 24.5" range, so viewing angle is currently a larger error source
+than any per-field bias. This is one buck; per §3.42 no global constant is
+derived from a single animal, and the bias corrector still requires ≥10
+observations and clamps ±3" so nothing here can move it. The next step is more
+sheets, not a correction factor. tsc clean, lint 0 errors, build succeeds,
+full suite 204/204. Files: modified
+`app/api/admin/training-import/[id]/run-ai-per-angle/route.ts`,
+`components/admin/official-score-sheet-view.tsx`,
+`components/admin/per-angle-accuracy.tsx`,
+`components/admin/official-vs-ai-table.tsx`.
+
 ---
 
 ## 4. What is NOT built yet

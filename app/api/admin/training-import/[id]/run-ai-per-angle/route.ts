@@ -174,14 +174,14 @@ export async function POST(
     try {
       await adminDb
         .from('official_score_sheets')
-        .update({ ai_run_per_angle: buildPayload(results, imageList.length, true) })
+        .update({ ai_run_per_angle: buildPayload(results, imageList.length, true, officialGross, officialNet) })
         .eq('id', id)
     } catch {
       // Best effort — the final write below is what matters.
     }
   }
 
-  const payload = buildPayload(results, imageList.length, false)
+  const payload = buildPayload(results, imageList.length, false, officialGross, officialNet)
 
   const { error: updateError } = await adminDb
     .from('official_score_sheets')
@@ -224,6 +224,8 @@ function buildPayload(
   results: PerAngleResult[],
   totalImages: number,
   partial: boolean,
+  officialGross: number | null,
+  officialNet: number | null,
 ) {
   const scored = results.filter(r => r.grossDelta != null)
 
@@ -256,6 +258,11 @@ function buildPayload(
     partial,
     image_count: totalImages,
     scored_count: scored.length,
+    // Kept in the payload so the panel can show what the deltas are measured
+    // against — dropped by accident when this builder was rewritten to
+    // average repeated angles, which is why it rendered as "—".
+    official_gross: officialGross,
+    official_net: officialNet,
     // Mean absolute gross error, one vote per ANGLE rather than per photo, so
     // an angle shot twice does not count double.
     mae_gross: ranked.length

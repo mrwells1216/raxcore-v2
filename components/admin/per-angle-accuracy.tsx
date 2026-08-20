@@ -189,7 +189,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border/40 bg-secondary/20 p-2">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="text-sm font-semibold tabular-nums truncate">{value}</div>
+      <div className="text-xs font-semibold leading-snug break-words tabular-nums sm:text-sm">{value}</div>
     </div>
   )
 }
