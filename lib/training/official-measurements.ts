@@ -101,3 +101,73 @@ export function officialImageTypeToAngle(
 
   return 'other'
 }
+
+/**
+ * Render a stored decimal measurement the way a scorer reads it: eighths.
+ * `15.25` → `15 2/8`. Null/blank → an em dash.
+ *
+ * Values are stored as decimals but entered and read in eighths, so the
+ * viewer should not make the operator convert in their head.
+ */
+export function formatInchesAsEighths(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  const sign = value < 0 ? '-' : ''
+  const abs = Math.abs(value)
+  let whole = Math.floor(abs)
+  let eighths = Math.round((abs - whole) * 8)
+  if (eighths >= 8) {
+    whole += 1
+    eighths = 0
+  }
+  if (eighths === 0) return `${sign}${whole}"`
+  return `${sign}${whole} ${eighths}/8"`
+}
+
+/** Human label for a camera-position tag. Shared so the import form and the
+ *  sheet viewer cannot drift apart. */
+export const IMAGE_TYPE_LABELS: Record<string, string> = {
+  front_center: 'Front-Center',
+  front_center_left: 'Front-Center-Left',
+  front_center_right: 'Front-Center-Right',
+  front_top_center: 'Front-Top-Center',
+  front_top_left: 'Front-Top-Left',
+  front_top_right: 'Front-Top-Right',
+  front_bottom_center: 'Front-Bottom-Center',
+  front_bottom_left: 'Front-Bottom-Left',
+  front_bottom_right: 'Front-Bottom-Right',
+  back_center: 'Back-Center',
+  back_center_left: 'Back-Center-Left',
+  back_center_right: 'Back-Center-Right',
+  back_top_center: 'Back-Top-Center',
+  back_top_left: 'Back-Top-Left',
+  back_top_right: 'Back-Top-Right',
+  back_bottom_center: 'Back-Bottom-Center',
+  back_bottom_left: 'Back-Bottom-Left',
+  back_bottom_right: 'Back-Bottom-Right',
+  irregular_points: 'Irregular Point/s',
+  // Legacy values from before the 3x3 grid.
+  front: 'Front',
+  side_left: 'Left Side',
+  side_right: 'Right Side',
+  angled: 'Angled',
+  rear: 'Rear',
+  elevated: 'Elevated',
+}
+
+/** Human label for a photo-context tag. */
+export const IMAGE_CONTEXT_LABELS: Record<string, string> = {
+  mounted: 'Mounted',
+  live: 'Live Buck',
+  harvest: 'Harvest',
+  trail_cam: 'Trail Cam',
+  european: 'European Mount',
+  other: 'Other',
+}
+
+/** Title-case fallback for any tag not in the maps above. */
+export function humanizeTag(tag: string | null | undefined): string {
+  if (!tag) return 'Untagged'
+  return IMAGE_TYPE_LABELS[tag]
+    ?? IMAGE_CONTEXT_LABELS[tag]
+    ?? tag.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}

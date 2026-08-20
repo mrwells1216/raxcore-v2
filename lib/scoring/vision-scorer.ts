@@ -481,7 +481,8 @@ ${angleDescriptions}
 - User says ears fully visible: ${input.earsFullyVisible ? 'yes' : 'unknown/no'}
 ${cropNote}${preMeasurementBlock}${precisionReferenceBlock}${ringReferenceBlock}${hatReferenceBlock}${preAiContextBlock}
 OUTPUT CONTRACT
-- All linear measurements in inches, float, one decimal place.
+- All linear measurements in inches, to the nearest 1/16 inch (0.0625). Report as a decimal with up to four places, e.g. 10.3125, 4.6875, 21.5.
+- Do NOT pre-round to halves or whole inches. B&C rounds to eighths downstream; rounding twice loses real precision. If your estimate is 10.3, report 10.3125, not 10.5.
 - confidence_percent honest, integer 10-95.
 - null (or 0 for required schema fields) for any field you cannot measure; do not invent.
 - quality_notes: short strings for every value you flag.

@@ -1355,6 +1355,57 @@ tsc clean, lint 0 errors, build succeeds, full suite 196/196. Files: new
 `supabase/migrations/20260820000000_official_score_sheet_columns.sql`;
 modified `components/admin/training-import-form.tsx`.
 
+### 3.58. Ground-truth truncation fix + score sheet view + 1/16" precision ✓
+The guide buck imported successfully (sheet created, 11 images tagged,
+AI-vs-official table rendering). Reviewing the result surfaced one critical
+data bug and three refinements.
+(a) **CRITICAL — stored ground truth was truncated to whole inches.**
+`buildScoreData()`'s `parseOrNull` was a bare `parseFloat`, NOT the
+`parseInch` added in §3.51. That fix corrected the *display* parser
+(`calcGross`/`calcDeductions`) and missed the *persistence* parser, so every
+eighth was stripped from the values actually written to `score_data`:
+`15 2/8` → `15`, `6 7/8` → `6`. The imported sheet stored
+`inside_spread: 15` alongside `calculated_gross: 151.5` — which was computed
+from 15.25, so the per-field values silently **contradicted the totals**. The
+AI-vs-official comparison was therefore scoring the model against numbers up
+to 7/8" wrong per field, making every delta in that table meaningless. Fixed
+to use `parseInch`; a blank field still persists `null` rather than 0.
+NOTE: no code can recover the lost eighths — the already-imported sheet must
+be re-entered.
+(b) **AI precision → nearest 1/16".** The prompt said *"one decimal place"*
+and the model was quantizing further still — every value in the comparison
+landed on `.000` or `.500`. Now asks for the nearest 1/16 (0.0625) with up to
+four decimals and explicitly says not to pre-round, since B&C rounds to
+eighths downstream and rounding twice loses real precision. This removes
+**quantization** error, not **estimation** error: the model's ability to read
+a photo is unchanged, but forcing halves discarded information from its own
+estimate (10.3 → 10.5 is 0.2 off; 10.3125 is 0.0125 off).
+(c) **Official Measurements is a real score sheet.** The detail page rendered
+`<pre>{JSON.stringify(score_data)}</pre>`. New
+`components/admin/official-score-sheet-view.tsx` lays it out like a B&C chart
+— a row per measurement with Left / Right / Difference, then Spread Credit
+(showing the §3.54 cap when it binds, with the raw spread struck through),
+Abnormal Points, and Gross / Deductions / Net totals. All values render in
+eighths via a new `formatInchesAsEighths()` in
+`lib/training/official-measurements.ts`, because making the operator convert
+decimals in their head is how a transcription error goes unnoticed.
+(d) **Buck gallery.** Raw `snake_case` tags (`front_bottom_cent…` truncated)
+replaced with humanized labels from shared `IMAGE_TYPE_LABELS` /
+`IMAGE_CONTEXT_LABELS` maps (shared so the form and viewer cannot drift), a
+secondary context badge per photo, and grouping by hemisphere
+(Front / Back / Other) with counts so a 9+ photo set reads as a set.
+Tests: 3 persistence-parity specs in `__tests__/scoring/parse-inch.test.ts`
+(eighths survive storage, blank stays null, and the stored fields sum to
+`calcGross` — the invariant that was violated) plus 3 precision specs in
+`__tests__/scoring/prompt-snapshots.test.ts`. tsc clean, lint 0 errors, build
+succeeds, full suite 202/202. Files: new
+`components/admin/official-score-sheet-view.tsx`; modified
+`components/admin/training-import-form.tsx`, `lib/scoring/vision-scorer.ts`,
+`lib/training/official-measurements.ts`,
+`app/admin/training-import/[id]/page.tsx`,
+`__tests__/scoring/parse-inch.test.ts`,
+`__tests__/scoring/prompt-snapshots.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

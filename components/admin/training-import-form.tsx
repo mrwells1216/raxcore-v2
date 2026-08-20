@@ -359,7 +359,17 @@ export function TrainingImportForm() {
 
   function buildScoreData() {
     const m = measurements
-    const parseOrNull = (v: string) => { const n = parseFloat(v); return isFinite(n) ? n : null }
+    // MUST be parseInch, not parseFloat. This is the parser that PERSISTS the
+    // ground truth, and a bare parseFloat stops at the first non-numeric
+    // character — "15 2/8" stored as 15. calcGross/calcDeductions already used
+    // parseInch, so the stored per-field values silently contradicted the
+    // stored totals, and every AI-vs-official delta was measured against
+    // numbers up to 7/8" wrong.
+    const parseOrNull = (v: string) => {
+      if (typeof v !== 'string' || v.trim() === '') return null
+      const n = parseInch(v)
+      return Number.isFinite(n) ? n : null
+    }
     const side = (s: SideVals) => ({
       main_beam: parseOrNull(s.main_beam),
       g1: parseOrNull(s.g1), g2: parseOrNull(s.g2), g3: parseOrNull(s.g3),

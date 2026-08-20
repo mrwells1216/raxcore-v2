@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseInch, toEighths, fromEighths } from '@/components/admin/training-import-form'
+import { parseInch, toEighths, fromEighths, calcGross } from '@/components/admin/training-import-form'
 
 /**
  * These values become the ground truth every later accuracy claim is measured
@@ -122,5 +122,54 @@ describe('toEighths / fromEighths', () => {
     for (const v of ['', '   ', '0', '4 6/8', '3.99', '4.7', 'abc']) {
       expect(Number.isFinite(parseInch(fromEighths(toEighths(v).whole, toEighths(v).eighths)))).toBe(true)
     }
+  })
+})
+
+
+/**
+ * The persistence path must use the same parser as the display path.
+ * buildScoreData originally used a bare parseFloat while calcGross used
+ * parseInch, so "15 2/8" was STORED as 15 while the stored calculated_gross
+ * was computed from 15.25 — the per-field values silently contradicted the
+ * totals, and every AI-vs-official delta was measured against wrong numbers.
+ */
+describe('persistence parity', () => {
+  // Mirrors buildScoreData's parseOrNull.
+  const parseOrNull = (v: string): number | null => {
+    if (typeof v !== 'string' || v.trim() === '') return null
+    const n = parseInch(v)
+    return Number.isFinite(n) ? n : null
+  }
+
+  it('stores eighths rather than truncating to whole inches', () => {
+    expect(parseOrNull('15 2/8')).toBeCloseTo(15.25, 6)
+    expect(parseOrNull('6 7/8')).toBeCloseTo(6.875, 6)
+    expect(parseOrNull('4 6/8')).toBeCloseTo(4.75, 6)
+  })
+
+  it('keeps an unmeasured field null rather than zero', () => {
+    expect(parseOrNull('')).toBeNull()
+    expect(parseOrNull('   ')).toBeNull()
+  })
+
+  it('agrees with calcGross so stored fields sum to the stored total', () => {
+    // The invariant that was violated: sum of persisted fields must equal the
+    // persisted gross (spread here is under the beams, so no cap applies).
+    const sheet = {
+      inside_spread: '15 2/8',
+      abnormal_points: '',
+      left: { main_beam: '21', g1: '6 7/8', g2: '9 7/8', g3: '10 3/8', g4: '6 3/8', g5: '',
+              h1: '4 6/8', h2: '4 3/8', h3: '4 2/8', h4: '3 6/8' },
+      right: { main_beam: '22', g1: '6 3/8', g2: '11 4/8', g3: '9', g4: '', g5: '',
+               h1: '4 7/8', h2: '4 2/8', h3: '4 2/8', h4: '3' },
+    }
+    const persistedSum =
+      (parseOrNull(sheet.inside_spread) ?? 0) +
+      (['left', 'right'] as const).reduce((sum, side) => {
+        const s = sheet[side]
+        return sum + (Object.keys(s) as Array<keyof typeof s>)
+          .reduce((acc, k) => acc + (parseOrNull(s[k]) ?? 0), 0)
+      }, 0)
+    expect(persistedSum).toBeCloseTo(calcGross(sheet), 6)
   })
 })

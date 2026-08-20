@@ -152,3 +152,24 @@ describe('learned bias is never injected into the vision prompt', () => {
     expect(biased).not.toContain('g2_left')
   })
 })
+
+
+describe('measurement precision instruction', () => {
+  // The model was quantizing every value onto the half-inch grid, so an
+  // estimate of 10.3 was reported as 10.5. Asking for sixteenths removes that
+  // quantization step; B&C rounding to eighths happens downstream.
+  const prompt = buildVisionPrompt(makeMinimalVisionInput())
+
+  it('asks for sixteenth-inch precision', () => {
+    expect(prompt).toMatch(/1\/16/)
+    expect(prompt).toMatch(/0\.0625/)
+  })
+
+  it('no longer caps precision at one decimal place', () => {
+    expect(prompt).not.toContain('one decimal place')
+  })
+
+  it('tells the model not to pre-round', () => {
+    expect(prompt).toMatch(/not pre-round|NOT pre-round/i)
+  })
+})

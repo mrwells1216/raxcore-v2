@@ -2,6 +2,12 @@ import { createClient } from '@/lib/supabase/server'
 import { getServiceSupabase } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { OfficialVsAiTable } from '@/components/admin/official-vs-ai-table'
+import { OfficialScoreSheetView } from '@/components/admin/official-score-sheet-view'
+import {
+  humanizeTag,
+  IMAGE_CONTEXT_LABELS,
+  officialImageTypeToAngle,
+} from '@/lib/training/official-measurements'
 import { PerAngleAccuracy, type PerAngleReport } from '@/components/admin/per-angle-accuracy'
 import { SheetDetailClient } from './sheet-detail-client'
 
@@ -63,29 +69,58 @@ export default async function TrainingImportDetailPage({
       </div>
 
       {/* Images */}
-      {images && images.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Images</h2>
-          <div className="grid grid-cols-3 gap-3">
-            {(images as Array<{ id: string; image_url: string; image_type?: string }>).map((img) => (
-              <div key={img.id} className="rounded-lg overflow-hidden border border-border/40">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img.image_url} alt={img.image_type ?? 'image'} className="w-full aspect-square object-cover" />
-                {img.image_type && (
-                  <div className="px-2 py-1 text-xs text-muted-foreground bg-secondary/30">{img.image_type}</div>
-                )}
+      {images && images.length > 0 && (() => {
+        type Img = { id: string; image_url: string; image_type?: string; image_context?: string }
+        const all = images as Img[]
+        // Group by hemisphere so a 9+ photo set reads as a set, not a wall.
+        const groups: Array<{ title: string; items: Img[] }> = [
+          { title: 'Front', items: all.filter(i => officialImageTypeToAngle(i.image_type) !== 'back' && i.image_type !== 'irregular_points') },
+          { title: 'Back', items: all.filter(i => officialImageTypeToAngle(i.image_type) === 'back') },
+          { title: 'Other', items: all.filter(i => i.image_type === 'irregular_points') },
+        ].filter(g => g.items.length > 0)
+
+        return (
+          <section className="space-y-4">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              Buck Gallery <span className="ml-1 font-normal normal-case">({all.length} photos)</span>
+            </h2>
+            {groups.map(group => (
+              <div key={group.title} className="space-y-2">
+                <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                  {group.title} · {group.items.length}
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {group.items.map((img) => (
+                    <div key={img.id} className="min-w-0 overflow-hidden rounded-lg border border-border/40">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.image_url}
+                        alt={humanizeTag(img.image_type)}
+                        className="aspect-square w-full object-cover"
+                      />
+                      <div className="space-y-0.5 bg-secondary/30 px-2 py-1.5">
+                        <div className="text-[11px] font-medium leading-tight break-words">
+                          {humanizeTag(img.image_type)}
+                        </div>
+                        {img.image_context && (
+                          <div className="text-[10px] leading-tight text-muted-foreground">
+                            {IMAGE_CONTEXT_LABELS[img.image_context] ?? humanizeTag(img.image_context)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
-          </div>
-        </section>
-      )}
+          </section>
+        )
+      })()}
 
       {/* Official measurements */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Official Measurements</h2>
-        <pre className="text-xs bg-secondary/20 rounded-lg p-4 overflow-auto border border-border/40 whitespace-pre-wrap">
-          {JSON.stringify(sheet.score_data, null, 2)}
-        </pre>
+        <OfficialScoreSheetView scoreData={sheet.score_data} />
       </section>
 
       {/* AI comparison */}
