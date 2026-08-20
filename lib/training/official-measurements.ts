@@ -93,6 +93,14 @@ export function officialImageTypeToAngle(
   // field now, but older rows stored them here.
   if (t === 'live' || t === 'mounted' || t === 'harvest' || t === 'trail_cam') return 'other'
 
+  // Camera-offset tags: the offset direction is the OPPOSITE of the antler in
+  // focus. A camera front-center-LEFT swings toward the deer's right side, so
+  // that frame best presents the RIGHT antler. Mapping on the word in the tag
+  // would hand the scorer the wrong side.
+  if (t.startsWith('front_') && t.endsWith('_left')) return 'right'
+  if (t.startsWith('front_') && t.endsWith('_right')) return 'left'
+
+  // Legacy tags name the deer's side directly (side_left = the deer's left).
   if (t.includes('left')) return 'left'
   if (t.includes('right')) return 'right'
 
@@ -126,24 +134,24 @@ export function formatInchesAsEighths(value: number | null | undefined): string 
 /** Human label for a camera-position tag. Shared so the import form and the
  *  sheet viewer cannot drift apart. */
 export const IMAGE_TYPE_LABELS: Record<string, string> = {
-  front_center: 'Front-Center',
-  front_center_left: 'Front-Center-Left',
-  front_center_right: 'Front-Center-Right',
-  front_top_center: 'Front-Top-Center',
-  front_top_left: 'Front-Top-Left',
-  front_top_right: 'Front-Top-Right',
-  front_bottom_center: 'Front-Bottom-Center',
-  front_bottom_left: 'Front-Bottom-Left',
-  front_bottom_right: 'Front-Bottom-Right',
-  back_center: 'Back-Center',
-  back_center_left: 'Back-Center-Left',
-  back_center_right: 'Back-Center-Right',
-  back_top_center: 'Back-Top-Center',
-  back_top_left: 'Back-Top-Left',
-  back_top_right: 'Back-Top-Right',
-  back_bottom_center: 'Back-Bottom-Center',
-  back_bottom_left: 'Back-Bottom-Left',
-  back_bottom_right: 'Back-Bottom-Right',
+  front_center: 'Front-Center (Full Rack)',
+  front_center_left: 'Front-Center-Left (Right Antler)',
+  front_center_right: 'Front-Center-Right (Left Antler)',
+  front_top_center: 'Front-Top-Center (Full Rack)',
+  front_top_left: 'Front-Top-Left (Right Antler)',
+  front_top_right: 'Front-Top-Right (Left Antler)',
+  front_bottom_center: 'Front-Bottom-Center (Full Rack)',
+  front_bottom_left: 'Front-Bottom-Left (Right Antler)',
+  front_bottom_right: 'Front-Bottom-Right (Left Antler)',
+  back_center: 'Back-Center (Full Rack)',
+  back_center_left: 'Back-Center-Left (Right Antler)',
+  back_center_right: 'Back-Center-Right (Left Antler)',
+  back_top_center: 'Back-Top-Center (Full Rack)',
+  back_top_left: 'Back-Top-Left (Right Antler)',
+  back_top_right: 'Back-Top-Right (Left Antler)',
+  back_bottom_center: 'Back-Bottom-Center (Full Rack)',
+  back_bottom_left: 'Back-Bottom-Left (Right Antler)',
+  back_bottom_right: 'Back-Bottom-Right (Left Antler)',
   irregular_points: 'Irregular Point/s',
   // Legacy values from before the 3x3 grid.
   front: 'Front',

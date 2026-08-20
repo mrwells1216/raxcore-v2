@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
+import { humanizeTag } from '@/lib/training/official-measurements'
 
 export interface PerAngleEntry {
   imageType: string | null
@@ -26,8 +27,20 @@ export interface PerAngleEntry {
   error?: string
 }
 
+export interface AngleSummary {
+  imageType: string
+  sampleCount: number
+  scoredCount: number
+  meanGross: number | null
+  meanGrossDelta: number | null
+  meanAbsGrossDelta: number | null
+  meanNetDelta: number | null
+}
+
 export interface PerAngleReport {
   run_at?: string
+  partial?: boolean
+  angle_summaries?: AngleSummary[]
   image_count?: number
   scored_count?: number
   official_gross?: number | null
@@ -86,10 +99,11 @@ export function PerAngleAccuracy({
     }
   }
 
-  const rows = report?.angles ?? []
-  const sorted = [...rows].sort((a, b) => {
-    const av = a.grossDelta == null ? Infinity : Math.abs(a.grossDelta)
-    const bv = b.grossDelta == null ? Infinity : Math.abs(b.grossDelta)
+  // One row per ANGLE, averaging repeated shots of the same position.
+  const summaries = report?.angle_summaries ?? []
+  const sorted = [...summaries].sort((a, b) => {
+    const av = a.meanAbsGrossDelta ?? Infinity
+    const bv = b.meanAbsGrossDelta ?? Infinity
     return av - bv
   })
 
@@ -120,8 +134,8 @@ export function PerAngleAccuracy({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Mean gross error" value={`${fmt(report.mae_gross, 2)}"`} />
           <Stat label="Official gross" value={fmt(report.official_gross)} />
-          <Stat label="Best angle" value={report.best_angle ?? '—'} />
-          <Stat label="Worst angle" value={report.worst_angle ?? '—'} />
+          <Stat label="Best angle" value={report.best_angle ? humanizeTag(report.best_angle) : '—'} />
+          <Stat label="Worst angle" value={report.worst_angle ? humanizeTag(report.worst_angle) : '—'} />
         </div>
       )}
 
@@ -131,28 +145,27 @@ export function PerAngleAccuracy({
             <thead>
               <tr className="border-b border-border/50 text-muted-foreground">
                 <th className="py-2 pr-3 text-left font-medium">Angle</th>
+                <th className="py-2 px-2 text-right font-medium">Shots</th>
                 <th className="py-2 px-2 text-right font-medium">Gross</th>
                 <th className="py-2 px-2 text-right font-medium">Δ Gross</th>
-                <th className="py-2 px-2 text-right font-medium">Net</th>
                 <th className="py-2 pl-2 text-right font-medium">Δ Net</th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((r) => (
-                <tr key={r.imageUrl} className="border-b border-border/30 last:border-0">
+                <tr key={r.imageType} className="border-b border-border/30 last:border-0">
                   <td className="py-2 pr-3">
-                    <span className="font-medium">{r.imageType ?? 'untagged'}</span>
-                    {r.error && (
-                      <span className="block text-[10px] text-red-600 dark:text-red-400">{r.error}</span>
-                    )}
+                    <span className="font-medium break-words">{humanizeTag(r.imageType)}</span>
                   </td>
-                  <td className="py-2 px-2 text-right tabular-nums">{fmt(r.gross)}</td>
-                  <td className={`py-2 px-2 text-right tabular-nums font-semibold ${deltaClass(r.grossDelta)}`}>
-                    {signed(r.grossDelta)}
+                  <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">
+                    {r.sampleCount > 1 ? `${r.scoredCount}/${r.sampleCount}` : r.sampleCount}
                   </td>
-                  <td className="py-2 px-2 text-right tabular-nums">{fmt(r.net)}</td>
-                  <td className={`py-2 pl-2 text-right tabular-nums ${deltaClass(r.netDelta)}`}>
-                    {signed(r.netDelta)}
+                  <td className="py-2 px-2 text-right tabular-nums">{fmt(r.meanGross)}</td>
+                  <td className={`py-2 px-2 text-right tabular-nums font-semibold ${deltaClass(r.meanGrossDelta)}`}>
+                    {signed(r.meanGrossDelta)}
+                  </td>
+                  <td className={`py-2 pl-2 text-right tabular-nums ${deltaClass(r.meanNetDelta)}`}>
+                    {signed(r.meanNetDelta)}
                   </td>
                 </tr>
               ))}
@@ -163,8 +176,9 @@ export function PerAngleAccuracy({
 
       {report?.run_at && (
         <p className="text-[10px] text-muted-foreground">
-          Sorted most accurate first. One buck shows which angles the scorer reads
-          best; it is not enough on its own to set any global correction.
+          Sorted most accurate first, one row per angle — repeated shots of the
+          same position are averaged. One buck shows which angles the scorer
+          reads best; it is not enough on its own to set any global correction.
         </p>
       )}
     </div>

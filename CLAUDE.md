@@ -1406,6 +1406,46 @@ succeeds, full suite 202/202. Files: new
 `__tests__/scoring/parse-inch.test.ts`,
 `__tests__/scoring/prompt-snapshots.test.ts`.
 
+### 3.59. Per-angle run: batching, angle averaging, focus-antler labels ✓
+"Run per angle" failed with a bare **"Load failed"** on an 11-image sheet, and
+reviewing the angle taxonomy surfaced a mapping bug.
+(a) **The failure was a function timeout.** The route scored images strictly
+sequentially (deliberately, to avoid rate limits), but each `scoreBuck` fans
+out into several GPT-4o calls at ~25s, so 11 images ran past the `maxDuration
+= 300` budget and the request died before responding — "Load failed" is the
+client's fetch giving up, not an application error. Now batched **3 at a
+time**, which stays inside both the rate limit and the time budget, and the
+partial payload is **persisted after every batch** so a timeout keeps the work
+already done instead of discarding all of it (`partial: true` marks it).
+(b) **Multiple photos per angle are now averaged.** The user had 11 photos for
+9 positions. Repeated shots of the same angle are two samples of how well that
+angle scores, so `buildPayload()` groups by `imageType` and reports
+`meanGross` / `meanGrossDelta` / `meanAbsGrossDelta` per angle, with
+`sampleCount` / `scoredCount` shown as "2/2" in the table. Headline `mae_gross`
+now averages **one vote per angle** rather than per photo, so an angle shot
+twice does not count double. Individual runs stay in `angles[]` — nothing is
+hidden behind the average.
+(c) **Angle labels name the antler in focus** — `Front-Center-Left (Right
+Antler)`, `Front-Top-Center (Full Rack)`, etc., in both the import dropdown
+and the shared `IMAGE_TYPE_LABELS`.
+(d) **The mapping was backwards, which (c) exposed.** These tags name where
+the CAMERA is, and a camera offset to the left swings toward the deer's right
+side — so `front_center_left` best presents the **right** antler.
+`officialImageTypeToAngle()` was returning `'left'` for it, handing the scorer
+the wrong side on every offset frame. Now `front_*_left` → `'right'` and
+`front_*_right` → `'left'`, while legacy `side_left` / `side_right` keep
+naming the deer's own side (a different convention that must keep working).
+The per-angle table also humanizes labels via `humanizeTag()` instead of
+showing raw snake_case.
+Tests: the front-position spec was split into three — centered positions,
+camera-offset positions asserting the OPPOSITE side, and a legacy-convention
+guard. tsc clean, lint 0 errors, build succeeds, full suite 204/204. Files:
+modified `app/api/admin/training-import/[id]/run-ai-per-angle/route.ts`,
+`components/admin/per-angle-accuracy.tsx`,
+`components/admin/training-import-form.tsx`,
+`lib/training/official-measurements.ts`,
+`__tests__/scoring/official-image-angle.test.ts`.
+
 ---
 
 ## 4. What is NOT built yet

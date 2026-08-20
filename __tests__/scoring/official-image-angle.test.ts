@@ -50,16 +50,30 @@ describe('officialImageTypeToAngle', () => {
     expect(officialImageTypeToAngle('   ')).toBe('other')
   })
 
-  it('maps every front camera position to a side or front', () => {
+  it('maps centered front positions to front', () => {
     expect(officialImageTypeToAngle('front_center')).toBe('front')
     expect(officialImageTypeToAngle('front_top_center')).toBe('front')
     expect(officialImageTypeToAngle('front_bottom_center')).toBe('front')
-    expect(officialImageTypeToAngle('front_center_left')).toBe('left')
-    expect(officialImageTypeToAngle('front_top_left')).toBe('left')
-    expect(officialImageTypeToAngle('front_bottom_left')).toBe('left')
-    expect(officialImageTypeToAngle('front_center_right')).toBe('right')
-    expect(officialImageTypeToAngle('front_top_right')).toBe('right')
-    expect(officialImageTypeToAngle('front_bottom_right')).toBe('right')
+  })
+
+  it('maps a camera offset to the OPPOSITE antler it presents', () => {
+    // These tags name where the CAMERA is, not which antler is in frame. A
+    // camera offset to the left swings toward the deer's right side, so that
+    // frame best presents the RIGHT antler. Mapping on the word in the tag
+    // would hand the scorer the wrong side — which is what it used to do.
+    expect(officialImageTypeToAngle('front_center_left')).toBe('right')
+    expect(officialImageTypeToAngle('front_top_left')).toBe('right')
+    expect(officialImageTypeToAngle('front_bottom_left')).toBe('right')
+    expect(officialImageTypeToAngle('front_center_right')).toBe('left')
+    expect(officialImageTypeToAngle('front_top_right')).toBe('left')
+    expect(officialImageTypeToAngle('front_bottom_right')).toBe('left')
+  })
+
+  it('keeps legacy side tags naming the deer\'s own side', () => {
+    // side_left means "the deer's left side", a different convention from the
+    // camera-offset grid. Both must keep working.
+    expect(officialImageTypeToAngle('side_left')).toBe('left')
+    expect(officialImageTypeToAngle('side_right')).toBe('right')
   })
 
   it('maps every back camera position to back, including the left/right ones', () => {

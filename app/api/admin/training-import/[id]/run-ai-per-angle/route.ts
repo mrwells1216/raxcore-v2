@@ -83,11 +83,16 @@ export async function POST(
   const rackType: 'typical' | 'non-typical' = rawRackType === 'non-typical' ? 'non-typical' : 'typical'
   const state = (sheet.score_data as Record<string, string>)?.state ?? 'unknown'
 
-  // Sequential, not parallel: each scoreBuck fans out into several GPT-4o
-  // calls of its own, so running 9 at once would hammer the rate limit.
+  const imageList = images as Array<{ image_url: string; image_type?: string | null }>
+
+  // Batched, not fully sequential. Each scoreBuck fans out into several GPT-4o
+  // calls, so all-at-once would hit rate limits — but one-at-a-time blew past
+  // the 300s function budget at 11 images and the request died with a bare
+  // "Load failed". Three in flight keeps us inside both limits.
+  const BATCH_SIZE = 3
   const results: PerAngleResult[] = []
 
-  for (const img of images as Array<{ image_url: string; image_type?: string | null }>) {
+  const scoreOne = async (img: { image_url: string; image_type?: string | null }): Promise<PerAngleResult> => {
     const angleType = officialImageTypeToAngle(img.image_type)
     const base: Omit<PerAngleResult, 'gross' | 'net' | 'grossDelta' | 'netDelta' | 'fields'> = {
       imageType: img.image_type ?? null,
@@ -137,17 +142,17 @@ export async function POST(
       const gross = scoringResult.predictedGross ?? null
       const net = scoringResult.predictedNet ?? null
 
-      results.push({
+      return {
         ...base,
         gross,
         net,
         grossDelta: gross != null && officialGross != null ? gross - officialGross : null,
         netDelta: net != null && officialNet != null ? net - officialNet : null,
         fields,
-      })
+      }
     } catch (err) {
-      // One bad image must not lose the other eight results.
-      results.push({
+      // One bad image must not lose the others.
+      return {
         ...base,
         gross: null,
         net: null,
@@ -155,31 +160,28 @@ export async function POST(
         netDelta: null,
         fields: [],
         error: err instanceof Error ? err.message : 'Scoring failed for this image',
-      })
+      }
     }
   }
 
-  const scored = results.filter(r => r.grossDelta != null)
-  const summary = {
-    run_at: new Date().toISOString(),
-    image_count: results.length,
-    scored_count: scored.length,
-    official_gross: officialGross,
-    official_net: officialNet,
-    // Mean ABSOLUTE gross error across angles — the headline "how far off is
-    // the scorer on this buck, on average, regardless of angle".
-    mae_gross: scored.length
-      ? Number((scored.reduce((s, r) => s + Math.abs(r.grossDelta as number), 0) / scored.length).toFixed(2))
-      : null,
-    best_angle: scored.length
-      ? scored.reduce((a, b) => Math.abs(a.grossDelta as number) <= Math.abs(b.grossDelta as number) ? a : b).imageType
-      : null,
-    worst_angle: scored.length
-      ? scored.reduce((a, b) => Math.abs(a.grossDelta as number) >= Math.abs(b.grossDelta as number) ? a : b).imageType
-      : null,
+  for (let i = 0; i < imageList.length; i += BATCH_SIZE) {
+    const batch = imageList.slice(i, i + BATCH_SIZE)
+    const settled = await Promise.all(batch.map(scoreOne))
+    results.push(...settled)
+
+    // Persist after every batch so a timeout keeps the work already done
+    // instead of discarding all of it.
+    try {
+      await adminDb
+        .from('official_score_sheets')
+        .update({ ai_run_per_angle: buildPayload(results, imageList.length, true) })
+        .eq('id', id)
+    } catch {
+      // Best effort — the final write below is what matters.
+    }
   }
 
-  const payload = { ...summary, angles: results }
+  const payload = buildPayload(results, imageList.length, false)
 
   const { error: updateError } = await adminDb
     .from('official_score_sheets')
@@ -192,7 +194,7 @@ export async function POST(
       {
         ok: false,
         error: 'per_angle_persist_failed',
-        message: `Scored ${scored.length}/${results.length} angles but could not save: ${updateError.message}. Apply the ai_run_per_angle migration.`,
+        message: `Scored ${payload.scored_count}/${payload.image_count} angles but could not save: ${updateError.message}. Apply the ai_run_per_angle migration.`,
         result: payload,
       },
       { status: 200 },
@@ -200,4 +202,72 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true, result: payload })
+}
+
+
+/** Mean of the finite values, or null when there are none. */
+function mean(values: number[]): number | null {
+  const finite = values.filter(v => Number.isFinite(v))
+  if (finite.length === 0) return null
+  return finite.reduce((a, b) => a + b, 0) / finite.length
+}
+
+/**
+ * Summary written to `ai_run_per_angle`.
+ *
+ * Repeated shots of the SAME angle are averaged into one entry: two photos
+ * from front-center are two samples of how well that angle scores, and the
+ * mean is a better estimate than either alone. Individual runs are kept in
+ * `angles[]` so nothing is hidden behind the average.
+ */
+function buildPayload(
+  results: PerAngleResult[],
+  totalImages: number,
+  partial: boolean,
+) {
+  const scored = results.filter(r => r.grossDelta != null)
+
+  // Group by camera position.
+  const byAngle = new Map<string, PerAngleResult[]>()
+  for (const r of results) {
+    const key = r.imageType ?? 'untagged'
+    const list = byAngle.get(key) ?? []
+    list.push(r)
+    byAngle.set(key, list)
+  }
+
+  const angleSummaries = [...byAngle.entries()].map(([imageType, runs]) => {
+    const ok = runs.filter(r => r.grossDelta != null)
+    return {
+      imageType,
+      sampleCount: runs.length,
+      scoredCount: ok.length,
+      meanGross: mean(ok.map(r => r.gross as number)),
+      meanGrossDelta: mean(ok.map(r => r.grossDelta as number)),
+      meanAbsGrossDelta: mean(ok.map(r => Math.abs(r.grossDelta as number))),
+      meanNetDelta: mean(ok.map(r => r.netDelta as number).filter(v => v != null)),
+    }
+  })
+
+  const ranked = angleSummaries.filter(a => a.meanAbsGrossDelta != null)
+
+  return {
+    run_at: new Date().toISOString(),
+    partial,
+    image_count: totalImages,
+    scored_count: scored.length,
+    // Mean absolute gross error, one vote per ANGLE rather than per photo, so
+    // an angle shot twice does not count double.
+    mae_gross: ranked.length
+      ? Number((ranked.reduce((s, a) => s + (a.meanAbsGrossDelta as number), 0) / ranked.length).toFixed(2))
+      : null,
+    best_angle: ranked.length
+      ? ranked.reduce((a, b) => (a.meanAbsGrossDelta as number) <= (b.meanAbsGrossDelta as number) ? a : b).imageType
+      : null,
+    worst_angle: ranked.length
+      ? ranked.reduce((a, b) => (a.meanAbsGrossDelta as number) >= (b.meanAbsGrossDelta as number) ? a : b).imageType
+      : null,
+    angle_summaries: angleSummaries,
+    angles: results,
+  }
 }
