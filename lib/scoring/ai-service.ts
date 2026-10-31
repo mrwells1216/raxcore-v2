@@ -37,6 +37,7 @@ import { computeMeasurementLevelCorrection, type MeasurementCorrectionResult } f
 import { runSelfCheck, type SelfCheckResult } from './self-check'
 import { validateScoringOutput, hasCriticalViolation, type PlausibilityReport } from './scoring-plausibility'
 import { runTwoPassScoring, type TwoPassScoringResult, type SecondPassInput } from './second-pass'
+import { calculateScores } from './gross-net'
 import { applyFallbackPenalties, type FallbackMetadata } from './fallback-handler'
 import { calibrateConfidence, getCalibrationMetadata, type CalibratedConfidenceResult } from './calibrated-confidence'
 import { calculateTrustScore, getTrustScoreMetadata, type TrustScoreResult } from './trust-score'
@@ -744,69 +745,6 @@ function generateMeasurements(input: ScoringInput, stateCalibration: StateCalibr
     abnormal_points: Number(abnormal.toFixed(1)),
     deductions:      Number(seeded(`${seed}:ded`, 1.5, 6.5).toFixed(1)),
   }
-}
-
-/**
- * Gross and net from a measurement set.
- *
- * Abnormal points are handled by rack type, which is how B&C actually works
- * and was the source of a reported "net is spot on but gross reads high"
- * discrepancy: abnormal inches used to be added into gross for every rack and
- * then subtracted again in net, so net came out right while gross was
- * inflated by exactly the abnormal total on any buck that had them.
- *
- *  - typical:     gross is the typical frame only. Abnormal points are not
- *                 part of it; they are a deduction on the way to net.
- *  - non-typical: abnormal points count positively, so they belong in gross
- *                 and are not subtracted again.
- */
-/**
- * Credited inside spread, per the B&C chart: "spread credit may equal but not
- * exceed the length of the longer antler". A 22" spread on 21" beams is
- * credited 21", not 22" — so the cap only binds on wide, short-beamed racks,
- * which is exactly where the uncapped total ran high.
- *
- * With no beam measured there is nothing to cap against, so the raw spread is
- * credited rather than zeroing it out.
- */
-function spreadCredit(measurements: Measurements): number {
-  const spread = measurements.inside_spread
-  if (typeof spread !== 'number' || !Number.isFinite(spread)) return 0
-
-  const beams = [measurements.main_beam_left, measurements.main_beam_right]
-    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0)
-  if (beams.length === 0) return spread
-
-  return Math.min(spread, Math.max(...beams))
-}
-
-function calculateScores(
-  measurements: Measurements,
-  rackType: 'typical' | 'non-typical' = 'typical',
-) {
-  const frame = [
-    measurements.main_beam_left, measurements.main_beam_right,
-    measurements.g1_left, measurements.g1_right,
-    measurements.g2_left, measurements.g2_right,
-    measurements.g3_left, measurements.g3_right,
-    measurements.g4_left, measurements.g4_right,
-    measurements.g5_left, measurements.g5_right,
-    measurements.h1_left, measurements.h1_right,
-    measurements.h2_left, measurements.h2_right,
-    measurements.h3_left, measurements.h3_right,
-    measurements.h4_left, measurements.h4_right,
-  ].filter((v): v is number => v !== null)
-
-  const frameTotal =
-    frame.reduce((sum, v) => sum + v, 0) + spreadCredit(measurements)
-  const abnormal = measurements.abnormal_points || 0
-  const deductions = measurements.deductions || 0
-
-  const isNonTypical = rackType === 'non-typical'
-  const gross = isNonTypical ? frameTotal + abnormal : frameTotal
-  const net = isNonTypical ? gross - deductions : gross - deductions - abnormal
-
-  return { gross: Number(gross.toFixed(1)), net: Number(net.toFixed(1)) }
 }
 
 /**

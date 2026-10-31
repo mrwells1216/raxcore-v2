@@ -1483,6 +1483,44 @@ full suite 204/204. Files: modified
 `components/admin/per-angle-accuracy.tsx`,
 `components/admin/official-vs-ai-table.tsx`.
 
+### 3.61. One gross/net formula: second-pass drift fix + parity tests ✓
+Found while looking for the next safe item after §3.60 (the queue in §4 is
+empty and the guide-buck baseline says "more sheets, not a correction
+factor"). `second-pass.ts` carried its OWN private `calculateScores`, a copy
+that was never updated when §3.47 (abnormal points by rack type) and §3.54
+(spread credit capped at the longer beam) fixed the one in `ai-service.ts`.
+The second-pass result is blended into the final gross (`blendedGross`), so any
+buck that triggered the two-pass solver and had abnormal points came back with
+gross inflated by the abnormal total and an uncapped spread — the exact
+"net right, gross high" symptom §3.47 was written to remove, surviving on
+one code path. It would also have shown up as AI error in the §3.49 per-angle
+accuracy run, because the official-sheet form (`calcGross`) uses the corrected
+rules.
+Fix: new pure module `lib/scoring/gross-net.ts` exports `spreadCredit()` and
+`calculateScores(measurements, rackType = 'typical')` — the §3.47/§3.54
+arithmetic moved verbatim, plus a finite-number guard on the frame values
+(§5; the old filter only dropped `null`). `ai-service.ts` and `second-pass.ts`
+both import it; the second pass now receives `input.rackType` (already on
+`SecondPassInput`). The module has no server-only or Supabase imports, so it
+is directly testable. Behavior change: second-pass gross on typical racks with
+abnormal points, and on wide short-beamed racks, goes DOWN to match the first
+pass; non-typical racks and racks where neither rule binds are unchanged.
+Verified Score gates untouched.
+Deliberately NOT changed (flagged): `lib/review/client.ts` and
+`lib/scoring/calculate-reviewed-score-sheet.ts` also add `abnormal_points` to
+gross unconditionally. They belong to the user-reviewed score-sheet /
+rules-engine path, which has its own rack-type handling, so they need a
+separate look rather than a drive-by edit here.
+Tests: 15 new specs in `__tests__/scoring/gross-net-consistency.test.ts` —
+AI gross vs the form's `calcGross` across six rack shapes (agreement within
+the 0.05 that one-decimal rounding allows), abnormal points never moving
+typical gross, typical vs non-typical net/gross, default rack type, spread cap
+and no-beam fallback, non-finite guards, and source-level guards that neither
+`ai-service.ts` nor `second-pass.ts` defines its own copy again. tsc clean, lint
+0 errors on touched files, build succeeds, full suite 219/219. Files: new
+`lib/scoring/gross-net.ts`, new `__tests__/scoring/gross-net-consistency.test.ts`;
+modified `lib/scoring/ai-service.ts`, `lib/scoring/second-pass.ts`.
+
 ---
 
 ## 4. What is NOT built yet

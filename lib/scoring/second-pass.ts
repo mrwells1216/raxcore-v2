@@ -15,6 +15,7 @@ import type {
 import type { SelfCheckResult, SelfCheckIssue, SelfCheckIssueType } from './self-check'
 import type { NormalizationResult, NormalizationAdjustment } from './normalization'
 import { normalizeMeasurements, MEASUREMENT_RANGES } from './normalization'
+import { calculateScores } from './gross-net'
 import { checkLandmarkConsistency, type LandmarkConsistencyResult } from './landmark-consistency'
 import { recalibrateConfidence, type CalibratedConfidence } from './confidence-calibration'
 import type { LearningSummary } from './ai-service'
@@ -438,7 +439,7 @@ function runSecondPass(
   measurements = landmarkConsistencyResult.adjustedMeasurements
   
   // Calculate scores
-  const { gross, net } = calculateScores(measurements)
+  const { gross, net } = calculateScores(measurements, input.rackType)
   
   // Recalculate confidence with adjustments
   const confidenceResult = recalibrateConfidence(
@@ -597,31 +598,6 @@ function getFieldRangeKey(field: keyof Measurements): keyof typeof MEASUREMENT_R
   if (field === 'abnormal_points') return 'abnormal_points'
   if (field === 'deductions') return 'deductions'
   return 'inside_spread' // fallback
-}
-
-function calculateScores(measurements: Measurements): { gross: number; net: number } {
-  const vals = [
-    measurements.inside_spread,
-    measurements.main_beam_left, measurements.main_beam_right,
-    measurements.g1_left, measurements.g1_right,
-    measurements.g2_left, measurements.g2_right,
-    measurements.g3_left, measurements.g3_right,
-    measurements.g4_left, measurements.g4_right,
-    measurements.g5_left, measurements.g5_right,
-    measurements.h1_left, measurements.h1_right,
-    measurements.h2_left, measurements.h2_right,
-    measurements.h3_left, measurements.h3_right,
-    measurements.h4_left, measurements.h4_right,
-    measurements.abnormal_points,
-  ].filter((v): v is number => v !== null)
-  
-  const gross = vals.reduce((sum, v) => sum + v, 0)
-  const net = gross - (measurements.deductions || 0) - (measurements.abnormal_points || 0)
-  
-  return { 
-    gross: Number(gross.toFixed(1)), 
-    net: Number(net.toFixed(1)) 
-  }
 }
 
 // ============================================================================
